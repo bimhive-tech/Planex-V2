@@ -1,8 +1,7 @@
 "use client";
 
-// Project detail shell — clean header with a meta strip + status, then the
-// Overview. No placeholder tabs: tabs return as their modules (Schedule, etc.)
-// ship, so nothing here shows fake data.
+// Project detail shell — header (meta strip + status), tabs, and the active tab.
+// Overall progress is shared state so editing on Schedule updates the Overview donut.
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,8 +13,12 @@ import type { IconName } from "@/components/ui/Icon";
 import { formatDate } from "@/lib/format";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
+import { ProjectSchedule } from "./ProjectSchedule";
 import type { ProjectDetail } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
+
+const TABS = ["Overview", "Schedule"] as const;
+type Tab = (typeof TABS)[number];
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
@@ -28,7 +31,9 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
 
 export function ProjectWorkspace({ project, canManage }: { project: ProjectDetail; canManage: boolean }) {
   const router = useRouter();
+  const [tab, setTab] = useState<Tab>("Overview");
   const [editOpen, setEditOpen] = useState(false);
+  const [progress, setProgress] = useState(project.overall_progress);
 
   return (
     <div className={styles.page}>
@@ -61,7 +66,21 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
         </div>
       </header>
 
-      <ProjectOverview project={project} />
+      <nav className={styles.tabs}>
+        {TABS.map((t) => (
+          <button key={t} className={`${styles.tab} ${tab === t ? styles.active : ""}`} onClick={() => setTab(t)}>
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      <div className={styles.content}>
+        {tab === "Overview" ? (
+          <ProjectOverview project={project} progress={progress} />
+        ) : (
+          <ProjectSchedule projectId={project.id} canManage={canManage} onOverallChange={setProgress} />
+        )}
+      </div>
 
       <ProjectFormDrawer
         open={editOpen}

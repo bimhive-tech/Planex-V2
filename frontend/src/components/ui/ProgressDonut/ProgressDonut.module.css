@@ -1,0 +1,32 @@
+.wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ring {
+  transition: stroke-dashoffset 0.5s ease;
+}
+
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.pct {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-width: 80px;
+}

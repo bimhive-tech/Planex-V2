@@ -41,6 +41,40 @@ export interface ProjectDetail {
   size_sqm: string | null;
   notes: string;
   is_archived: boolean;
+  overall_progress: number;
+  activity_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export type ScopeType = "phase" | "zone" | "building" | "area";
+
+export interface Scope {
+  id: string;
+  parent: string | null;
+  scope_type: ScopeType;
+  scope_type_display: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface Activity {
+  id: string;
+  scope: string;
+  name: string;
+  code: string;
+  unit: string;
+  progress_type: "percentage" | "quantity";
+  progress_type_display: string;
+  planned_quantity: string | null;
+  weight: string;
+  progress_percent: string;
+  sort_order: number;
+}
+
+export interface ProjectStructure {
+  overall_progress: number;
+  scope_progress: Record<string, number>;
+  scopes: Scope[];
+  activities: Activity[];
 }

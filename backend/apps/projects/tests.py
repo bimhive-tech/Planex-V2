@@ -81,3 +81,53 @@ class ProjectApiTests(TestCase):
         resp = self.client.post("/api/projects/", {"name": "Tower", "project_type": "commercial"},
                                 content_type="application/json")
         self.assertEqual(resp.status_code, 400)
+
+    # ── Work hierarchy ────────────────────────────────────────────────────
+    def test_build_structure_and_rollup(self):
+        p = Project.objects.create(company=self.company_a, name="Hospital", project_type="commercial")
+        self.login("admin@acme.com")
+        base = f"/api/projects/{p.id}"
+        # phase -> activity x2 with different weights/progress
+        phase = self.client.post(f"{base}/scopes/", {"scope_type": "phase", "name": "Substructure"},
+                                 content_type="application/json").json()
+        a1 = self.client.post(f"{base}/activities/",
+                              {"scope": phase["id"], "name": "Excavation", "weight": "3", "progress_percent": "100"},
+                              content_type="application/json")
+        a2 = self.client.post(f"{base}/activities/",
+                              {"scope": phase["id"], "name": "Piling", "weight": "1", "progress_percent": "0"},
+                              content_type="application/json")
+        self.assertEqual(a1.status_code, 201, a1.content)
+        self.assertEqual(a2.status_code, 201, a2.content)
+        # overall = (100*3 + 0*1) / (3+1) = 75
+        struct = self.client.get(f"{base}/structure/").json()
+        self.assertEqual(struct["overall_progress"], 75.0)
+        self.assertEqual(len(struct["scopes"]), 1)
+        self.assertEqual(len(struct["activities"]), 2)
+
+    def test_update_activity_progress_recomputes(self):
+        p = Project.objects.create(company=self.company_a, name="Bridge", project_type="infrastructure")
+        self.login("admin@acme.com")
+        base = f"/api/projects/{p.id}"
+        phase = self.client.post(f"{base}/scopes/", {"scope_type": "phase", "name": "Deck"},
+                                 content_type="application/json").json()
+        act = self.client.post(f"{base}/activities/",
+                               {"scope": phase["id"], "name": "Pour", "weight": "1", "progress_percent": "0"},
+                               content_type="application/json").json()
+        self.client.patch(f"{base}/activities/{act['id']}/", {"progress_percent": "50"},
+                          content_type="application/json")
+        detail = self.client.get(f"{base}/").json()
+        self.assertEqual(detail["overall_progress"], 50.0)
+        self.assertEqual(detail["activity_count"], 1)
+
+    def test_viewer_cannot_edit_structure(self):
+        p = Project.objects.create(company=self.company_a, name="Depot2", project_type="industrial")
+        self.login("viewer@acme.com")
+        resp = self.client.post(f"/api/projects/{p.id}/scopes/", {"scope_type": "phase", "name": "X"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cannot_build_structure_on_other_company_project(self):
+        self.login("admin@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project_b.id}/scopes/",
+                                {"scope_type": "phase", "name": "X"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 404)

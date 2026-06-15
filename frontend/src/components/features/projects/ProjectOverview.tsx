@@ -2,6 +2,7 @@
 // (Progress %, report rollups, milestones and team arrive with their modules.)
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
+import { ProgressDonut } from "@/components/ui/ProgressDonut";
 import { formatDate } from "@/lib/format";
 import type { ProjectDetail } from "@/types/project";
 import styles from "./projectOverview.module.css";
@@ -43,11 +44,27 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function ProjectOverview({ project: p }: { project: ProjectDetail }) {
+export function ProjectOverview({ project: p, progress }: { project: ProjectDetail; progress: number }) {
   const t = timeline(p.planned_start, p.planned_finish);
 
   return (
     <div className={styles.grid}>
+      {/* Progress summary (rolled up from the Schedule activities) */}
+      <section className={styles.card}>
+        <header className={styles.cardHead}>
+          <h2 className={styles.cardTitle}>Progress Summary</h2>
+          <p className={styles.cardSub}>Rolled up from the project schedule.</p>
+        </header>
+        <div className={styles.progressBody}>
+          <ProgressDonut value={progress} />
+          <p className={styles.progressNote}>
+            {p.activity_count > 0
+              ? `${p.activity_count} ${p.activity_count === 1 ? "activity" : "activities"} tracked`
+              : "Add activities in the Schedule tab to start tracking progress."}
+          </p>
+        </div>
+      </section>
+
       {/* Project details */}
       <section className={styles.card}>
         <header className={styles.cardHead}>
