@@ -32,6 +32,12 @@ class Company(TimestampedModel):
     is_platform_admin = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
+    # Optional company profile (shown/edited on the Settings → Info tab).
+    phone_number = models.CharField(max_length=40, blank=True)
+    email = models.EmailField(blank=True)
+    address = models.TextField(blank=True)
+    website = models.CharField(max_length=255, blank=True)
+
     class Meta:
         verbose_name_plural = "companies"
         ordering = ["name"]

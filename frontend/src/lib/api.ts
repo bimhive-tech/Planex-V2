@@ -55,4 +55,16 @@ export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "GET" }),
   post: <T>(path: string, json?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: "POST", json }),
+  patch: <T>(path: string, json?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "PATCH", json }),
+  del: <T>(path: string, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "DELETE" }),
 };
+
+/** Standard DRF page-number response shape. */
+export interface Paginated<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}

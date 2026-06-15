@@ -10,6 +10,7 @@ export const BACKEND_INTERNAL_URL =
 export const ROUTES = {
   login: "/login",
   dashboard: "/dashboard",
+  settings: "/settings",
   home: "/",
 } as const;
 

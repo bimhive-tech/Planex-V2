@@ -2,6 +2,7 @@
 export const Permission = {
   MANAGE_COMPANIES: "manage_companies",
   MANAGE_PLATFORM: "manage_platform",
+  MANAGE_COMPANY: "manage_company",
   MANAGE_USERS: "manage_users",
   MANAGE_ROLES: "manage_roles",
   MANAGE_DEPARTMENTS: "manage_departments",

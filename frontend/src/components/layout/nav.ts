@@ -15,6 +15,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: ROUTES.dashboard, icon: "dashboard" },
   { label: "Projects", href: "/projects", icon: "projects", permission: Permission.VIEW_PROJECTS, soon: true },
-  { label: "User Management", href: "/users", icon: "users", permission: Permission.MANAGE_USERS, soon: true },
-  { label: "Companies", href: "/companies", icon: "companies", platformOnly: true, soon: true },
+  // Settings is always shown (the Info subtab is available to every user);
+  // its subtabs self-filter by permission.
+  { label: "Settings", href: ROUTES.settings, icon: "settings" },
 ];

@@ -101,7 +101,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.CursorPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.accounts.pagination.StandardPagination",
     "PAGE_SIZE": env.int("DEFAULT_PAGE_SIZE", default=25),
     "EXCEPTION_HANDLER": "apps.accounts.exceptions.api_exception_handler",
 }

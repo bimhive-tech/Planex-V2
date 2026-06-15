@@ -19,3 +19,13 @@ body {
 .tnum {
   font-variant-numeric: tabular-nums;
 }
+
+/* Inline form error text, reused by modal forms. */
+.formError {
+  margin-top: var(--space-3);
+  font-size: 13px;
+  color: var(--danger-text);
+  background: var(--danger-fill);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}

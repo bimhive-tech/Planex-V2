@@ -14,6 +14,7 @@ class Permission(models.TextChoices):
     MANAGE_PLATFORM = "manage_platform", "Manage platform"
 
     # Company-level administration.
+    MANAGE_COMPANY = "manage_company", "Manage company info"
     MANAGE_USERS = "manage_users", "Manage users"
     MANAGE_ROLES = "manage_roles", "Manage roles"
     MANAGE_DEPARTMENTS = "manage_departments", "Manage departments"
@@ -43,3 +44,43 @@ class SeededRole:
 COMPANY_ADMIN_PERMISSIONS = [
     p for p in ALL_PERMISSIONS if p not in PLATFORM_PERMISSIONS
 ]
+
+
+# Grouped catalog for the Roles UI (checkbox sections). Order matters for display.
+PERMISSION_GROUPS = [
+    ("Administration", [
+        Permission.MANAGE_COMPANY.value,
+        Permission.MANAGE_USERS.value,
+        Permission.MANAGE_ROLES.value,
+        Permission.MANAGE_DEPARTMENTS.value,
+    ]),
+    ("Projects", [
+        Permission.MANAGE_PROJECTS.value,
+        Permission.VIEW_PROJECTS.value,
+        Permission.SUBMIT_PROGRESS.value,
+        Permission.REVIEW_PROGRESS.value,
+        Permission.APPROVE_PROGRESS.value,
+        Permission.EXPORT_REPORTS.value,
+    ]),
+    ("Platform", PLATFORM_PERMISSIONS),
+]
+
+_LABELS = {p.value: p.label for p in Permission}
+
+
+def allowed_permissions(*, is_platform: bool) -> list[str]:
+    """Permission keys a company's roles may hold (platform keys only for the
+    administrative company)."""
+    return ALL_PERMISSIONS if is_platform else COMPANY_ADMIN_PERMISSIONS
+
+
+def permission_catalog(*, is_platform: bool) -> list[dict]:
+    """Grouped {group, key, label} list for building the Roles permission UI,
+    filtered to what the given company is allowed to grant."""
+    allowed = set(allowed_permissions(is_platform=is_platform))
+    catalog = []
+    for group, keys in PERMISSION_GROUPS:
+        items = [{"key": k, "label": _LABELS[k]} for k in keys if k in allowed]
+        if items:
+            catalog.append({"group": group, "permissions": items})
+    return catalog
