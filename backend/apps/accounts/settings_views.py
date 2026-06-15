@@ -152,7 +152,7 @@ class UsersViewSet(viewsets.ViewSet):
     def _company(self, request):
         return resolve_company(request, request.query_params.get("company"))
 
-    def _queryset(self, company, search=None):
+    def _queryset(self, company, search=None, role=None):
         qs = User.objects.filter(company=company).prefetch_related(
             "memberships__role"
         ).select_related("company").order_by("email")
@@ -162,11 +162,18 @@ class UsersViewSet(viewsets.ViewSet):
                 | Q(first_name__icontains=search)
                 | Q(last_name__icontains=search)
             )
+        if role:
+            # Filter to users holding the given role (default is all roles).
+            qs = qs.filter(memberships__role_id=role, memberships__is_active=True).distinct()
         return qs
 
     def list(self, request):
         company = self._company(request)
-        qs = self._queryset(company, request.query_params.get("search"))
+        qs = self._queryset(
+            company,
+            search=request.query_params.get("search"),
+            role=request.query_params.get("role"),
+        )
         page = StandardListMixin.paginate(self, qs, request)
         return page(UserListSerializer)
 

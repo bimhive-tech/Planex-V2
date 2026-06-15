@@ -7,10 +7,11 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
+import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import type { UserRow } from "@/types/settings";
+import type { RoleRow, UserRow } from "@/types/settings";
 import { CompanySelector } from "./CompanySelector";
 import { UserFormModal } from "./UserFormModal";
 import { companyQuery } from "./companyQuery";
@@ -28,10 +29,21 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId, ownUserId }: Props) {
   const [companyId, setCompanyId] = useState(ownCompanyId);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [roleFilter, setRoleFilter] = useState(""); // "" = all roles (default)
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Roles for the filter dropdown (scoped to the selected company).
+  const { data: roleData } = useFetch(
+    () => api.get<Paginated<RoleRow>>(`/roles/${companyQuery(companyId, { page_size: "100" })}`),
+    [companyId],
+  );
+  const roleOptions = [
+    { value: "", label: "All roles" },
+    ...(roleData?.results ?? []).map((r) => ({ value: r.id, label: r.name })),
+  ];
 
   // Debounce the search box (~300ms) so typing doesn't spam the API.
   useEffect(() => {
@@ -45,11 +57,22 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId, ownUserId }: Props) {
   const { data, loading, error, reload } = useFetch(
     () =>
       api.get<Paginated<UserRow>>(
-        `/users/${companyQuery(companyId, { page: String(page), search: debounced })}`,
+        `/users/${companyQuery(companyId, { page: String(page), search: debounced, role: roleFilter })}`,
       ),
-    [companyId, page, debounced],
+    [companyId, page, debounced, roleFilter],
   );
   const rows = data?.results ?? [];
+
+  function changeCompany(id: string) {
+    setCompanyId(id);
+    setRoleFilter(""); // roles are company-specific
+    setPage(1);
+  }
+
+  function changeRole(id: string) {
+    setRoleFilter(id);
+    setPage(1);
+  }
 
   function openCreate() {
     setEditing(null);
@@ -75,7 +98,7 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId, ownUserId }: Props) {
     <div>
       <div className={styles.toolbar}>
         <div className={styles.toolbarLeft}>
-          {isPlatformAdmin && <CompanySelector value={companyId} onChange={setCompanyId} />}
+          {isPlatformAdmin && <CompanySelector value={companyId} onChange={changeCompany} />}
           <input
             className={styles.search}
             type="search"
@@ -83,6 +106,12 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId, ownUserId }: Props) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Search users"
+          />
+          <Select
+            options={roleOptions}
+            value={roleFilter}
+            onChange={(e) => changeRole(e.target.value)}
+            aria-label="Filter by role"
           />
         </div>
         <Button size="sm" leadingIcon={<Icon name="plus" size={16} />} onClick={openCreate}>
