@@ -38,7 +38,7 @@ export function Sidebar({ user, open, onClose }: Props) {
 
       <nav className={styles.nav}>
         {items.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           const className = `${styles.item} ${active ? styles.active : ""} ${
             item.soon ? styles.soon : ""
           }`;
