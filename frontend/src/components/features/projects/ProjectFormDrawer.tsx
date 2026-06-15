@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { api, ApiError } from "@/lib/api";
-import { PROJECT_TYPES } from "@/lib/projectTypes";
+import { PRIORITIES, PROJECT_TYPES } from "@/lib/projectTypes";
 import type { ProjectDetail } from "@/types/project";
 import styles from "./projectForm.module.css";
 
@@ -23,7 +23,8 @@ interface Props {
 type Form = Record<string, string>;
 
 const FIELDS = [
-  "name", "project_type", "location", "description", "client_name",
+  "name", "code", "project_type", "priority", "location", "description",
+  "budget", "currency", "client_name",
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email",
   "planned_start", "planned_finish", "revised_finish", "size_sqm", "notes",
@@ -33,6 +34,8 @@ const blank = (): Form => {
   const f: Form = {};
   FIELDS.forEach((k) => (f[k] = ""));
   f.project_type = "commercial";
+  f.priority = "medium";
+  f.currency = "AED";
   return f;
 };
 
@@ -71,7 +74,7 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
     setError(null);
     // Empty dates / size must be null, not "".
     const payload: Record<string, unknown> = { ...form };
-    for (const k of ["planned_start", "planned_finish", "revised_finish", "size_sqm"]) {
+    for (const k of ["planned_start", "planned_finish", "revised_finish", "size_sqm", "budget"]) {
       if (!payload[k]) payload[k] = null;
     }
     try {
@@ -103,9 +106,18 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
       <form id="project-form" onSubmit={handleSubmit} className={styles.form}>
         <Input label="Project name" name="name" required autoFocus value={form.name} onChange={set("name")} />
         <div className={styles.row2}>
+          <Input label="Project code" name="code" placeholder="SCD-2026-001" value={form.code} onChange={set("code")} />
+          <Input label="Location" name="location" value={form.location} onChange={set("location")} />
+        </div>
+        <div className={styles.row2}>
           <Select label="Type" name="project_type" options={[...PROJECT_TYPES]}
             value={form.project_type} onChange={set("project_type")} />
-          <Input label="Location" name="location" value={form.location} onChange={set("location")} />
+          <Select label="Priority" name="priority" options={[...PRIORITIES]}
+            value={form.priority} onChange={set("priority")} />
+        </div>
+        <div className={styles.row2}>
+          <Input label="Budget" name="budget" type="number" step="0.01" value={form.budget} onChange={set("budget")} />
+          <Input label="Currency" name="currency" value={form.currency} onChange={set("currency")} />
         </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="description">Description</label>

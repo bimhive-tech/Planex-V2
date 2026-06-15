@@ -1,13 +1,14 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-3);
 }
 
 .back {
@@ -15,6 +16,7 @@
   align-items: center;
   gap: var(--space-1);
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 .back:hover {
@@ -28,80 +30,38 @@
 .head {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
 }
 
-.title {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.2;
-}
-
-.badges {
+.titleRow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.location {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.tabs {
-  display: flex;
-  gap: var(--space-4);
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.tab {
-  padding: var(--space-3) var(--space-1);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  white-space: nowrap;
-}
-.tab:hover {
+.title {
+  font-size: 26px;
+  font-weight: 700;
   color: var(--text-primary);
-}
-.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+  line-height: 1.15;
 }
 
-.content {
-  padding-top: var(--space-2);
-}
-
-.placeholder {
+.metaRow {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.meta {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-10) var(--space-5);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  text-align: center;
-}
-
-.placeholderTitle {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.placeholderText {
   font-size: 13px;
   color: var(--text-secondary);
+}
+.meta svg {
+  color: var(--text-muted);
 }

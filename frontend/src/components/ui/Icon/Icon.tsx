@@ -17,7 +17,13 @@ export type IconName =
   | "close"
   | "edit"
   | "trash"
-  | "check";
+  | "check"
+  | "mapPin"
+  | "calendar"
+  | "hash"
+  | "money"
+  | "flag"
+  | "clock";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -112,6 +118,41 @@ const PATHS: Record<IconName, React.ReactNode> = {
   check: (
     <>
       <path d="M20 6 9 17l-5-5" />
+    </>
+  ),
+  mapPin: (
+    <>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M3 10h18M8 2v4M16 2v4" />
+    </>
+  ),
+  hash: (
+    <>
+      <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+    </>
+  ),
+  money: (
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M6 12h.01M18 12h.01" />
+    </>
+  ),
+  flag: (
+    <>
+      <path d="M4 22V4M4 4h13l-2 4 2 4H4" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
     </>
   ),
 };

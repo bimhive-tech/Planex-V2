@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-4);
+  align-items: start;
 }
 
 .card {
@@ -16,20 +17,28 @@
   grid-column: 1 / -1;
 }
 
-.cardTitle {
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-secondary);
+.cardHead {
   margin-bottom: var(--space-3);
+}
+
+.cardTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cardSub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-2) 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 .row:last-child {
@@ -44,16 +53,56 @@
 
 .value {
   font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
   text-align: right;
   word-break: break-word;
 }
 
-.notes {
+.overdue {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+.contactGroup {
+  padding: var(--space-2) 0;
+}
+.contactGroup + .contactGroup {
+  border-top: 1px solid var(--border);
+}
+
+.contactRole {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: var(--space-2) 0;
+}
+
+.prose {
   font-size: 14px;
   color: var(--text-primary);
   line-height: 1.6;
-  white-space: pre-wrap;
+}
+
+.notes {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-canvas);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.notes svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 @media (min-width: 768px) {

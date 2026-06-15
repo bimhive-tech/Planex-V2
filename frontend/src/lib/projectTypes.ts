@@ -5,3 +5,10 @@ export const PROJECT_TYPES = [
   { value: "infrastructure", label: "Infrastructure" },
   { value: "industrial", label: "Industrial" },
 ] as const;
+
+// Mirror backend Project.Priority.
+export const PRIORITIES = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+] as const;

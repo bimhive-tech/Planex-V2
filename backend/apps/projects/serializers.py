@@ -18,21 +18,23 @@ class ProjectListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            "id", "name", "project_type", "project_type_display", "location",
-            "client_name", "planned_start", "planned_finish", "is_archived",
+            "id", "name", "code", "project_type", "project_type_display", "priority",
+            "location", "client_name", "planned_start", "planned_finish", "is_archived",
             "created_at", "updated_at",
         ]
 
 
 class ProjectDetailSerializer(serializers.ModelSerializer):
     project_type_display = serializers.CharField(source="get_project_type_display", read_only=True)
+    priority_display = serializers.CharField(source="get_priority_display", read_only=True)
 
     class Meta:
         model = Project
         fields = [
-            "id", "name", "project_type", "project_type_display", "location", "description",
-            *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes", "is_archived",
-            "created_at", "updated_at",
+            "id", "name", "code", "project_type", "project_type_display",
+            "priority", "priority_display", "location", "description",
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
+            "is_archived", "created_at", "updated_at",
         ]
 
 
@@ -42,8 +44,9 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            "name", "project_type", "location", "description",
-            *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes", "is_archived",
+            "name", "code", "project_type", "priority", "location", "description",
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
+            "is_archived",
         ]
 
     def validate_name(self, value):

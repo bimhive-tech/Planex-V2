@@ -3,8 +3,10 @@
 export interface ProjectListRow {
   id: string;
   name: string;
+  code: string;
   project_type: string;
   project_type_display: string;
+  priority: string;
   location: string;
   client_name: string;
   planned_start: string | null;
@@ -17,8 +19,13 @@ export interface ProjectListRow {
 export interface ProjectDetail {
   id: string;
   name: string;
+  code: string;
   project_type: string;
   project_type_display: string;
+  priority: string;
+  priority_display: string;
+  budget: string | null;
+  currency: string;
   location: string;
   description: string;
   client_name: string;

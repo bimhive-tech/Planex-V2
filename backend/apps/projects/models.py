@@ -14,12 +14,23 @@ class Project(TimestampedModel):
         INFRASTRUCTURE = "infrastructure", "Infrastructure"
         INDUSTRIAL = "industrial", "Industrial"
 
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="projects")
     name = models.CharField(max_length=180)
+    code = models.CharField(max_length=60, blank=True)  # e.g. SCD-2026-001
     project_type = models.CharField(max_length=40, choices=ProjectType.choices)
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     location = models.CharField(max_length=220, blank=True)
     description = models.TextField(blank=True)
+
+    # Budget (optional). Money uses DecimalField, never float.
+    budget = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=8, default="AED")
 
     # Stakeholders (kept as fields now; a reusable Client entity comes later).
     client_name = models.CharField(max_length=180, blank=True)
