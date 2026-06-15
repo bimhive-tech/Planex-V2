@@ -1,0 +1,50 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--bg-canvas);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-8);
+}
+
+.brand {
+  margin-bottom: var(--space-6);
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin-top: var(--space-2);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.form {
+  margin-top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.error {
+  font-size: 13px;
+  color: var(--danger-text);
+  background: var(--danger-fill);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}

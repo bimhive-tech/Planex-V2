@@ -1,0 +1,14 @@
+# Keep the build context small.
+**/node_modules
+**/.next
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.local
+backend/staticfiles
+.git
+.idea
+.vscode
+*.sqlite3

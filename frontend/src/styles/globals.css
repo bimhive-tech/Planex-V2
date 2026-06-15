@@ -1,0 +1,21 @@
+/* Global base styles. Imported exactly once in app/layout.tsx. */
+@import "./tokens.css";
+@import "./reset.css";
+
+body {
+  font-family: var(--font);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Tabular figures for numeric data (stats, tables). */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

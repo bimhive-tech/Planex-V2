@@ -1,0 +1,42 @@
+.shell {
+  min-height: 100vh;
+}
+
+/* Mobile: sidebar is an off-canvas drawer; main fills the viewport. */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.content {
+  flex: 1;
+  padding: var(--space-5);
+  background: var(--bg-canvas);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.4);
+  z-index: 40;
+}
+
+/* Tablet+ : fixed sidebar rail, content offset by its width. */
+@media (min-width: 768px) {
+  .main {
+    margin-left: var(--sidebar-width);
+  }
+  .backdrop {
+    display: none;
+  }
+  .content {
+    padding: var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .content {
+    padding: var(--space-8);
+  }
+}

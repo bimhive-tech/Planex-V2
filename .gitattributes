@@ -1,0 +1,7 @@
+# Normalize line endings. Shell scripts MUST stay LF so they run in the Linux
+# container (CRLF would yield "bad interpreter"). Treat lockfiles as binary-ish
+# to avoid churn.
+* text=auto
+*.sh text eol=lf
+start.sh text eol=lf
+Dockerfile text eol=lf

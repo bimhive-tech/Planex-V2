@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Container entrypoint: migrate, then run Django (internal :8000) + Next ($PORT).
+set -e
+
+cd /app/backend
+
+echo "→ Running migrations…"
+python manage.py migrate --noinput
+
+# Seed the platform admin on first boot (idempotent).
+if [ "${SEED_PLATFORM:-true}" = "true" ]; then
+  echo "→ Seeding platform admin…"
+  python manage.py seed_platform || true
+fi
+
+echo "→ Starting Django (gunicorn) on :8000…"
+gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers "${WEB_CONCURRENCY:-2}" &
+
+cd /app/frontend
+export PORT="${PORT:-3000}"
+export HOSTNAME="0.0.0.0"
+export BACKEND_INTERNAL_URL="http://127.0.0.1:8000"
+echo "→ Starting Next.js on :${PORT}…"
+exec node server.js

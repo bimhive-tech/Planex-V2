@@ -1,0 +1,68 @@
+.header {
+  height: var(--header-height);
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.menuBtn {
+  color: var(--text-secondary);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.menuBtn:hover {
+  background: var(--bg-canvas);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  max-width: 420px;
+  padding: 8px 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+}
+
+.searchInput {
+  border: none;
+  background: transparent;
+  outline: none;
+  width: 100%;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.iconBtn {
+  color: var(--text-secondary);
+  padding: var(--space-2);
+  border-radius: var(--radius-pill);
+}
+.iconBtn:hover {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+}
+
+/* Hamburger only on mobile (sidebar is fixed on tablet+). */
+@media (min-width: 768px) {
+  .menuBtn {
+    display: none;
+  }
+}

@@ -1,0 +1,54 @@
+/* Design tokens — single source of truth (copied from style.md §8, extended).
+   Never write raw hex / shadow / themed px in a component module; use these. */
+:root {
+  /* Brand */
+  --primary: #5b4fe9;
+  --primary-hover: #4a3fd0;
+  --primary-soft: #efedfe;
+  --primary-text-accent: #534ab7;
+
+  /* Neutrals */
+  --bg-canvas: #f6f7f9;
+  --bg-surface: #ffffff;
+  --border: #e8eaed;
+  --border-strong: #d6d9de;
+  --text-primary: #1e2430;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+
+  /* Status */
+  --success-text: #1e7e4f;
+  --success-fill: #e4f6ec;
+  --warning-text: #b45309;
+  --warning-fill: #fcf0df;
+  --danger-text: #b42318;
+  --danger-fill: #fdecea;
+  --info-text: #1d6fb8;
+  --info-fill: #e7f1fb;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-pill: 9999px;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 4px 12px rgba(16, 24, 40, 0.1);
+
+  /* Type */
+  --font: "Inter", -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --header-height: 64px;
+}
