@@ -329,7 +329,7 @@ on upload; store object keys (not full URLs) on the model. Config via env only. 
 |---|---|---|
 | Sign In | Email + password auth (no public sign-up; users are created internally). | **[built]** |
 | Dashboard | Role-relevant operating view; health, pending work, recent updates. | placeholder **[built]**, redesign **[later]** |
-| Project Hub | List / create / edit / open / archive / delete projects. | **[next]** |
+| Project Hub | List / create / edit / open / archive / delete projects. | **[built]** |
 | Settings | Company-level admin (tabs below). | **[built]** |
 | Workflow Templates | Reusable project structures & task library (Builder). | **[later]** |
 | Account Settings | Personal settings, password, own permissions. | **[later]** |
@@ -368,7 +368,7 @@ dismiss only via their explicit close/cancel (not accidental outside-clicks).
 1. **Auth & tenancy** — email login, JWT httpOnly cookies, platform seed. **[built]**
 2. **Settings** — companies, users, roles, permissions matrix, default/locked roles. **[built]**
 3. **Dashboard redesign** — once real metrics exist. **[later]**
-4. **Projects module** — Project Hub + create/edit drawer + project detail shell. **[next]**
+4. **Projects module** — Project Hub + create/edit drawer + project detail shell. **[built]**
 5. **Hierarchy & scope** — Phase→Zone→Building→Area→Activity, scope assignments. **[next]**
 6. **Fieldwork** — scoped progress entry (% / quantity), attachments (R2). **[next]**
 7. **Approvals** — reviewer → PM chain, statuses, resubmission, audit trail. **[next]**
