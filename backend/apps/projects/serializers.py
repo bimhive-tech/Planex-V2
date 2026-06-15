@@ -30,6 +30,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     priority_display = serializers.CharField(source="get_priority_display", read_only=True)
     overall_progress = serializers.SerializerMethodField()
     activity_count = serializers.SerializerMethodField()
+    progress_breakdown = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -37,7 +38,8 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             "id", "name", "code", "project_type", "project_type_display",
             "priority", "priority_display", "location", "description",
             "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
-            "is_archived", "overall_progress", "activity_count", "created_at", "updated_at",
+            "is_archived", "overall_progress", "activity_count", "progress_breakdown",
+            "created_at", "updated_at",
         ]
 
     def get_overall_progress(self, obj):
@@ -45,6 +47,21 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
 
     def get_activity_count(self, obj):
         return obj.activities.count()
+
+    def get_progress_breakdown(self, obj):
+        from django.db.models import Count, Q
+        agg = obj.activities.aggregate(
+            total=Count("id"),
+            completed=Count("id", filter=Q(progress_percent__gte=100)),
+            not_started=Count("id", filter=Q(progress_percent__lte=0)),
+        )
+        total = agg["total"]
+        return {
+            "total": total,
+            "completed": agg["completed"],
+            "not_started": agg["not_started"],
+            "in_progress": total - agg["completed"] - agg["not_started"],
+        }
 
 
 class ProjectWriteSerializer(serializers.ModelSerializer):

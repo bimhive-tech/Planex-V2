@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { ProgressDonut } from "@/components/ui/ProgressDonut";
 import { formatDate } from "@/lib/format";
 import type { ProjectDetail } from "@/types/project";
+import type { ProjectStats } from "./ProjectWorkspace";
 import styles from "./projectOverview.module.css";
 
 const DAY = 1000 * 60 * 60 * 24;
@@ -44,8 +45,28 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function ProjectOverview({ project: p, progress }: { project: ProjectDetail; progress: number }) {
+function StatusBar({ tone, label, count, pct }: { tone: string; label: string; count: number; pct: number }) {
+  return (
+    <div className={styles.statusRow}>
+      <div className={styles.statusTop}>
+        <span className={styles.statusLabel}>{label}</span>
+        <span className={`${styles.statusCount} tnum`}>{count}</span>
+      </div>
+      <div className={styles.statusTrack}>
+        <span
+          className={`${styles.statusFill} ${styles[`tone_${tone}`]}`}
+          style={{ ["--pct" as string]: `${pct}%` }}
+        />
+      </div>
+      <span className={`${styles.statusPct} tnum`}>{pct}%</span>
+    </div>
+  );
+}
+
+export function ProjectOverview({ project: p, stats }: { project: ProjectDetail; stats: ProjectStats }) {
   const t = timeline(p.planned_start, p.planned_finish);
+  const b = stats.breakdown;
+  const pct = (n: number) => (b.total ? Math.round((n / b.total) * 100) : 0);
 
   return (
     <div className={styles.grid}>
@@ -53,16 +74,25 @@ export function ProjectOverview({ project: p, progress }: { project: ProjectDeta
       <section className={styles.card}>
         <header className={styles.cardHead}>
           <h2 className={styles.cardTitle}>Progress Summary</h2>
-          <p className={styles.cardSub}>Rolled up from the project schedule.</p>
+          <p className={styles.cardSub}>Rolled up from {b.total} activities.</p>
         </header>
-        <div className={styles.progressBody}>
-          <ProgressDonut value={progress} />
-          <p className={styles.progressNote}>
-            {p.activity_count > 0
-              ? `${p.activity_count} ${p.activity_count === 1 ? "activity" : "activities"} tracked`
-              : "Add activities in the Schedule tab to start tracking progress."}
-          </p>
-        </div>
+        {b.total > 0 ? (
+          <div className={styles.progressLayout}>
+            <ProgressDonut value={stats.overall} />
+            <div className={styles.statusBars}>
+              <StatusBar tone="success" label="Completed" count={b.completed} pct={pct(b.completed)} />
+              <StatusBar tone="warning" label="In Progress" count={b.in_progress} pct={pct(b.in_progress)} />
+              <StatusBar tone="neutral" label="Not Started" count={b.not_started} pct={pct(b.not_started)} />
+            </div>
+          </div>
+        ) : (
+          <div className={styles.progressBody}>
+            <ProgressDonut value={stats.overall} />
+            <p className={styles.progressNote}>
+              Add activities in the Schedule tab — or import an Excel tracker — to start tracking progress.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Project details */}

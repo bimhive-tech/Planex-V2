@@ -43,8 +43,16 @@ export interface ProjectDetail {
   is_archived: boolean;
   overall_progress: number;
   activity_count: number;
+  progress_breakdown: ProgressBreakdown;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProgressBreakdown {
+  total: number;
+  completed: number;
+  in_progress: number;
+  not_started: number;
 }
 
 export type ScopeType = "phase" | "zone" | "building" | "area";

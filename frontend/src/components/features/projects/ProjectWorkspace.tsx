@@ -14,8 +14,13 @@ import { formatDate } from "@/lib/format";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
-import type { ProjectDetail } from "@/types/project";
+import type { ProgressBreakdown, ProjectDetail } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
+
+export interface ProjectStats {
+  overall: number;
+  breakdown: ProgressBreakdown;
+}
 
 const TABS = ["Overview", "Schedule"] as const;
 type Tab = (typeof TABS)[number];
@@ -33,7 +38,10 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("Overview");
   const [editOpen, setEditOpen] = useState(false);
-  const [progress, setProgress] = useState(project.overall_progress);
+  const [stats, setStats] = useState<ProjectStats>({
+    overall: project.overall_progress,
+    breakdown: project.progress_breakdown,
+  });
 
   return (
     <div className={styles.page}>
@@ -76,9 +84,9 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
 
       <div className={styles.content}>
         {tab === "Overview" ? (
-          <ProjectOverview project={project} progress={progress} />
+          <ProjectOverview project={project} stats={stats} />
         ) : (
-          <ProjectSchedule projectId={project.id} canManage={canManage} onOverallChange={setProgress} />
+          <ProjectSchedule projectId={project.id} canManage={canManage} onStatsChange={setStats} />
         )}
       </div>
 

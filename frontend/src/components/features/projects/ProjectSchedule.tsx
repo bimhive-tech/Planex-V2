@@ -20,19 +20,26 @@ const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", bui
 interface Props {
   projectId: string;
   canManage: boolean;
-  onOverallChange: (value: number) => void;
+  onStatsChange: (stats: { overall: number; breakdown: { total: number; completed: number; in_progress: number; not_started: number } }) => void;
 }
 
-export function ProjectSchedule({ projectId, canManage, onOverallChange }: Props) {
+export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) {
   const { data, loading, error, reload } = useFetch(
     () => api.get<ProjectStructure>(`/projects/${projectId}/structure/`),
     [projectId],
   );
 
-  // Bubble the live overall up to the donut on the Overview tab.
+  // Bubble live stats (overall + status breakdown) up to the Overview tab.
   useEffect(() => {
-    if (data) onOverallChange(data.overall_progress);
-  }, [data, onOverallChange]);
+    if (!data) return;
+    const acts = data.activities;
+    const completed = acts.filter((a) => Number(a.progress_percent) >= 100).length;
+    const notStarted = acts.filter((a) => Number(a.progress_percent) <= 0).length;
+    onStatsChange({
+      overall: data.overall_progress,
+      breakdown: { total: acts.length, completed, in_progress: acts.length - completed - notStarted, not_started: notStarted },
+    });
+  }, [data, onStatsChange]);
 
   const [scopeModal, setScopeModal] = useState<{ parentId: string | null; scope: Scope | null; type: string } | null>(null);
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);

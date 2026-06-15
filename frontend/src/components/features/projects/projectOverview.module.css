@@ -79,6 +79,77 @@
   max-width: 28ch;
 }
 
+/* Donut + status bars (matches the reference Progress Summary). */
+.progressLayout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-2) 0;
+}
+
+.statusBars {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.statusRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--space-3);
+  align-items: center;
+}
+
+.statusTop {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusLabel {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.statusCount {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.statusTrack {
+  grid-column: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.statusFill {
+  display: block;
+  height: 100%;
+  width: var(--pct, 0%);
+  border-radius: var(--radius-pill);
+  transition: width 0.4s ease;
+}
+
+.tone_success { background: var(--success-text); }
+.tone_warning { background: var(--warning-text); }
+.tone_neutral { background: var(--border-strong); }
+
+.statusPct {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  align-self: center;
+}
+
 .contactGroup {
   padding: var(--space-2) 0;
 }
