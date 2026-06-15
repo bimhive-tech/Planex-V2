@@ -2,7 +2,7 @@
 
 // Schedule tab: the project's work hierarchy (Phase -> Zone -> Building -> Area ->
 // Activity). Build the tree, set per-activity progress; everything rolls up.
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -37,6 +37,30 @@ export function ProjectSchedule({ projectId, canManage, onOverallChange }: Props
   const [scopeModal, setScopeModal] = useState<{ parentId: string | null; scope: Scope | null; type: string } | null>(null);
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    if (data && data.scopes.length > 0 &&
+        !window.confirm("Importing replaces the current structure. Continue?")) return;
+    setImporting(true);
+    setActionError(null);
+    setImportMsg(null);
+    try {
+      const r = await api.upload<{ zones: number; activities: number; overall_progress: number }>(
+        `/upload/import/${projectId}`, file);
+      setImportMsg(`Imported ${r.zones} zones and ${r.activities} activities (${r.overall_progress}% overall).`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const { childrenOf, activitiesOf, progressOf } = useMemo(() => buildTree(data), [data]);
 
@@ -72,13 +96,21 @@ export function ProjectSchedule({ projectId, canManage, onOverallChange }: Props
           {data ? `${data.scopes.length} scopes · ${data.activities.length} activities · ${data.overall_progress}% overall` : "Structure"}
         </span>
         {canManage && (
-          <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
-            onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
-            Add phase
-          </Button>
+          <div className={styles.toolbarActions}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
+            <Button size="sm" variant="secondary" disabled={importing}
+              onClick={() => fileRef.current?.click()}>
+              {importing ? "Importing…" : "Import Excel"}
+            </Button>
+            <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
+              onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
+              Add phase
+            </Button>
+          </div>
         )}
       </div>
 
+      {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
       <div className={styles.surface}>

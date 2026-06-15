@@ -5,12 +5,14 @@ MANAGE_PROJECTS. Everything is company- and project-scoped (tenant isolation).
 """
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
+from .imports import import_workbook
 from .models import Activity, Project, ProjectScope
 from .serializers import (
     ActivitySerializer,
@@ -144,3 +146,31 @@ class ActivityDetailView(APIView):
         _require(request, Permission.MANAGE_PROJECTS.value)
         self._get(project, activity_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Upload limit (the workbook is large but mostly the skipped P6 sheet).
+MAX_IMPORT_BYTES = 40 * 1024 * 1024
+
+
+class ProjectImportView(APIView):
+    """Import an Excel progress-tracker workbook into the project hierarchy.
+    Replaces the existing structure."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, project_id):
+        project = _project(request, project_id)
+        _require(request, Permission.MANAGE_PROJECTS.value)
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "No file uploaded."})
+        if not upload.name.lower().endswith((".xlsx", ".xlsm")):
+            raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
+        if upload.size > MAX_IMPORT_BYTES:
+            raise ValidationError({"file": "File is too large (max 40 MB)."})
+        try:
+            result = import_workbook(project, upload)
+        except Exception as exc:  # parsing failures shouldn't 500
+            raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
+        return Response(result)

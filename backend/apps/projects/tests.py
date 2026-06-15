@@ -1,10 +1,43 @@
 """Project API tests: tenant isolation, permission enforcement, CRUD, archive."""
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
+from .imports import parse_sheet
 from .models import Project
+
+
+class ImportParserTests(SimpleTestCase):
+    """The zone-sheet parser detects the grid (with or without a weight column)
+    and averages each task across its subzones."""
+
+    def test_detects_grid_with_weight_column(self):
+        rows = [
+            (None, None, 1, 2, 3),
+            (None, None, "(A1)", "(A2)", "(A3)"),
+            ("W", "summary", 0.5, 0.5, 0.5),
+            (2.0, "Task1", 1, 1, 1),       # avg 1.0 -> 100%, weight 2
+            (1.0, "Task2", 0, 0.5, 1),     # avg 0.5 -> 50%, weight 1
+        ]
+        tasks = parse_sheet(rows)
+        self.assertEqual(tasks, [
+            {"name": "Task1", "weight": 2.0, "progress": 100.0},
+            {"name": "Task2", "weight": 1.0, "progress": 50.0},
+        ])
+
+    def test_detects_grid_without_weight_column(self):
+        # Like ZONE (B): codes start in column 1, name is column 0, no weight col.
+        rows = [
+            (None, 1, 2),
+            (None, "(B1)", "(B2)"),
+            ("summary", 0.4, 0.4),
+            ("Task1", 1, 0),               # avg 0.5 -> 50%, default weight 1
+        ]
+        tasks = parse_sheet(rows)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["weight"], 1.0)
+        self.assertEqual(tasks[0]["progress"], 50.0)
 
 STRONG_PW = "Str0ngPassw0rd!"
 

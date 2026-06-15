@@ -11,3 +11,5 @@ whitenoise==6.7.0
 # Object storage (Cloudflare R2 — S3-compatible). Wired now, used when R2 creds arrive.
 django-storages==1.14.4
 boto3==1.35.36
+# Excel parsing for Primavera / progress-tracker imports.
+openpyxl==3.1.5

@@ -83,5 +83,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|admin|django-static|_next/static|_next/image|favicon.ico|healthz).*)"],
+  matcher: ["/((?!api|admin|django-static|_next/static|_next/image|favicon.ico|healthz|upload).*)"],
 };

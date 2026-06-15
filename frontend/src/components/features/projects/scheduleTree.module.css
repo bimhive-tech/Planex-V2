@@ -12,6 +12,20 @@
   color: var(--text-secondary);
 }
 
+.toolbarActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.importMsg {
+  margin-bottom: var(--space-3);
+  font-size: 13px;
+  color: var(--success-text);
+  background: var(--success-fill);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
 .surface {
   background: var(--bg-surface);
   border: 1px solid var(--border);

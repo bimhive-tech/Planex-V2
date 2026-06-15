@@ -10,6 +10,11 @@ const nextConfig = {
   reactStrictMode: true,
   // Self-contained server bundle for the single-container Railway deploy.
   output: "standalone",
+  // Raise the proxied-request body cap (default 10MB) so large Excel imports
+  // can stream through Next to Django. (All traffic is same-origin via the proxy.)
+  experimental: {
+    middlewareClientMaxBodySize: 64 * 1024 * 1024,
+  },
   // Don't redirect away trailing slashes; pages stay slash-less. Django routes
   // need the slash, so we append it in the rewrite destinations below — the
   // `:path*` matcher drops the trailing slash, so we add it back explicitly.
