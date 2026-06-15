@@ -10,5 +10,11 @@ export default async function UsersPage() {
   if (!user) redirect(ROUTES.login);
   const allowed = user.is_platform_admin || user.permissions.includes(Permission.MANAGE_USERS);
   if (!allowed) redirect("/settings/info");
-  return <UsersTab isPlatformAdmin={user.is_platform_admin} ownCompanyId={user.company?.id ?? ""} />;
+  return (
+    <UsersTab
+      isPlatformAdmin={user.is_platform_admin}
+      ownCompanyId={user.company?.id ?? ""}
+      ownUserId={user.id}
+    />
+  );
 }

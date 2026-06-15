@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
+import { TypedConfirmModal } from "@/components/ui/ConfirmModal";
 import { api, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import { formatDate } from "@/lib/format";
@@ -14,17 +15,24 @@ import type { CompanyRow } from "@/types/settings";
 import { CompanyFormModal } from "./CompanyFormModal";
 import styles from "./settingsList.module.css";
 
-const COLS = { "--cols": "2fr 1fr 1fr 1fr" } as CSSProperties;
+const COLS = { "--cols": "2fr 1fr 1fr 1fr auto" } as CSSProperties;
 
 export function CompaniesTab() {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState<CompanyRow | null>(null);
   const { data, loading, error, reload } = useFetch(
     () => api.get<Paginated<CompanyRow>>(`/companies/?page=${page}`),
     [page],
   );
 
   const rows = data?.results ?? [];
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    await api.del(`/companies/${deleting.id}/`);
+    reload();
+  }
 
   return (
     <div>
@@ -43,6 +51,7 @@ export function CompaniesTab() {
           <span>Users</span>
           <span>Status</span>
           <span>Created</span>
+          <span />
         </div>
 
         <StateView
@@ -70,6 +79,16 @@ export function CompaniesTab() {
                 )}
               </span>
               <span className={styles.muted}>{formatDate(c.created_at)}</span>
+              <div className={styles.actions}>
+                <button
+                  className={`${styles.actionBtn} ${styles.danger}`}
+                  aria-label="Delete company"
+                  disabled={c.is_platform_admin}
+                  onClick={() => setDeleting(c)}
+                >
+                  <Icon name="trash" size={16} />
+                </button>
+              </div>
             </div>
           ))}
         </StateView>
@@ -90,6 +109,21 @@ export function CompaniesTab() {
       </div>
 
       <CompanyFormModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={reload} />
+
+      <TypedConfirmModal
+        open={!!deleting}
+        title="Delete company"
+        confirmPhrase={deleting?.name ?? ""}
+        confirmLabel="Delete company"
+        description={
+          <>
+            This permanently deletes <strong>{deleting?.name}</strong> and all of its users,
+            roles, and data. This cannot be undone.
+          </>
+        }
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

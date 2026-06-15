@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
-import { api, type Paginated } from "@/lib/api";
+import { api, ApiError, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import type { UserRow } from "@/types/settings";
 import { CompanySelector } from "./CompanySelector";
@@ -21,15 +21,17 @@ const COLS = { "--cols": "2fr 1.5fr 0.8fr auto" } as CSSProperties;
 interface Props {
   isPlatformAdmin: boolean;
   ownCompanyId: string;
+  ownUserId: string;
 }
 
-export function UsersTab({ isPlatformAdmin, ownCompanyId }: Props) {
+export function UsersTab({ isPlatformAdmin, ownCompanyId, ownUserId }: Props) {
   const [companyId, setCompanyId] = useState(ownCompanyId);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Debounce the search box (~300ms) so typing doesn't spam the API.
   useEffect(() => {
@@ -58,6 +60,17 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId }: Props) {
     setModalOpen(true);
   }
 
+  async function handleDelete(user: UserRow) {
+    if (!window.confirm(`Delete ${user.full_name || user.email}? This can't be undone.`)) return;
+    setActionError(null);
+    try {
+      await api.del(`/users/${user.id}/${companyQuery(companyId)}`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't delete user.");
+    }
+  }
+
   return (
     <div>
       <div className={styles.toolbar}>
@@ -76,6 +89,8 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId }: Props) {
           New user
         </Button>
       </div>
+
+      {actionError && <p className="formError">{actionError}</p>}
 
       <div className={styles.surface} style={COLS}>
         <div className={styles.headRow}>
@@ -115,6 +130,14 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId }: Props) {
                 <button className={styles.actionBtn} aria-label="Edit user" onClick={() => openEdit(u)}>
                   <Icon name="edit" size={16} />
                 </button>
+                <button
+                  className={`${styles.actionBtn} ${styles.danger}`}
+                  aria-label="Delete user"
+                  disabled={u.id === ownUserId}
+                  onClick={() => handleDelete(u)}
+                >
+                  <Icon name="trash" size={16} />
+                </button>
               </div>
             </div>
           ))}
@@ -139,7 +162,8 @@ export function UsersTab({ isPlatformAdmin, ownCompanyId }: Props) {
 
       <UserFormModal
         open={modalOpen}
-        companyId={companyId}
+        contextCompanyId={companyId}
+        isPlatformAdmin={isPlatformAdmin}
         user={editing}
         onClose={() => setModalOpen(false)}
         onSaved={reload}

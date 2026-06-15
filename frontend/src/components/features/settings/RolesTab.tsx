@@ -1,7 +1,8 @@
 "use client";
 
-// Settings → Roles: list roles for the (selected) company, create/edit with
-// permission checkboxes, delete when unused.
+// Settings → Roles: create roles, rename them, delete custom ones. Default roles
+// (Company Admin, User) can't be deleted; locked roles (Company Admin) can't be
+// edited at all. Permissions are managed in the Permissions tab.
 import { useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/ui/Button";
@@ -74,7 +75,7 @@ export function RolesTab({ isPlatformAdmin, ownCompanyId }: Props) {
       <div className={styles.surface} style={COLS}>
         <div className={styles.headRow}>
           <span>Role</span>
-          <span>Permissions</span>
+          <span>Type</span>
           <span>Members</span>
           <span />
         </div>
@@ -84,28 +85,35 @@ export function RolesTab({ isPlatformAdmin, ownCompanyId }: Props) {
           error={error}
           isEmpty={rows.length === 0}
           emptyTitle="No roles yet"
-          emptyText="Create a role and choose its permissions."
+          emptyText="Create a role, then set its permissions in the Permissions tab."
           onRetry={reload}
         >
           {rows.map((r) => (
             <div key={r.id} className={styles.row}>
-              <div>
-                <div className={styles.primary}>{r.name}</div>
-                {r.is_platform_role && <div className={styles.muted}>System role</div>}
-              </div>
+              <div className={styles.primary}>{r.name}</div>
               <span>
-                <Badge tone="neutral">
-                  {r.permissions.length} {r.permissions.length === 1 ? "permission" : "permissions"}
-                </Badge>
+                {r.is_locked ? (
+                  <Badge tone="info">Locked</Badge>
+                ) : r.is_system ? (
+                  <Badge tone="neutral">Default</Badge>
+                ) : (
+                  <Badge tone="neutral">Custom</Badge>
+                )}
               </span>
               <span className="tnum">{r.member_count}</span>
               <div className={styles.actions}>
-                <button className={styles.actionBtn} aria-label="Edit role" onClick={() => openEdit(r)}>
+                <button
+                  className={styles.actionBtn}
+                  aria-label="Rename role"
+                  disabled={r.is_locked}
+                  onClick={() => openEdit(r)}
+                >
                   <Icon name="edit" size={16} />
                 </button>
                 <button
                   className={`${styles.actionBtn} ${styles.danger}`}
                   aria-label="Delete role"
+                  disabled={r.is_system}
                   onClick={() => handleDelete(r)}
                 >
                   <Icon name="trash" size={16} />

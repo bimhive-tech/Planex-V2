@@ -162,6 +162,10 @@ class Role(TimestampedModel):
     name = models.CharField(max_length=120)
     is_platform_role = models.BooleanField(default=False)
     permissions = models.JSONField(default=list, blank=True)
+    # Seeded defaults (Company Admin, User, Platform Admin) — can't be deleted.
+    is_system = models.BooleanField(default=False)
+    # Fully locked (Company Admin / Platform Admin) — name + permissions immutable.
+    is_locked = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

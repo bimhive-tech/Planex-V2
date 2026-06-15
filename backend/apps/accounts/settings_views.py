@@ -16,8 +16,9 @@ from .settings_serializers import (
     CompanyCreateSerializer,
     CompanyInfoSerializer,
     CompanyListSerializer,
+    RoleCreateSerializer,
     RoleSerializer,
-    RoleWriteSerializer,
+    RoleUpdateSerializer,
     UserCreateSerializer,
     UserListSerializer,
     UserUpdateSerializer,
@@ -68,6 +69,17 @@ class CompaniesViewSet(viewsets.ViewSet):
         company.user_count = 0
         return Response(CompanyListSerializer(company).data, status=status.HTTP_201_CREATED)
 
+    def destroy(self, request, pk=None):
+        from rest_framework.exceptions import NotFound
+        try:
+            company = Company.objects.get(pk=pk)
+        except (Company.DoesNotExist, ValueError):
+            raise NotFound("Company not found.")
+        if company.is_platform_admin:
+            raise PermissionDenied("The platform company can't be deleted.")
+        svc.delete_company(company=company)  # cascades users, roles, all data
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class RolesViewSet(viewsets.ViewSet):
     """Roles within the resolved company. Requires MANAGE_ROLES."""
@@ -90,7 +102,7 @@ class RolesViewSet(viewsets.ViewSet):
 
     def create(self, request):
         company = self._company(request)
-        serializer = RoleWriteSerializer(data=request.data)
+        serializer = RoleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         role = svc.create_role(company=company, **serializer.validated_data)
         role.member_count = 0
@@ -99,7 +111,9 @@ class RolesViewSet(viewsets.ViewSet):
     def partial_update(self, request, pk=None):
         company = self._company(request)
         role = self._get_role(company, pk)
-        serializer = RoleWriteSerializer(data=request.data)
+        if role.is_locked:
+            raise PermissionDenied("This role is locked and can't be edited.")
+        serializer = RoleUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         svc.update_role(role=role, **serializer.validated_data)
         return Response(RoleSerializer(self._annotated_role(company, role.pk)).data)
@@ -107,6 +121,8 @@ class RolesViewSet(viewsets.ViewSet):
     def destroy(self, request, pk=None):
         company = self._company(request)
         role = self._get_role(company, pk)
+        if role.is_system:
+            raise PermissionDenied("Default roles can't be deleted.")
         if role.memberships.exists():
             raise PermissionDenied("Can't delete a role that is still assigned to users.")
         role.delete()
@@ -165,12 +181,20 @@ class UsersViewSet(viewsets.ViewSet):
     def partial_update(self, request, pk=None):
         company = self._company(request)
         user = self._get_user(company, pk)
-        serializer = UserUpdateSerializer(data=request.data)
+        serializer = UserUpdateSerializer(data=request.data, context={"instance": user})
         serializer.is_valid(raise_exception=True)
         if "role_ids" in serializer.validated_data:
             self._validate_roles(company, serializer.validated_data["role_ids"])
         svc.update_user(user=user, data=serializer.validated_data)
         return Response(self._serialized(self._get_user(company, pk)))
+
+    def destroy(self, request, pk=None):
+        company = self._company(request)
+        user = self._get_user(company, pk)
+        if user.pk == request.user.pk:
+            raise PermissionDenied("You can't delete your own account.")
+        user.delete()  # cascades memberships
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _serialized(self, user):
         user = User.objects.filter(pk=user.pk).prefetch_related(

@@ -42,6 +42,8 @@ export interface RoleRow {
   id: string;
   name: string;
   is_platform_role: boolean;
+  is_system: boolean;
+  is_locked: boolean;
   permissions: string[];
   member_count: number;
   created_at: string;

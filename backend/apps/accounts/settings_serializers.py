@@ -51,18 +51,26 @@ class RoleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Role
-        fields = ["id", "name", "is_platform_role", "permissions", "member_count", "created_at"]
-        read_only_fields = ["id", "is_platform_role", "created_at"]
+        fields = [
+            "id", "name", "is_platform_role", "is_system", "is_locked",
+            "permissions", "member_count", "created_at",
+        ]
+        read_only_fields = ["id", "is_platform_role", "is_system", "is_locked", "created_at"]
 
 
-class RoleWriteSerializer(serializers.Serializer):
-    """Create/update a role. Permission keys are filtered to the company's allowed
-    set in the service, so an out-of-scope key is silently dropped, not an error."""
+class RoleCreateSerializer(serializers.Serializer):
+    """Create a custom role (name; permissions optional, set later in the matrix)."""
 
     name = serializers.CharField(max_length=120)
-    permissions = serializers.ListField(
-        child=serializers.CharField(), allow_empty=True, default=list
-    )
+    permissions = serializers.ListField(child=serializers.CharField(), allow_empty=True, default=list)
+
+
+class RoleUpdateSerializer(serializers.Serializer):
+    """Partial update: name (Roles tab) and/or permissions (Permissions matrix).
+    Keys are filtered to the company's allowed set in the service."""
+
+    name = serializers.CharField(max_length=120, required=False)
+    permissions = serializers.ListField(child=serializers.CharField(), required=False)
 
 
 # ── Users ─────────────────────────────────────────────────────────────────
@@ -113,9 +121,34 @@ class UserCreateSerializer(serializers.Serializer):
 
 
 class UserUpdateSerializer(serializers.Serializer):
+    """Edit a user — everything, including email and (optionally) password.
+    Pass the target user via context['instance'] for the email-uniqueness check."""
+
+    email = serializers.EmailField(required=False)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True,
+                                     trim_whitespace=False)
     first_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
     last_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
     phone_number = serializers.CharField(max_length=40, allow_blank=True, required=False)
     is_active = serializers.BooleanField(required=False)
     # When omitted, memberships are left unchanged; when present, they're replaced.
     role_ids = serializers.ListField(child=serializers.UUIDField(), required=False)
+
+    def validate_email(self, value):
+        value = value.lower().strip()
+        instance = self.context.get("instance")
+        qs = User.objects.filter(email=value)
+        if instance:
+            qs = qs.exclude(pk=instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_password(self, value):
+        if not value:
+            return value  # blank = leave unchanged
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value

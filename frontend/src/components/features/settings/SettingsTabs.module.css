@@ -3,6 +3,12 @@
   gap: var(--space-4);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  /* Hide the horizontal scrollbar while keeping the tabs scrollable on mobile. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {

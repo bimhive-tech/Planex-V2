@@ -91,6 +91,14 @@
   color: var(--danger-text);
   background: var(--danger-fill);
 }
+.actionBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.actionBtn:disabled:hover {
+  color: var(--text-secondary);
+  background: transparent;
+}
 
 .footer {
   display: flex;

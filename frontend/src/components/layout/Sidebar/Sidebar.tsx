@@ -33,7 +33,7 @@ export function Sidebar({ user, open, onClose }: Props) {
   return (
     <aside className={`${styles.sidebar} ${open ? styles.open : ""}`}>
       <div className={styles.top}>
-        <Logo />
+        <Logo showMark={false} />
       </div>
 
       <nav className={styles.nav}>

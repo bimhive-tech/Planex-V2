@@ -40,13 +40,17 @@ class Command(BaseCommand):
         role, _ = Role.objects.get_or_create(
             company=company,
             name=SeededRole.PLATFORM_ADMIN,
-            defaults={"is_platform_role": True, "permissions": ALL_PERMISSIONS},
+            defaults={"is_platform_role": True, "permissions": ALL_PERMISSIONS,
+                      "is_system": True, "is_locked": True},
         )
-        # Keep the seeded role's permissions current with the code.
-        if set(role.permissions or []) != set(ALL_PERMISSIONS):
+        # Keep the seeded role current with the code (perms + system/locked flags).
+        if (set(role.permissions or []) != set(ALL_PERMISSIONS)
+                or not role.is_system or not role.is_locked):
             role.permissions = ALL_PERMISSIONS
             role.is_platform_role = True
-            role.save(update_fields=["permissions", "is_platform_role"])
+            role.is_system = True
+            role.is_locked = True
+            role.save(update_fields=["permissions", "is_platform_role", "is_system", "is_locked"])
 
         user, created_user = User.objects.get_or_create(
             email=email,

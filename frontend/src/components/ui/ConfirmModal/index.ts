@@ -1,0 +1,1 @@
+export { TypedConfirmModal } from "./TypedConfirmModal";

@@ -1,0 +1,90 @@
+.scroll {
+  overflow-x: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.cornerCell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-canvas);
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  min-width: 200px;
+}
+
+.roleHead {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  min-width: 120px;
+  vertical-align: middle;
+}
+
+.roleName {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.groupHeader {
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-canvas);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+.permRow:hover {
+  background: var(--bg-canvas);
+}
+
+.permCell {
+  position: sticky;
+  left: 0;
+  background: var(--bg-surface);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.permRow:hover .permCell {
+  background: var(--bg-canvas);
+}
+
+.checkCell {
+  text-align: center;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.check {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.check:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

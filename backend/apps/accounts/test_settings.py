@@ -119,3 +119,80 @@ class SettingsApiTests(TestCase):
         resp = self.client.patch(
             "/api/company/", {"phone_number": "+999"}, content_type="application/json")
         self.assertEqual(resp.status_code, 403)
+
+    # ── Default + locked roles ────────────────────────────────────────────
+    def test_create_company_seeds_default_roles(self):
+        self.login("super@planex.app")
+        resp = self.client.post("/api/companies/", {"name": "Initech"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        company = Company.objects.get(name="Initech")
+        ca = Role.objects.get(company=company, name=SeededRole.COMPANY_ADMIN)
+        usr = Role.objects.get(company=company, name=SeededRole.USER)
+        self.assertTrue(ca.is_system and ca.is_locked)
+        self.assertTrue(usr.is_system and not usr.is_locked)
+
+    def test_locked_company_admin_role_cannot_be_edited_or_deleted(self):
+        # Mark Acme's admin role as the locked default.
+        self.admin_role_a.is_system = self.admin_role_a.is_locked = True
+        self.admin_role_a.save()
+        self.login("admin@acme.com")
+        edit = self.client.patch(f"/api/roles/{self.admin_role_a.id}/",
+                                 {"name": "Renamed"}, content_type="application/json")
+        self.assertEqual(edit.status_code, 403)
+        delete = self.client.delete(f"/api/roles/{self.admin_role_a.id}/")
+        self.assertEqual(delete.status_code, 403)
+
+    def test_editable_default_user_role_name_can_change(self):
+        user_role = Role.objects.create(
+            company=self.company_a, name=SeededRole.USER,
+            permissions=[Permission.VIEW_PROJECTS.value], is_system=True, is_locked=False)
+        self.login("admin@acme.com")
+        resp = self.client.patch(f"/api/roles/{user_role.id}/",
+                                 {"name": "Member"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["name"], "Member")
+        # ...but still not deletable (system role).
+        self.assertEqual(self.client.delete(f"/api/roles/{user_role.id}/").status_code, 403)
+
+    def test_permission_matrix_toggle_updates_role(self):
+        self.login("admin@acme.com")
+        resp = self.client.patch(
+            f"/api/roles/{self.viewer_role_a.id}/",
+            {"permissions": [Permission.VIEW_PROJECTS.value, Permission.SUBMIT_PROGRESS.value]},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(set(resp.json()["permissions"]),
+                         {Permission.VIEW_PROJECTS.value, Permission.SUBMIT_PROGRESS.value})
+
+    # ── Deletion ──────────────────────────────────────────────────────────
+    def test_platform_admin_deletes_company_cascades(self):
+        self.login("super@planex.app")
+        resp = self.client.delete(f"/api/companies/{self.company_b.id}/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(Company.objects.filter(pk=self.company_b.id).exists())
+        self.assertFalse(User.objects.filter(email="bob@globex.com").exists())
+
+    def test_cannot_delete_platform_company(self):
+        self.login("super@planex.app")
+        self.assertEqual(self.client.delete(f"/api/companies/{self.platform.id}/").status_code, 403)
+
+    def test_delete_user_and_cannot_delete_self(self):
+        self.login("admin@acme.com")
+        ok = self.client.delete(f"/api/users/{self.viewer_a.id}/")
+        self.assertEqual(ok.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=self.viewer_a.id).exists())
+        # Can't delete yourself.
+        self.assertEqual(self.client.delete(f"/api/users/{self.admin_a.id}/").status_code, 403)
+
+    def test_edit_user_email_and_password(self):
+        self.login("admin@acme.com")
+        resp = self.client.patch(
+            f"/api/users/{self.viewer_a.id}/",
+            {"email": "newviewer@acme.com", "password": "An0therStr0ng!"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.viewer_a.refresh_from_db()
+        self.assertEqual(self.viewer_a.email, "newviewer@acme.com")
+        self.assertTrue(self.viewer_a.check_password("An0therStr0ng!"))

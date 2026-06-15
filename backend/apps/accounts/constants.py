@@ -38,12 +38,16 @@ class SeededRole:
 
     PLATFORM_ADMIN = "Platform Admin"
     COMPANY_ADMIN = "Company Admin"
+    USER = "User"
 
 
 # Company admins can do everything inside their own company, but no platform ops.
 COMPANY_ADMIN_PERMISSIONS = [
     p for p in ALL_PERMISSIONS if p not in PLATFORM_PERMISSIONS
 ]
+
+# Sensible minimal default for the seeded "User" role (editable later in the matrix).
+DEFAULT_USER_PERMISSIONS = [Permission.VIEW_PROJECTS.value]
 
 
 # Grouped catalog for the Roles UI (checkbox sections). Order matters for display.
