@@ -15,7 +15,9 @@ if env_file.exists():
     environ.Env.read_env(str(env_file))
 
 # --- Core security ---------------------------------------------------------
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
+# NOTE: set a real DJANGO_SECRET_KEY in prod (Railway). The default below is only
+# for local dev; it's long enough to avoid JWT key-length warnings but is NOT secret.
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me-0123456789abcdef")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 CSRF_TRUSTED_ORIGINS = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])

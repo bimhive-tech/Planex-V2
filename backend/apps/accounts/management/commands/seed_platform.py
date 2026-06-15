@@ -17,6 +17,7 @@ from django.db import transaction
 
 from apps.accounts.constants import ALL_PERMISSIONS, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
+from apps.accounts.settings_services import seed_default_roles
 
 PLATFORM_COMPANY_NAME = "Admin"
 
@@ -81,6 +82,10 @@ class Command(BaseCommand):
             company=company, user=user, role=role, department=None,
             defaults={"is_active": True},
         )
+
+        # The admin company also gets the standard default roles so it behaves
+        # like any other company in the Roles/Permissions tabs.
+        seed_default_roles(company)
 
         self.stdout.write(self.style.SUCCESS(
             f"Platform seeded. Company={company.name} "

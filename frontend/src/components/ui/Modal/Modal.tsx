@@ -17,22 +17,20 @@ interface Props {
 export function Modal({ open, title, onClose, children, footer }: Props) {
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
+    // Lock background scroll while open. Note: clicking the backdrop does NOT
+    // close the modal (avoids accidental data loss) — only the X button does.
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
   return (
-    <div className={styles.backdrop} onClick={onClose} role="presentation">
+    <div className={styles.backdrop} role="presentation">
       <div
         className={styles.panel}
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
