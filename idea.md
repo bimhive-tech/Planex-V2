@@ -369,7 +369,8 @@ dismiss only via their explicit close/cancel (not accidental outside-clicks).
 2. **Settings** — companies, users, roles, permissions matrix, default/locked roles. **[built]**
 3. **Dashboard redesign** — once real metrics exist. **[later]**
 4. **Projects module** — Project Hub + create/edit drawer + project detail shell. **[built]**
-5. **Hierarchy & scope** — Phase→Zone→Building→Area→Activity, scope assignments. **[next]**
+5. **Hierarchy** — Phase→Zone→Building→Area→Activity tree + Schedule tab + weighted
+   roll-up + progress donut. **[built]** · per-user scope assignments **[next]**
 6. **Fieldwork** — scoped progress entry (% / quantity), attachments (R2). **[next]**
 7. **Approvals** — reviewer → PM chain, statuses, resubmission, audit trail. **[next]**
 8. **Roll-up & overview** — weighted aggregation, planned vs actual, SPI. **[next]**
