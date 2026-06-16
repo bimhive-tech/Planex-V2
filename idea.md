@@ -375,7 +375,8 @@ dismiss only via their explicit close/cancel (not accidental outside-clicks).
 7. **Approvals** — reviewer → PM chain, statuses, resubmission, audit trail. **[next]**
 8. **Roll-up & overview** — weighted aggregation, planned vs actual, SPI. **[next]**
 9. **Delays & issues**, **notifications**. **[later]**
-10. **Primavera import/export**, **reports & PDF**, **template builder**. **[later]**
+10. **Excel zone-tracker import** → hierarchy + progress **[built]** · Primavera P6
+    round-trip export, **reports & PDF**, **template builder** **[later]**
 
 ---
 
