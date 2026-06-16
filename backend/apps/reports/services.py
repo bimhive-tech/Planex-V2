@@ -1,6 +1,6 @@
 """Report data assembly — gathers the real project numbers the PDF renders.
 We only include data we actually have; missing fields are simply omitted."""
-from apps.projects.models import ProjectScope
+from apps.projects.models import ProjectImage, ProjectScope
 from apps.projects.services import project_overall_progress, scope_progress_map
 
 
@@ -49,6 +49,10 @@ def build_report_context(report):
     snapshots = list(
         project.snapshots.order_by("date").values("date", "overall_progress", "source")
     )
+    images = list(
+        project.images.order_by("image_type", "sort_order", "created_at")
+        .values("image_type", "caption", "image")
+    )
 
     return {
         "report": {
@@ -80,4 +84,11 @@ def build_report_context(report):
         "zones": _zone_rows(project),
         "milestones": milestones,
         "snapshots": snapshots,
+        "images": images,
+        "logos": {
+            "left": next((i for i in images if i["image_type"] == ProjectImage.ImageType.LOGO_LEFT), None),
+            "right": next((i for i in images if i["image_type"] == ProjectImage.ImageType.LOGO_RIGHT), None),
+            "cover": next((i for i in images if i["image_type"] == ProjectImage.ImageType.COVER), None),
+        },
+        "photos": [i for i in images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],
     }

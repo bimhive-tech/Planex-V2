@@ -1,7 +1,9 @@
 """Project serializers: list/detail/write, plus the work-hierarchy serializers."""
 from rest_framework import serializers
 
-from .models import Activity, Project, ProjectMember, ProjectScope
+from django.conf import settings
+
+from .models import Activity, Project, ProjectImage, ProjectMember, ProjectScope
 from .services import project_overall_progress
 
 STAKEHOLDER_FIELDS = [
@@ -137,6 +139,42 @@ class ActivityWriteSerializer(serializers.ModelSerializer):
     def validate_progress_percent(self, value):
         if value < 0 or value > 100:
             raise serializers.ValidationError("Progress must be between 0 and 100.")
+        return value
+
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+class ProjectImageSerializer(serializers.ModelSerializer):
+    """Image metadata plus a private short-lived URL for preview/download."""
+
+    url = serializers.SerializerMethodField()
+    image_type_display = serializers.CharField(source="get_image_type_display", read_only=True)
+
+    class Meta:
+        model = ProjectImage
+        fields = [
+            "id", "image_type", "image_type_display", "caption", "sort_order",
+            "url", "created_at", "updated_at",
+        ]
+
+    def get_url(self, obj):
+        return obj.image.url if obj.image else ""
+
+
+class ProjectImageUploadSerializer(serializers.ModelSerializer):
+    """Validates and stores private report image assets."""
+
+    class Meta:
+        model = ProjectImage
+        fields = ["image", "image_type", "caption", "sort_order"]
+
+    def validate_image(self, value):
+        if value.size > settings.MAX_UPLOAD_BYTES:
+            limit = settings.MAX_UPLOAD_BYTES // (1024 * 1024)
+            raise serializers.ValidationError(f"Image must be {limit}MB or smaller.")
+        if value.content_type not in ALLOWED_IMAGE_TYPES:
+            raise serializers.ValidationError("Upload a JPG, PNG, or WebP image.")
         return value
 
 

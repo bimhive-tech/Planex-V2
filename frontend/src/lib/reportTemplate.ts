@@ -100,6 +100,7 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "sections.milestones", label: "Key milestones", type: "toggle" },
       { path: "sections.timeline", label: "Progress timeline", type: "toggle" },
       { path: "sections.notes", label: "Notes", type: "toggle" },
+      { path: "sections.photos", label: "Site photos", type: "toggle" },
     ],
   },
   {
@@ -121,6 +122,7 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "labels.milestones", label: "Milestones heading", type: "text" },
       { path: "labels.timeline", label: "Timeline heading", type: "text" },
       { path: "labels.notes", label: "Notes heading", type: "text" },
+      { path: "labels.photos", label: "Photos heading", type: "text" },
       { path: "labels.col_zone", label: "Column: Zone", type: "text" },
       { path: "labels.col_progress", label: "Column: Progress", type: "text" },
       { path: "labels.col_milestone", label: "Column: Milestone", type: "text" },

@@ -60,6 +60,41 @@ class Project(TimestampedModel):
         return self.name
 
 
+def project_image_key(instance, filename):
+    """Stable private R2 key; never exposes a public URL."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"projects/{instance.project_id}/images/{uuid.uuid4()}.{ext}"
+
+
+class ProjectImage(TimestampedModel):
+    """Private image asset used by project reports: logos, cover, and site photos."""
+
+    class ImageType(models.TextChoices):
+        SITE_PHOTO = "site_photo", "Site Photo"
+        COVER = "cover", "Cover Image"
+        LOGO_LEFT = "logo_left", "Left Logo"
+        LOGO_RIGHT = "logo_right", "Right Logo"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_images")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to=project_image_key)
+    image_type = models.CharField(max_length=20, choices=ImageType.choices, default=ImageType.SITE_PHOTO)
+    caption = models.CharField(max_length=180, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="uploaded_project_images")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["project", "image_type", "sort_order"]),
+            models.Index(fields=["company", "created_at"]),
+        ]
+        ordering = ["image_type", "sort_order", "created_at"]
+
+    def __str__(self):
+        return self.caption or self.get_image_type_display()
+
+
 class ProgressSnapshot(TimestampedModel):
     """A dated snapshot of a project's aggregate progress, captured on each import.
     Importing monthly trackers builds a history you can chart and filter by date."""

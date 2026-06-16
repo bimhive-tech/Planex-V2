@@ -1,10 +1,13 @@
 """Shared PDF helpers: font registration, Arabic shaping, color parsing."""
 import os
 import re
+from io import BytesIO
 
 import arabic_reshaper
 from bidi.algorithm import get_display
+from django.core.files.storage import default_storage
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -46,3 +49,14 @@ def hexcolor(value, fallback="#000000"):
         return colors.HexColor(value)
     except Exception:
         return colors.HexColor(fallback)
+
+
+def storage_image_reader(key):
+    """Read a private storage image into ReportLab without exposing its URL."""
+    if not key:
+        return None
+    try:
+        with default_storage.open(key, "rb") as f:
+            return ImageReader(BytesIO(f.read()))
+    except Exception:
+        return None

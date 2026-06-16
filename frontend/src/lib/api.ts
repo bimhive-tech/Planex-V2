@@ -65,6 +65,16 @@ async function upload<T>(path: string, file: File, field = "file"): Promise<T> {
   return data as T;
 }
 
+async function uploadApi<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", body: form });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = (data as ApiErrorBody | null)?.error;
+    throw new ApiError(res.status, err?.code ?? "error", err?.message ?? "Upload failed.", err?.details ?? null);
+  }
+  return data as T;
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "GET" }),
   post: <T>(path: string, json?: unknown, options?: RequestOptions) =>
@@ -76,6 +86,7 @@ export const api = {
   del: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: "DELETE" }),
   upload,
+  uploadApi,
 };
 
 /** Standard DRF page-number response shape. */

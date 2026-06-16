@@ -4,14 +4,17 @@ headings, a bordered project-info table, RTL bullet lists, and progress charts.
 Arabic text is reshaped + bidi-reordered so it renders right-to-left."""
 from io import BytesIO
 
+from django.core.files.storage import default_storage
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     HRFlowable,
+    Image,
     KeepTogether,
     NextPageTemplate,
     PageBreak,
@@ -135,6 +138,52 @@ def _data_table(cfg, styles, header, rows, col_widths=None):
     return t
 
 
+def _storage_image_flowable(key, max_width, max_height):
+    """Build a contained ReportLab Image flowable from private storage."""
+    if not key:
+        return None
+    try:
+        with default_storage.open(key, "rb") as f:
+            data = f.read()
+        reader = ImageReader(BytesIO(data))
+        iw, ih = reader.getSize()
+        scale = min(max_width / iw, max_height / ih)
+        return Image(BytesIO(data), width=iw * scale, height=ih * scale)
+    except Exception:
+        return None
+
+
+def _photo_grid(cfg, styles, photos, width):
+    """Reference-style bordered photo grid for uploaded site photos."""
+    if not photos:
+        return None
+    c = cfg["colors"]
+    cell_w = (width - 8 * mm) / 2
+    cell_h = 48 * mm
+    rows = []
+    for i in range(0, len(photos[:8]), 2):
+        row = []
+        for photo in photos[i:i + 2]:
+            img = _storage_image_flowable(photo.get("image"), cell_w - 6 * mm, cell_h - 12 * mm)
+            caption = Paragraph(shape(photo.get("caption") or ""), ParagraphStyle(
+                "photoCaption", parent=styles["muted"], alignment=TA_CENTER, fontSize=8, leading=10))
+            row.append([img or Paragraph("", styles["body"]), caption])
+        if len(row) == 1:
+            row.append([""])
+        rows.append(row)
+    table = Table(rows, colWidths=[cell_w, cell_w], hAlign="CENTER")
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return table
+
+
 def build_report_pdf(report, ctx) -> bytes:
     """Render `ctx` (from services.build_report_context) into PDF bytes."""
     ensure_fonts()
@@ -252,6 +301,11 @@ def build_report_pdf(report, ctx) -> bytes:
 
     if sections.get("notes") and p["notes"]:
         story.append(KeepTogether(_heading(styles, labels["notes"]) + [_aligned(styles["body"], p["notes"])]))
+
+    if sections.get("photos") and ctx.get("photos"):
+        grid = _photo_grid(cfg, styles, ctx["photos"], fw)
+        if grid:
+            story.append(KeepTogether(_heading(styles, labels["photos"]) + [grid]))
 
     doc.multiBuild(story)
     return buf.getvalue()

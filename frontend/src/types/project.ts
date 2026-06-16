@@ -76,6 +76,19 @@ export interface ProjectPerms {
   approve: boolean;
 }
 
+export type ProjectImageType = "site_photo" | "cover" | "logo_left" | "logo_right";
+
+export interface ProjectImage {
+  id: string;
+  image_type: ProjectImageType;
+  image_type_display: string;
+  caption: string;
+  sort_order: number;
+  url: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectMember {
   id: string;
   user_id: string;

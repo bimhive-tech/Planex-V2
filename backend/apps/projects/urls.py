@@ -14,6 +14,7 @@ from .structure_views import (
     ScopeListCreateView,
 )
 from .milestone_views import MilestoneDetailView, MilestoneListView
+from .image_views import ProjectImageDetailView, ProjectImageListCreateView
 from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
 from .team_views import (
     AssignableUsersView,
@@ -33,6 +34,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/zones/<uuid:zone_id>/grid/", ProjectZoneGridView.as_view(), name="project-zone-grid"),
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),
+    path("projects/<uuid:project_id>/images/", ProjectImageListCreateView.as_view(), name="project-images"),
+    path("projects/<uuid:project_id>/images/<uuid:pk>/", ProjectImageDetailView.as_view(), name="project-image"),
     path("projects/<uuid:project_id>/members/", ProjectMemberListView.as_view(), name="project-members"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/", ProjectMemberDetailView.as_view(), name="project-member"),
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),

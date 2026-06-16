@@ -3,7 +3,7 @@
 and the cover page — all matching the reference monthly report."""
 from reportlab.lib.units import mm
 
-from .pdf_base import BOLD, FONT_NAME, hexcolor, shape
+from .pdf_base import BOLD, FONT_NAME, hexcolor, shape, storage_image_reader
 
 # Geometry (kept here so the doc frame in pdf.py can mirror it).
 BORDER_INSET = 10 * mm
@@ -77,12 +77,19 @@ def draw_page_furniture(canvas, doc):
         canvas.line(inner_x + left_w, hy, inner_x + left_w, hy + HEADER_H)
         canvas.line(inner_x + left_w + center_w, hy, inner_x + left_w + center_w, hy + HEADER_H)
 
-        # Logo cells: text stand-ins (no logo images in our data).
+        # Logo cells: uploaded image first, text fallback until assets exist.
         canvas.setFillColor(hexcolor(cfg["colors"]["primary"]))
         canvas.setFont(BOLD, 12)
-        if header.get("org_left"):
+        left_logo = storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image"))
+        right_logo = storage_image_reader((ctx.get("logos", {}).get("right") or {}).get("image"))
+        if left_logo:
+            _draw_contained_image(canvas, left_logo, inner_x + 4 * mm, hy + 3 * mm, left_w - 8 * mm, HEADER_H - 6 * mm)
+        elif header.get("org_left"):
             canvas.drawCentredString(inner_x + left_w / 2, hy + HEADER_H / 2 - 4, shape(header["org_left"]))
-        if header.get("org_right"):
+        if right_logo:
+            _draw_contained_image(canvas, right_logo, inner_x + left_w + center_w + 4 * mm, hy + 3 * mm,
+                                  right_w - 8 * mm, HEADER_H - 6 * mm)
+        elif header.get("org_right"):
             canvas.drawCentredString(inner_x + left_w + center_w + right_w / 2, hy + HEADER_H / 2 - 4, shape(header["org_right"]))
 
         # Center: project name, bold, wrapped to two lines if needed.
@@ -126,6 +133,15 @@ def _centered_wrapped(canvas, text, x, width, y, height, font, size):
     canvas.drawCentredString(cx, y + height / 2 - size, line2)
 
 
+def _draw_contained_image(canvas, reader, x, y, width, height):
+    """Draw an image inside a cell without cropping or distorting it."""
+    iw, ih = reader.getSize()
+    scale = min(width / iw, height / ih)
+    dw, dh = iw * scale, ih * scale
+    canvas.drawImage(reader, x + (width - dw) / 2, y + (height - dh) / 2,
+                     width=dw, height=dh, preserveAspectRatio=True, mask="auto")
+
+
 def draw_cover(canvas, doc):
     """Cover page: maroon accent, report-number block, prepared-by, project title."""
     cfg, ctx = doc.cfg, doc.ctx
@@ -145,10 +161,19 @@ def draw_cover(canvas, doc):
 
     # Top-left org / logo stand-in.
     org = cfg["header"].get("org_left") or cover.get("org")
-    if org:
+    cover_logo = storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image"))
+    if cover_logo:
+        _draw_contained_image(canvas, cover_logo, BORDER_INSET + 6 * mm, h - BORDER_INSET - 24 * mm,
+                              36 * mm, 18 * mm)
+    elif org:
         canvas.setFillColor(hexcolor(cfg["colors"]["primary"]))
         canvas.setFont(BOLD, 18)
         canvas.drawString(BORDER_INSET + 6 * mm, h - BORDER_INSET - 16 * mm, shape(org))
+
+    cover_image = storage_image_reader((ctx.get("logos", {}).get("cover") or {}).get("image"))
+    if cover_image:
+        _draw_contained_image(canvas, cover_image, BORDER_INSET + 6 * mm, h * 0.22,
+                              w * 0.42, h * 0.28)
 
     # Report number + month, right-aligned near the accent bar.
     rx = bx - 6 * mm

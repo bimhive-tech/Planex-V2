@@ -35,6 +35,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "corsheaders",
+    "storages",
 ]
 
 LOCAL_APPS = [
@@ -146,6 +147,18 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
+
+# --- Private object storage (Cloudflare R2, S3-compatible) -----------------
+R2_ACCOUNT_ID = env("R2_ACCOUNT_ID", default="")
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_BUCKET = env("R2_BUCKET", default="")
+R2_ENDPOINT_URL = env("R2_ENDPOINT_URL", default="")
+R2_PRESIGNED_URL_EXPIRY = env.int("R2_PRESIGNED_URL_EXPIRY", default=900)
+MAX_UPLOAD_BYTES = env.int("MAX_UPLOAD_BYTES", default=10 * 1024 * 1024)
+
+if R2_BUCKET:
+    STORAGES["default"] = {"BACKEND": "config.storage_backends.PrivateR2Storage"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
