@@ -13,3 +13,7 @@ django-storages==1.14.4
 boto3==1.35.36
 # Excel parsing for Primavera / progress-tracker imports.
 openpyxl==3.1.5
+# PDF report generation (with Arabic shaping/bidi support).
+reportlab==4.2.5
+arabic-reshaper==3.0.0
+python-bidi==0.4.2

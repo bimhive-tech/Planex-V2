@@ -11,6 +11,8 @@ export const ROUTES = {
   login: "/login",
   dashboard: "/dashboard",
   settings: "/settings",
+  reports: "/reports",
+  reportTemplates: "/reports/templates",
   home: "/",
 } as const;
 

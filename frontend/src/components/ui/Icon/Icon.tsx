@@ -23,7 +23,9 @@ export type IconName =
   | "hash"
   | "money"
   | "flag"
-  | "clock";
+  | "clock"
+  | "reports"
+  | "download";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -153,6 +155,18 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </>
+  ),
+  reports: (
+    <>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5M8 13h8M8 17h6" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 3v12M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
     </>
   ),
 };
