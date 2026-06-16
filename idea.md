@@ -90,7 +90,7 @@ manage companies, manage platform).
 Defines the slice of the organization/project a user may work in. A site engineer
 may submit progress, but **only** for specific projects, zones, buildings, or areas
 assigned to them. A reviewer approves only within their responsibility. This makes
-Planex **role-based *and* scope-aware**. **[next — project scope assignments]**
+Planex **role-based *and* scope-aware**. **[built]** — members restricted to assigned zones.
 
 ### 4.3 Default & locked roles (per company)
 Every company is seeded with: **[built]**
@@ -200,7 +200,7 @@ happens outside the long DB write so status stays live.
 The most important daily flow. A site engineer opens a project, navigates to the
 correct place in the hierarchy (phase → zone → building? → area/room? → activity),
 and the system shows the **correct input form** based on the activity type
-(% or quantity). The engineer can add notes, remarks, and delay comments. **[next]**
+(% or quantity). The engineer can add notes, remarks, and delay comments. **[built]** (submit action).
 
 On submission Planex records: the submitted value, submitter identity, timestamp,
 attached remarks/delay notes, and the full project path. Editing happens in a
@@ -215,7 +215,7 @@ At submission the entry is **pending** — it does not yet change official figur
 ## 10. Approval Chain & State Logic
 
 Submitted progress is **not** automatically official. Planex separates raw
-submissions from accepted data with a sequential chain: **[next]**
+submissions from accepted data with a sequential chain: **[built]**
 
 1. **Engineer submits** → entry is *Pending Review*.
 2. **Reviewer reviews** → approves, or rejects with a required comment.
@@ -349,7 +349,7 @@ companies via a company selector; others are locked to their own company.
 | Approvals | Reviewer/PM queue to approve or reject pending submissions. |
 | Delays / Issues | Delay records, causes, affected scopes, remarks. |
 | Reports & Exports | Visual reports, monthly PDF, Primavera-compatible export. |
-| Team & Access | Members + project roles (PM/Reviewer/Engineer) **[built]**; per-user scope config **[next]**. |
+| Team & Access | Members + project roles **[built]**; per-user zone access **[built]**. |
 
 ---
 
@@ -370,9 +370,9 @@ dismiss only via their explicit close/cancel (not accidental outside-clicks).
 3. **Dashboard redesign** — once real metrics exist. **[later]**
 4. **Projects module** — Project Hub + create/edit drawer + project detail shell. **[built]**
 5. **Hierarchy** — Phase→Zone→Building→Area→Activity tree + Schedule tab + weighted
-   roll-up + progress donut. **[built]** · per-user scope assignments **[next]**
-6. **Fieldwork** — scoped progress entry (% / quantity), attachments (R2). **[next]**
-7. **Approvals** — reviewer → PM chain, statuses, resubmission, audit trail. **[next]**
+   roll-up + progress donut. **[built]** · per-user scope assignments **[built]**
+6. **Fieldwork** — scoped progress submission. **[built]** · attachments (R2) **[next]**
+7. **Approvals** — reviewer → PM chain, statuses, resubmission. **[built]** · audit trail **[next]**
 8. **Roll-up & overview** — weighted aggregation, planned vs actual, SPI. **[next]**
 9. **Delays & issues**, **notifications**. **[later]**
 10. **Excel zone-tracker import** → hierarchy + progress **[built]** · Primavera P6
