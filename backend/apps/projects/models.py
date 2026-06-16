@@ -95,6 +95,7 @@ class ProjectScope(TimestampedModel):
         ZONE = "zone", "Zone"
         BUILDING = "building", "Building"
         AREA = "area", "Area"
+        TASK = "task", "Task"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_scopes")
@@ -135,16 +136,18 @@ class Activity(TimestampedModel):
     progress_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     sort_order = models.PositiveIntegerField(default=0)
 
-    # Excel-grid support: a zone tracker stores one Activity per (task, subzone)
-    # cell. `row_index` identifies the task row (same value across its subzones)
-    # and `phase_name` groups task rows into sections.
+    # Excel-grid support. For zone trackers the tree is Zone -> Phase -> Task
+    # (Task is a scope); each Activity is a (task, subzone) cell whose `scope` is
+    # the Task scope and `subzone_code`/`subzone_index` place it in a grid column.
     phase_name = models.CharField(max_length=180, blank=True)
     row_index = models.PositiveIntegerField(default=0)
+    subzone_code = models.CharField(max_length=80, blank=True)
+    subzone_index = models.PositiveIntegerField(default=0)
 
     class Meta:
         indexes = [
             models.Index(fields=["project", "scope"]),
-            models.Index(fields=["scope", "row_index"]),
+            models.Index(fields=["scope", "subzone_index"]),
         ]
         ordering = ["sort_order", "name"]
 

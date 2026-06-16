@@ -88,40 +88,45 @@ class ProjectZoneGridView(APIView):
         except (ProjectScope.DoesNotExist, ValueError, TypeError):
             raise NotFound("Zone not found.")
 
-        # Subzones live under each phase (zone -> phase -> subzone). Columns are the
-        # distinct subzone names; cells from different phases land in different rows.
+        # Tree is Zone -> Phase -> Task; each task carries (subzone) cells. Rows are
+        # the task scopes; columns are the distinct subzone codes from the cells.
         phase_ids = list(zone.children.values_list("id", flat=True))
-        subzone_scopes = list(
-            ProjectScope.objects.filter(parent_id__in=phase_ids, scope_type=ProjectScope.ScopeType.AREA)
-            .order_by("sort_order", "name")
+        task_scopes = list(
+            ProjectScope.objects.filter(parent_id__in=phase_ids, scope_type=ProjectScope.ScopeType.TASK)
+            .select_related("parent").order_by("parent__sort_order", "sort_order")
         )
-        columns, col_of_name, col_of_scope = [], {}, {}
-        for sz in subzone_scopes:
-            if sz.name not in col_of_name:
-                col_of_name[sz.name] = len(columns)
-                columns.append({"id": str(sz.id), "name": sz.name})
-            col_of_scope[sz.id] = col_of_name[sz.name]
+        task_ids = [t.id for t in task_scopes]
+        acts = list(Activity.objects.filter(scope_id__in=task_ids)
+                    .values("id", "scope_id", "subzone_code", "subzone_index", "weight", "progress_percent"))
 
-        rows_by_index, order = {}, []
-        acts = (Activity.objects.filter(scope_id__in=col_of_scope.keys())
-                .order_by("row_index", "name")
-                .values("id", "scope_id", "name", "phase_name", "weight", "progress_percent", "row_index"))
+        # Columns: distinct subzone indices (ordered), mapped to their code/name.
+        index_name = {}
         for a in acts:
-            ri = a["row_index"]
-            row = rows_by_index.get(ri)
-            if row is None:
-                row = {"row_index": ri, "name": a["name"], "phase": a["phase_name"],
-                       "weight": str(a["weight"]), "cells": [None] * len(columns)}
-                rows_by_index[ri] = row
-                order.append(ri)
-            ci = col_of_scope.get(a["scope_id"])
-            if ci is not None:
-                row["cells"][ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
+            index_name.setdefault(a["subzone_index"], a["subzone_code"])
+        col_order = sorted(index_name)
+        col_pos = {idx: i for i, idx in enumerate(col_order)}
+        columns = [{"id": str(idx), "name": index_name[idx]} for idx in col_order]
+
+        by_task = {}
+        for a in acts:
+            by_task.setdefault(a["scope_id"], []).append(a)
+
+        rows = []
+        for i, t in enumerate(task_scopes):
+            cells = [None] * len(col_order)
+            weight = "1"
+            for a in by_task.get(t.id, []):
+                weight = str(a["weight"])
+                ci = col_pos.get(a["subzone_index"])
+                if ci is not None:
+                    cells[ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
+            rows.append({"row_index": i, "name": t.name, "phase": t.parent.name,
+                         "weight": weight, "cells": cells})
 
         return Response({
             "zone": {"id": str(zone.id), "name": zone.name},
             "subzones": columns,
-            "rows": [rows_by_index[i] for i in order],
+            "rows": rows,
         })
 
 

@@ -60,9 +60,9 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     setActionError(null);
     setImportMsg(null);
     try {
-      const r = await api.upload<{ zones: number; phases: number; subzones: number; activities: number; overall_progress: number }>(
+      const r = await api.upload<{ zones: number; phases: number; tasks: number; subzones: number; activities: number; overall_progress: number }>(
         `/upload/import/${projectId}`, file);
-      setImportMsg(`Imported ${r.zones} zones, ${r.phases} phases, ${r.subzones} subzones, ${r.activities} cells (${r.overall_progress}% overall). Open a zone’s grid to view it.`);
+      setImportMsg(`Imported ${r.zones} zones, ${r.phases} phases, ${r.tasks} tasks, ${r.subzones} subzones (${r.overall_progress}% overall). Open a zone’s grid for the subzone detail.`);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
@@ -201,8 +201,9 @@ interface NodeProps {
 
 function ScopeNode(props: NodeProps) {
   const { scope, depth, childrenOf, activitiesOf, progressOf, canManage } = props;
-  const [open, setOpen] = useState(true);
   const childScopes = childrenOf.get(scope.id) ?? [];
+  // Collapse nodes with many children by default (e.g. a phase with 90+ tasks).
+  const [open, setOpen] = useState(childScopes.length <= 25);
   const activities = activitiesOf.get(scope.id) ?? [];
   const hasChildren = childScopes.length > 0 || activities.length > 0;
   const pct = progressOf(scope.id);
