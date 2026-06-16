@@ -296,17 +296,21 @@ structured **Details** view and an optional movable-card **Canvas**.
 - **Planned-vs-actual** and **comparison** charts across zones/buildings/scopes.
 - **Delay/issue** reporting grouped to surface repeated causes and affected areas.
 
-### 14.4 Monthly PDF report **[later]**
-A shareable, client-ready export built **only from live data** (no faked values):
-cover (company logo, project/client/consultant/contractor details), actual/planned/
-**SPI** summary cards, planned-vs-actual chart, progress curve, zone chart, phase
-chart, zone & phase summary tables, task progress snapshot, delays/issues table,
-progress notes. Arabic text shaping is supported for imported names.
+### 14.4 Monthly PDF report **[built]**
+A shareable export built **only from live data** (no faked values): cover (title,
+project, report number, period, overall %), table of contents, executive summary,
+project information, overall progress, progress-by-zone table, milestones, and
+progress timeline. Running header (project + report no.) and page numbers.
+Arabic text shaping (reshaper + bidi, Amiri font) renders imported names RTL.
+Generated on demand from a saved Report (project + template + period) via
+`GET /api/reports/<id>/pdf/`. **[next]** charts/curves, SPI cards, delays table.
 
-### 14.5 Report/template builder **[later]**
-A **Template Builder** with a live A4 preview and controls for margins, header/footer
-guides, logo placement, secondary logo, page border, table styling, and rows-per-page.
-Templates can be created/activated/duplicated/reset per company.
+### 14.5 Report/template builder **[built]**
+A schema-driven **Template Builder** controlling the whole document: page size/
+orientation/margins, all colors, font sizes, cover, TOC, header/footer, section
+toggles, table styling, and every heading/column label (set Arabic for a fully
+Arabic report). Templates are company-scoped, named, default-able. **[next]**
+live A4 preview, logo upload (R2), duplicate/reset.
 
 ### 14.6 Primavera-compatible export **[later]**
 Export accepted progress back to the P6 Excel structure (see §8).
@@ -376,7 +380,7 @@ dismiss only via their explicit close/cancel (not accidental outside-clicks).
 8. **Roll-up & overview** — weighted aggregation, planned vs actual, SPI. **[next]**
 9. **Delays & issues**, **notifications**. **[later]**
 10. **Excel zone-tracker import** → hierarchy + progress **[built]** · Primavera P6
-    round-trip export, **reports & PDF**, **template builder** **[later]**
+    round-trip export **[later]**; **reports & PDF** + **template builder** **[built]**
 
 ---
 
