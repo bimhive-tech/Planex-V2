@@ -25,7 +25,19 @@ export type IconName =
   | "flag"
   | "clock"
   | "reports"
-  | "download";
+  | "download"
+  | "text"
+  | "heading"
+  | "image"
+  | "table"
+  | "list"
+  | "pageBreak"
+  | "spacer"
+  | "divider"
+  | "undo"
+  | "redo"
+  | "copy"
+  | "eye";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -167,6 +179,76 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M12 3v12M7 10l5 5 5-5" />
       <path d="M5 21h14" />
+    </>
+  ),
+  text: (
+    <>
+      <path d="M5 5h14M12 5v14M9 19h6" />
+    </>
+  ),
+  heading: (
+    <>
+      <path d="M5 19V5M19 19V5M5 12h14" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="8" cy="10" r="1.5" />
+      <path d="m21 16-5-5L5 19" />
+    </>
+  ),
+  table: (
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="1.5" />
+      <path d="M4 10h16M9 5v14M15 5v14" />
+    </>
+  ),
+  list: (
+    <>
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <path d="M4 6h.01M4 12h.01M4 18h.01" />
+    </>
+  ),
+  pageBreak: (
+    <>
+      <path d="M6 3h9l3 3v5M15 3v4h4" />
+      <path d="M4 14h16M6 21h12" />
+    </>
+  ),
+  spacer: (
+    <>
+      <path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
+    </>
+  ),
+  divider: (
+    <>
+      <path d="M4 12h16" />
+      <path d="M8 8h8M8 16h8" />
+    </>
+  ),
+  undo: (
+    <>
+      <path d="M9 7H4v5" />
+      <path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6" />
+    </>
+  ),
+  redo: (
+    <>
+      <path d="M15 7h5v5" />
+      <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.6" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <circle cx="12" cy="12" r="3" />
     </>
   ),
 };
