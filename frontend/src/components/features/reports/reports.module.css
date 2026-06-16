@@ -227,6 +227,13 @@
   color: inherit;
 }
 
+.builderCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 /* Builder tab panel + read-only data tables */
 .tabPanel {
   display: flex;

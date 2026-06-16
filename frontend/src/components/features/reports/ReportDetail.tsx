@@ -167,19 +167,19 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   </Button>
                 </div>
               </div>
-              <nav className={styles.tabs}>
-                {TABS.map((t) => (
-                  <button key={t.key} type="button"
-                    className={`${styles.tab} ${t.key === tab ? styles.tabActive : ""}`}
-                    onClick={() => setTab(t.key)}>
-                    {t.label}
-                  </button>
-                ))}
-              </nav>
             </header>
 
             <div className={styles.detailGrid}>
-              <div>
+              <div className={styles.builderCol}>
+                <nav className={styles.tabs}>
+                  {TABS.map((t) => (
+                    <button key={t.key} type="button"
+                      className={`${styles.tab} ${t.key === tab ? styles.tabActive : ""}`}
+                      onClick={() => setTab(t.key)}>
+                      {t.label}
+                    </button>
+                  ))}
+                </nav>
                 {tab === "setup" && canManage && (
                   <section className={styles.tabPanel}>
                     <div className={styles.fieldRow}>
