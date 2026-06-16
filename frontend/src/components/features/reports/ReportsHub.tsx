@@ -19,7 +19,6 @@ import styles from "./reports.module.css";
 export function ReportsHub({ canManage }: { canManage: boolean }) {
   const [page, setPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const { data, loading, error, reload } = useFetch(
@@ -27,11 +26,6 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
     [page],
   );
   const rows = data?.results ?? [];
-
-  function openCreate() {
-    setEditId(null);
-    setDrawerOpen(true);
-  }
 
   // Same-origin so the httpOnly auth cookie rides along; opens inline in a tab.
   function viewPdf(r: ReportRow) {
@@ -60,7 +54,7 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
             </p>
           </div>
           {canManage && (
-            <Button leadingIcon={<Icon name="plus" size={16} />} onClick={openCreate}>New report</Button>
+            <Button leadingIcon={<Icon name="plus" size={16} />} onClick={() => setDrawerOpen(true)}>New report</Button>
           )}
         </div>
         <nav className={styles.tabs}>
@@ -86,7 +80,6 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
               report={r}
               canManage={canManage}
               onView={viewPdf}
-              onEdit={(id) => { setEditId(id); setDrawerOpen(true); }}
               onDelete={handleDelete}
             />
           ))}
@@ -103,12 +96,7 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
         </div>
       )}
 
-      <ReportFormDrawer
-        open={drawerOpen}
-        reportId={editId}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={reload}
-      />
+      <ReportFormDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </div>
   );
 }

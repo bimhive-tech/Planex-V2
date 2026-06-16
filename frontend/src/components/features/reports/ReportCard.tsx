@@ -23,11 +23,10 @@ interface Props {
   report: ReportRow;
   canManage: boolean;
   onView: (r: ReportRow) => void;
-  onEdit: (id: string) => void;
   onDelete: (r: ReportRow) => void;
 }
 
-export function ReportCard({ report, canManage, onView, onEdit, onDelete }: Props) {
+export function ReportCard({ report, canManage, onView, onDelete }: Props) {
   return (
     <article className={styles.card}>
       <div className={styles.cardTop}>
@@ -56,9 +55,9 @@ export function ReportCard({ report, canManage, onView, onEdit, onDelete }: Prop
         </button>
         {canManage && (
           <>
-            <button className={styles.iconBtn} onClick={() => onEdit(report.id)} aria-label="Edit" title="Edit">
+            <Link className={styles.iconBtn} href={`${ROUTES.reports}/${report.id}`} aria-label="Open builder" title="Open builder">
               <Icon name="edit" size={16} />
-            </button>
+            </Link>
             <button
               className={`${styles.iconBtn} ${styles.danger}`}
               onClick={() => onDelete(report)}
