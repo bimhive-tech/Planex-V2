@@ -203,6 +203,67 @@ class ProjectApiTests(TestCase):
             content_type="application/json")
         self.assertEqual(resp.status_code, 403)
 
+    # ── Approval chain ────────────────────────────────────────────────────
+    def _activity(self):
+        p = Project.objects.create(company=self.company_a, name="Lab", project_type="commercial")
+        from .models import Activity, ProjectScope
+        zone = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z")
+        return p, Activity.objects.create(company=self.company_a, project=p, scope=zone, name="Pour",
+                                          weight=1, progress_percent=0)
+
+    def _grant(self, user, *perms):
+        role = Role.objects.create(company=self.company_a, name="R-" + "-".join(perms), permissions=list(perms))
+        Membership.objects.create(company=self.company_a, user=user, role=role)
+
+    def test_full_approval_chain_updates_activity(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        # admin already has all company perms (review + approve)
+        self.login("eng@acme.com")
+        r = self.client.post(f"/api/projects/{p.id}/submissions/",
+                             {"activity": str(act.id), "submitted_progress": "60"}, content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        sid = r.json()["id"]
+        self.assertEqual(r.json()["status"], "pending_review")
+
+        self.login("admin@acme.com")
+        rev = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                               {"decision": "approve"}, content_type="application/json")
+        self.assertEqual(rev.json()["status"], "pending_pm")
+        app = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/approve/",
+                               {"decision": "approve"}, content_type="application/json")
+        self.assertEqual(app.json()["status"], "accepted")
+        act.refresh_from_db()
+        self.assertEqual(float(act.progress_percent), 60.0)  # accepted -> official
+
+    def test_reject_requires_comment_and_keeps_progress(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng2@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login("eng2@acme.com")
+        sid = self.client.post(f"/api/projects/{p.id}/submissions/",
+                               {"activity": str(act.id), "submitted_progress": "50"},
+                               content_type="application/json").json()["id"]
+        self.login("admin@acme.com")
+        no_comment = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                                      {"decision": "reject"}, content_type="application/json")
+        self.assertEqual(no_comment.status_code, 400)
+        ok = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                              {"decision": "reject", "comment": "Recheck zone B"}, content_type="application/json")
+        self.assertEqual(ok.json()["status"], "reviewer_rejected")
+        act.refresh_from_db()
+        self.assertEqual(float(act.progress_percent), 0.0)  # unchanged
+
+    def test_viewer_cannot_submit(self):
+        p, act = self._activity()
+        self.login("viewer@acme.com")
+        r = self.client.post(f"/api/projects/{p.id}/submissions/",
+                             {"activity": str(act.id), "submitted_progress": "10"}, content_type="application/json")
+        self.assertEqual(r.status_code, 403)
+
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")

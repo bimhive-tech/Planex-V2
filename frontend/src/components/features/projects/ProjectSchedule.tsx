@@ -22,10 +22,11 @@ const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", bui
 interface Props {
   projectId: string;
   canManage: boolean;
+  canSubmit: boolean;
   onStatsChange: (stats: { overall: number; breakdown: { total: number; completed: number; in_progress: number; not_started: number } }) => void;
 }
 
-export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) {
+export function ProjectSchedule({ projectId, canManage, canSubmit, onStatsChange }: Props) {
   const { data, loading, error, reload } = useFetch(
     () => api.get<ProjectStructure>(`/projects/${projectId}/structure/`),
     [projectId],
@@ -133,7 +134,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
               key={s.id} scope={s} depth={0}
               projectId={projectId}
               childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
-              canManage={canManage}
+              canManage={canManage} canSubmit={canSubmit}
               onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
               onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
               onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
@@ -173,6 +174,7 @@ interface NodeProps {
   progressOf: (scopeId: string) => number;
   activityCountOf: Record<string, number>;
   canManage: boolean;
+  canSubmit: boolean;
   onAddScope: (parentId: string, type: string) => void;
   onEditScope: (scope: Scope) => void;
   onDeleteScope: (scope: Scope) => void;
@@ -238,7 +240,8 @@ function ScopeNode(props: NodeProps) {
           {childScopes.length === 0 && activityCount > 0 && (
             <ScopeActivities
               projectId={props.projectId} scopeId={scope.id} depth={depth + 1}
-              canManage={canManage} onEdit={props.onEditActivity} onChanged={props.onChanged}
+              canManage={canManage} canSubmit={props.canSubmit}
+              onEdit={props.onEditActivity} onChanged={props.onChanged}
             />
           )}
         </>

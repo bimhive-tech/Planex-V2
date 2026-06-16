@@ -15,7 +15,8 @@ import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { ProjectTeam } from "./ProjectTeam";
-import type { ProgressBreakdown, ProjectDetail } from "@/types/project";
+import { ProjectApprovals } from "./ProjectApprovals";
+import type { ProgressBreakdown, ProjectDetail, ProjectPerms } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
 
 export interface ProjectStats {
@@ -23,8 +24,7 @@ export interface ProjectStats {
   breakdown: ProgressBreakdown;
 }
 
-const TABS = ["Overview", "Schedule", "Team"] as const;
-type Tab = (typeof TABS)[number];
+type Tab = "Overview" | "Schedule" | "Team" | "Approvals";
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
@@ -35,8 +35,10 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
   );
 }
 
-export function ProjectWorkspace({ project, canManage }: { project: ProjectDetail; canManage: boolean }) {
+export function ProjectWorkspace({ project, canManage, perms }: { project: ProjectDetail; canManage: boolean; perms: ProjectPerms }) {
   const router = useRouter();
+  const showApprovals = perms.review || perms.approve || perms.submit;
+  const tabs: Tab[] = ["Overview", "Schedule", "Team", ...(showApprovals ? (["Approvals"] as Tab[]) : [])];
   const [tab, setTab] = useState<Tab>("Overview");
   const [editOpen, setEditOpen] = useState(false);
   const [stats, setStats] = useState<ProjectStats>({
@@ -76,9 +78,12 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
       </header>
 
       <nav className={styles.tabs}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t} className={`${styles.tab} ${tab === t ? styles.active : ""}`} onClick={() => setTab(t)}>
             {t}
+            {t === "Approvals" && project.open_submission_count > 0 && (
+              <span className={styles.tabBadge}>{project.open_submission_count}</span>
+            )}
           </button>
         ))}
       </nav>
@@ -86,9 +91,12 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
       <div className={styles.content}>
         {tab === "Overview" && <ProjectOverview project={project} stats={stats} canManage={canManage} />}
         {tab === "Schedule" && (
-          <ProjectSchedule projectId={project.id} canManage={canManage} onStatsChange={setStats} />
+          <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} onStatsChange={setStats} />
         )}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
+        {tab === "Approvals" && (
+          <ProjectApprovals projectId={project.id} perms={perms} onChanged={() => router.refresh()} />
+        )}
       </div>
 
       <ProjectFormDrawer

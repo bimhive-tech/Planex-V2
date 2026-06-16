@@ -16,6 +16,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const project = await getProject(id);
   if (!project) notFound();
 
-  const canManage = user.is_platform_admin || user.permissions.includes(Permission.MANAGE_PROJECTS);
-  return <ProjectWorkspace project={project} canManage={canManage} />;
+  const has = (perm: string) => user.is_platform_admin || user.permissions.includes(perm);
+  const perms = {
+    manage: has(Permission.MANAGE_PROJECTS),
+    submit: has(Permission.SUBMIT_PROGRESS),
+    review: has(Permission.REVIEW_PROGRESS),
+    approve: has(Permission.APPROVE_PROGRESS),
+  };
+  return <ProjectWorkspace project={project} canManage={perms.manage} perms={perms} />;
 }

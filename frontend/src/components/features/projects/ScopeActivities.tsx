@@ -8,6 +8,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { api, ApiError } from "@/lib/api";
 import type { Activity } from "@/types/project";
+import { SubmitProgressModal } from "./SubmitProgressModal";
 import styles from "./scheduleTree.module.css";
 
 interface Props {
@@ -15,13 +16,15 @@ interface Props {
   scopeId: string;
   depth: number;
   canManage: boolean;
+  canSubmit: boolean;
   onEdit: (activity: Activity) => void;
   onChanged: () => void; // refresh roll-ups (progress bars) upstream
 }
 
-export function ScopeActivities({ projectId, scopeId, depth, canManage, onEdit, onChanged }: Props) {
+export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmit, onEdit, onChanged }: Props) {
   const [acts, setActs] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitFor, setSubmitFor] = useState<Activity | null>(null);
 
   async function load() {
     try {
@@ -83,18 +86,33 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, onEdit, 
           ) : (
             <span className={`${styles.pct} tnum`}>{Math.round(Number(a.progress_percent))}%</span>
           )}
-          {canManage && (
+          {(canSubmit || canManage) && (
             <div className={styles.actions}>
-              <button className={styles.actionBtn} aria-label="Edit task" onClick={() => onEdit(a)}>
-                <Icon name="edit" size={14} />
-              </button>
-              <button className={`${styles.actionBtn} ${styles.danger}`} aria-label="Delete task" onClick={() => remove(a)}>
-                <Icon name="trash" size={14} />
-              </button>
+              {canSubmit && (
+                <button className={styles.submitBtn} title="Submit progress for review" onClick={() => setSubmitFor(a)}>
+                  Submit
+                </button>
+              )}
+              {canManage && (
+                <>
+                  <button className={styles.actionBtn} aria-label="Edit task" onClick={() => onEdit(a)}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button className={`${styles.actionBtn} ${styles.danger}`} aria-label="Delete task" onClick={() => remove(a)}>
+                    <Icon name="trash" size={14} />
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
       ))}
+      {submitFor && (
+        <SubmitProgressModal
+          projectId={projectId} activity={submitFor}
+          onClose={() => setSubmitFor(null)} onSubmitted={onChanged}
+        />
+      )}
     </>
   );
 }

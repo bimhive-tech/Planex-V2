@@ -84,6 +84,45 @@ class ProgressSnapshot(TimestampedModel):
         return f"{self.project.name} @ {self.date}"
 
 
+class ProgressSubmission(TimestampedModel):
+    """Field progress that moves through the review/approval chain. Only an
+    accepted submission updates the activity's official progress."""
+
+    class Status(models.TextChoices):
+        PENDING_REVIEW = "pending_review", "Pending Review"
+        REVIEWER_REJECTED = "reviewer_rejected", "Reviewer Rejected"
+        PENDING_PM = "pending_pm", "Pending PM Approval"
+        PM_REJECTED = "pm_rejected", "PM Rejected"
+        ACCEPTED = "accepted", "Accepted"
+
+    OPEN_STATES = (Status.PENDING_REVIEW, Status.PENDING_PM)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="progress_submissions")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="submissions")
+    activity = models.ForeignKey("Activity", on_delete=models.CASCADE, related_name="submissions")
+
+    submitted_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="submitted_progress")
+    reviewed_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_progress")
+    approved_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_progress")
+
+    previous_progress = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    submitted_progress = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_REVIEW)
+    note = models.TextField(blank=True)            # submitter note
+    review_comment = models.TextField(blank=True)  # reviewer/PM comment (required on reject)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["project", "status"]),
+            models.Index(fields=["activity", "status"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.activity.name} → {self.submitted_progress}% ({self.get_status_display()})"
+
+
 class Milestone(TimestampedModel):
     """A key project milestone (kickoff, design approval, handover, ...)."""
 

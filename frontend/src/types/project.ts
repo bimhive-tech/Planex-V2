@@ -46,8 +46,34 @@ export interface ProjectDetail {
   progress_breakdown: ProgressBreakdown;
   manager_name: string;
   team_count: number;
+  open_submission_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectSubmission {
+  id: string;
+  activity: string;
+  activity_name: string;
+  activity_path: string;
+  previous_progress: string;
+  submitted_progress: string;
+  status: string;
+  status_display: string;
+  note: string;
+  review_comment: string;
+  submitted_by_name: string;
+  reviewed_by_name: string;
+  approved_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectPerms {
+  manage: boolean;
+  submit: boolean;
+  review: boolean;
+  approve: boolean;
 }
 
 export interface ProjectMember {

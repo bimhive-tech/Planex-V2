@@ -105,7 +105,8 @@
   flex-shrink: 0;
 }
 
-.gridBtn {
+.gridBtn,
+.submitBtn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -117,7 +118,8 @@
   background: var(--primary-soft);
   border-radius: var(--radius-sm);
 }
-.gridBtn:hover {
+.gridBtn:hover,
+.submitBtn:hover {
   background: var(--primary);
   color: #fff;
 }
