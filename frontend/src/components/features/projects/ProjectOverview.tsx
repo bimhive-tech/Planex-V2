@@ -6,6 +6,7 @@ import { ProgressDonut } from "@/components/ui/ProgressDonut";
 import { formatDate } from "@/lib/format";
 import type { ProjectDetail } from "@/types/project";
 import type { ProjectStats } from "./ProjectWorkspace";
+import { MilestonesPanel } from "./MilestonesPanel";
 import styles from "./projectOverview.module.css";
 
 const DAY = 1000 * 60 * 60 * 24;
@@ -63,7 +64,7 @@ function StatusBar({ tone, label, count, pct }: { tone: string; label: string; c
   );
 }
 
-export function ProjectOverview({ project: p, stats }: { project: ProjectDetail; stats: ProjectStats }) {
+export function ProjectOverview({ project: p, stats, canManage }: { project: ProjectDetail; stats: ProjectStats; canManage: boolean }) {
   const t = timeline(p.planned_start, p.planned_finish);
   const b = stats.breakdown;
   const pct = (n: number) => (b.total ? Math.round((n / b.total) * 100) : 0);
@@ -164,6 +165,8 @@ export function ProjectOverview({ project: p, stats }: { project: ProjectDetail;
           )}
         </section>
       )}
+
+      <MilestonesPanel projectId={p.id} canManage={canManage} />
     </div>
   );
 }

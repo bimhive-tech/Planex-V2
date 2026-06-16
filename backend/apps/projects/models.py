@@ -60,6 +60,30 @@ class Project(TimestampedModel):
         return self.name
 
 
+class Milestone(TimestampedModel):
+    """A key project milestone (kickoff, design approval, handover, ...)."""
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        IN_PROGRESS = "in_progress", "In Progress"
+        UPCOMING = "upcoming", "Upcoming"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="milestones")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="milestones")
+    title = models.CharField(max_length=180)
+    date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.UPCOMING)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "sort_order"])]
+        ordering = ["sort_order", "date"]
+
+    def __str__(self):
+        return self.title
+
+
 class ProjectMember(TimestampedModel):
     """A company user assigned to a project, with a project-level role."""
 

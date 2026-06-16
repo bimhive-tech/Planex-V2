@@ -199,6 +199,27 @@ class ProjectApiTests(TestCase):
             content_type="application/json")
         self.assertEqual(resp.status_code, 403)
 
+    # ── Milestones ────────────────────────────────────────────────────────
+    def test_milestones_crud_and_permissions(self):
+        p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")
+        self.login("admin@acme.com")
+        resp = self.client.post(
+            f"/api/projects/{p.id}/milestones/",
+            {"title": "Kickoff", "date": "2026-01-10", "status": "completed"},
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["status_display"], "Completed")
+        mid = resp.json()["id"]
+        self.assertEqual(len(self.client.get(f"/api/projects/{p.id}/milestones/").json()), 1)
+        self.assertEqual(self.client.delete(f"/api/projects/{p.id}/milestones/{mid}/").status_code, 204)
+
+    def test_viewer_cannot_add_milestone(self):
+        p = Project.objects.create(company=self.company_a, name="Resort2", project_type="commercial")
+        self.login("viewer@acme.com")
+        resp = self.client.post(f"/api/projects/{p.id}/milestones/", {"title": "X"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
     def test_assignable_users_excludes_existing_members(self):
         p = Project.objects.create(company=self.company_a, name="Plaza", project_type="commercial")
         self.login("admin@acme.com")

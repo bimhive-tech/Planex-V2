@@ -84,7 +84,7 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
       </nav>
 
       <div className={styles.content}>
-        {tab === "Overview" && <ProjectOverview project={project} stats={stats} />}
+        {tab === "Overview" && <ProjectOverview project={project} stats={stats} canManage={canManage} />}
         {tab === "Schedule" && (
           <ProjectSchedule projectId={project.id} canManage={canManage} onStatsChange={setStats} />
         )}

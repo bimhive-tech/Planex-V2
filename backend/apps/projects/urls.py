@@ -11,6 +11,7 @@ from .structure_views import (
     ScopeDetailView,
     ScopeListCreateView,
 )
+from .milestone_views import MilestoneDetailView, MilestoneListView
 from .team_views import (
     AssignableUsersView,
     ProjectMemberDetailView,
@@ -29,6 +30,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/members/", ProjectMemberListView.as_view(), name="project-members"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/", ProjectMemberDetailView.as_view(), name="project-member"),
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
+    path("projects/<uuid:project_id>/milestones/", MilestoneListView.as_view(), name="project-milestones"),
+    path("projects/<uuid:project_id>/milestones/<uuid:milestone_id>/", MilestoneDetailView.as_view(), name="project-milestone"),
     path("projects/<uuid:project_id>/scopes/", ScopeListCreateView.as_view(), name="scope-create"),
     path("projects/<uuid:project_id>/scopes/<uuid:scope_id>/", ScopeDetailView.as_view(), name="scope-detail"),
     path("projects/<uuid:project_id>/activities/", ActivityListCreateView.as_view(), name="activity-create"),
