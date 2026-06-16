@@ -153,35 +153,58 @@ def _storage_image_flowable(key, max_width, max_height):
         return None
 
 
-def _photo_grid(cfg, styles, photos, width):
-    """Reference-style bordered photo grid for uploaded site photos."""
-    if not photos:
-        return None
+def _caption_style(styles):
+    return ParagraphStyle("photoCaption", parent=styles["muted"], alignment=TA_CENTER, fontSize=8, leading=11)
+
+
+def _photo_page_table(cfg, styles, photos, width, height):
+    """One 2×2 bordered photo grid (up to 4 photos) sized to fill the page."""
     c = cfg["colors"]
-    cell_w = (width - 8 * mm) / 2
-    cell_h = 48 * mm
+    cell_w = (width - 6 * mm) / 2
+    cell_h = (height - 14 * mm) / 2  # two rows fill the frame below the heading
     rows = []
-    for i in range(0, len(photos[:8]), 2):
+    for i in range(0, len(photos), 2):
         row = []
         for photo in photos[i:i + 2]:
             img = _storage_image_flowable(photo.get("image"), cell_w - 6 * mm, cell_h - 12 * mm)
-            caption = Paragraph(shape(photo.get("caption") or ""), ParagraphStyle(
-                "photoCaption", parent=styles["muted"], alignment=TA_CENTER, fontSize=8, leading=10))
+            caption = Paragraph(shape(photo.get("caption") or ""), _caption_style(styles))
             row.append([img or Paragraph("", styles["body"]), caption])
         if len(row) == 1:
             row.append([""])
         rows.append(row)
-    table = Table(rows, colWidths=[cell_w, cell_w], hAlign="CENTER")
+    table = Table(rows, colWidths=[cell_w, cell_w], rowHeights=[cell_h] * len(rows), hAlign="CENTER")
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     return table
+
+
+def _photo_section(cfg, styles, photos, width, height, heading_text):
+    """Progress-photo pages — 4 photos (2×2) per page, like the reference."""
+    flow = []
+    for page_i in range(0, len(photos), 4):
+        chunk = photos[page_i:page_i + 4]
+        flow.append(PageBreak())  # each set of 4 gets its own page
+        flow += _heading(styles, heading_text)  # fresh flowables per page
+        flow.append(_photo_page_table(cfg, styles, chunk, width, height - 24 * mm))
+    return flow
+
+
+def _attachment_section(cfg, styles, attachments, width, height, heading_text):
+    """Attachments — one image per page, scaled to fill it."""
+    flow = []
+    for i, att in enumerate(attachments):
+        flow.append(PageBreak())
+        if i == 0:
+            flow += _heading(styles, heading_text)
+        img = _storage_image_flowable(att.get("image"), width, height - 30 * mm)
+        flow.append(img or Paragraph("", styles["body"]))
+        if att.get("caption"):
+            flow += [Spacer(1, 4), Paragraph(shape(att["caption"]), _caption_style(styles))]
+    return flow
 
 
 def build_report_pdf(report, ctx) -> bytes:
@@ -303,9 +326,11 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(KeepTogether(_heading(styles, labels["notes"]) + [_aligned(styles["body"], p["notes"])]))
 
     if sections.get("photos") and ctx.get("photos"):
-        grid = _photo_grid(cfg, styles, ctx["photos"], fw)
-        if grid:
-            story.append(KeepTogether(_heading(styles, labels["photos"]) + [grid]))
+        story += _photo_section(cfg, styles, ctx["photos"], fw, fh, labels["photos"])
+
+    if sections.get("attachments") and ctx.get("attachments"):
+        story += _attachment_section(cfg, styles, ctx["attachments"], fw, fh,
+                                     labels.get("attachments", "Attachments"))
 
     doc.multiBuild(story)
     return buf.getvalue()

@@ -19,6 +19,7 @@ export interface ReportRow {
   id: string;
   title: string;
   report_number: string;
+  report_date: string | null;
   status: ReportStatus;
   project: string;
   project_name: string;
@@ -26,5 +27,19 @@ export interface ReportRow {
   template_name: string | null;
   period_start: string | null;
   period_finish: string | null;
+  description: string;
+  created_at: string;
+}
+
+// Per-report content image (cover / progress photo / attachment).
+export type ReportImageKind = "cover" | "progress" | "attachment";
+
+export interface ReportImage {
+  id: string;
+  kind: ReportImageKind;
+  kind_display: string;
+  caption: string;
+  sort_order: number;
+  url: string;
   created_at: string;
 }

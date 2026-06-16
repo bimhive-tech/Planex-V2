@@ -19,7 +19,13 @@ const IMAGE_TYPES: { value: ProjectImageType; label: string }[] = [
   { value: "logo_right", label: "Right logo" },
 ];
 
-export function ProjectReportAssets({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+interface Props {
+  projectId: string;
+  canManage: boolean;
+  onChanged?: () => void; // notify parent (e.g. to refresh a PDF preview)
+}
+
+export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) {
   const [imageType, setImageType] = useState<ProjectImageType>("site_photo");
   const [caption, setCaption] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -46,6 +52,7 @@ export function ProjectReportAssets({ projectId, canManage }: { projectId: strin
       setFile(null);
       setCaption("");
       reload();
+      onChanged?.();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Couldn't upload image.");
     } finally {
@@ -58,6 +65,7 @@ export function ProjectReportAssets({ projectId, canManage }: { projectId: strin
     try {
       await api.del(`/projects/${projectId}/images/${image.id}/`);
       reload();
+      onChanged?.();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Couldn't delete image.");
     }

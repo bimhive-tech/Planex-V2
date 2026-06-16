@@ -143,6 +143,11 @@ USE_TZ = True
 # --- Static files (Django admin / DRF browsable API only) ------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Local media (used only when R2 isn't configured — e.g. dev). Private images
+# are never served from here directly; they stream through an authed endpoint.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},

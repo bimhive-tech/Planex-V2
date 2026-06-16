@@ -159,7 +159,11 @@ class ProjectImageSerializer(serializers.ModelSerializer):
         ]
 
     def get_url(self, obj):
-        return obj.image.url if obj.image else ""
+        # Stream through the authed endpoint (works for filesystem + R2, stays
+        # private). `/api` is the app's fixed proxy mount (Next rewrites it).
+        if not obj.image:
+            return ""
+        return f"/api/projects/{obj.project_id}/images/{obj.id}/file/"
 
 
 class ProjectImageUploadSerializer(serializers.ModelSerializer):

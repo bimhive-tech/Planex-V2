@@ -1,8 +1,11 @@
 "use client";
 
-// Template Builder workspace: palette, document preview, and config inspector.
+// Template Builder: page-type tabs (Cover, TOC, Project Info, Description,
+// Progress Report, Progress Images, Attachments, Design). The left "Pages" list
+// shows/hides pages, the centre shows a live preview, and the right inspector
+// edits the active page's real properties — every change feeds the PDF.
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -13,24 +16,14 @@ import { useFetch } from "@/hooks/useFetch";
 import { BUILDER_SECTIONS, getPath, setPath } from "@/lib/reportTemplate";
 import type { ReportConfig, ReportTemplate } from "@/types/report";
 import { BuilderField } from "./BuilderField";
+import { BuilderPreview } from "./BuilderPreview";
 import styles from "./builder.module.css";
-
-const ELEMENTS = [
-  { label: "Text", icon: "text" },
-  { label: "Heading", icon: "heading" },
-  { label: "Image", icon: "image" },
-  { label: "Table", icon: "table" },
-  { label: "Key-Value List", icon: "list" },
-  { label: "Page Break", icon: "pageBreak" },
-  { label: "Spacer", icon: "spacer" },
-  { label: "Divider", icon: "divider" },
-] as const;
 
 export function TemplateBuilder({ templateId }: { templateId: string }) {
   const [name, setName] = useState("");
   const [isDefault, setIsDefault] = useState(false);
   const [config, setConfig] = useState<ReportConfig>({});
-  const [activeSection, setActiveSection] = useState(BUILDER_SECTIONS[0].title);
+  const [activeKey, setActiveKey] = useState(BUILDER_SECTIONS[0].key);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -62,17 +55,7 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
     }
   }
 
-  function handlePreview() {
-    window.open(ROUTES.reports, "_blank", "noopener");
-  }
-
-  const section = BUILDER_SECTIONS.find((item) => item.title === activeSection) ?? BUILDER_SECTIONS[0];
-  const headingColor = String(getPath(config, "colors.section_heading") ?? getPath(config, "colors.heading") ?? "#534AB7");
-  const tableColor = String(getPath(config, "colors.table_header_bg") ?? "#534AB7");
-  const previewStyle = {
-    "--preview-heading": headingColor,
-    "--preview-table": tableColor,
-  } as CSSProperties;
+  const section = BUILDER_SECTIONS.find((s) => s.key === activeKey) ?? BUILDER_SECTIONS[0];
 
   return (
     <div className={styles.page}>
@@ -86,34 +69,30 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
             <input
               className={styles.nameInput}
               value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setSaved(false);
-              }}
+              onChange={(e) => { setName(e.target.value); setSaved(false); }}
               aria-label="Template name"
             />
-            <span className={styles.badge}>Draft</span>
             <span className={saved ? styles.saved : styles.unsaved}>
               {saved ? "All changes saved" : "Unsaved changes"}
             </span>
           </div>
           <div className={styles.barActions}>
-            <Button variant="secondary" leadingIcon={<Icon name="eye" size={16} />} onClick={handlePreview}>Preview</Button>
-            <Button variant="secondary" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save as Draft"}
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>Publish</Button>
+            <label className={styles.defaultToggle}>
+              <input type="checkbox" checked={isDefault} onChange={(e) => { setIsDefault(e.target.checked); setSaved(false); }} />
+              Default
+            </label>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
           </div>
         </div>
-        <nav className={styles.tabs} aria-label="Template builder sections">
-          {BUILDER_SECTIONS.slice(0, 4).map((item) => (
+        <nav className={styles.tabs} aria-label="Report pages">
+          {BUILDER_SECTIONS.map((s) => (
             <button
-              key={item.title}
-              className={`${styles.tab} ${item.title === activeSection ? styles.tabActive : ""}`}
-              onClick={() => setActiveSection(item.title)}
+              key={s.key}
+              className={`${styles.tab} ${s.key === activeKey ? styles.tabActive : ""}`}
+              onClick={() => setActiveKey(s.key)}
               type="button"
             >
-              {item.title === "Page" ? "Builder" : item.title}
+              {s.title}
             </button>
           ))}
         </nav>
@@ -123,14 +102,29 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
 
       <StateView loading={loading} error={error} isEmpty={false} onRetry={reload}>
         <div className={styles.workspace}>
-          <aside className={styles.palette} aria-label="Report elements">
-            <h2 className={styles.panelTitle}>Add Elements</h2>
-            <p className={styles.panelHint}>Drag and drop elements to build your template.</p>
-            <div className={styles.elementList}>
-              {ELEMENTS.map((item) => (
-                <button className={styles.elementBtn} type="button" key={item.label}>
-                  <Icon name={item.icon} size={16} />
-                  <span>{item.label}</span>
+          <aside className={styles.palette} aria-label="Report pages">
+            <h2 className={styles.panelTitle}>Pages</h2>
+            <p className={styles.panelHint}>Tick to include a page; click to edit it.</p>
+            <div className={styles.pageList}>
+              {BUILDER_SECTIONS.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  className={`${styles.pageRow} ${s.key === activeKey ? styles.pageRowActive : ""}`}
+                  onClick={() => setActiveKey(s.key)}
+                >
+                  {s.enablePath ? (
+                    <input
+                      type="checkbox"
+                      checked={Boolean(getPath(config, s.enablePath))}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => update(s.enablePath as string, e.target.checked)}
+                      aria-label={`Include ${s.title}`}
+                    />
+                  ) : (
+                    <Icon name="settings" size={14} />
+                  )}
+                  <span className={styles.pageRowLabel}>{s.title}</span>
                 </button>
               ))}
             </div>
@@ -138,86 +132,27 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
 
           <main className={styles.canvasArea}>
             <div className={styles.canvasTools}>
-              <div className={styles.toolGroup}>
-                <button className={styles.toolBtn} type="button" title="Undo"><Icon name="undo" size={16} /></button>
-                <button className={styles.toolBtn} type="button" title="Redo"><Icon name="redo" size={16} /></button>
-                <button className={styles.toolBtn} type="button" title="Duplicate"><Icon name="copy" size={16} /></button>
-                <button className={styles.toolBtn} type="button" title="Delete"><Icon name="trash" size={16} /></button>
-              </div>
-              <span className={styles.paperSelect}>A4 Portrait</span>
+              <span className={styles.paperSelect}>{section.title}</span>
+              <span className={styles.paperSelect}>
+                {String(getPath(config, "page.size") ?? "A4")} {String(getPath(config, "page.orientation") ?? "portrait")}
+              </span>
             </div>
-            <section className={styles.paper} style={previewStyle} aria-label="Report preview">
-              <div className={styles.logoRow}>
-                <div className={styles.logoMark}>MCG</div>
-                <div className={styles.logoMark}>SINAI</div>
-              </div>
-              <h2 className={styles.previewTitle}>{String(getPath(config, "cover.title") || name || "Monthly Progress Report")}</h2>
-              <dl className={styles.infoGrid}>
-                <dt>Project:</dt><dd>{"{{Project Name}}"}</dd>
-                <dt>Report No.:</dt><dd>{"{{Report Number}}"}</dd>
-                <dt>Reporting Period:</dt><dd>{"{{From Date}} - {{To Date}}"}</dd>
-                <dt>Prepared By:</dt><dd>{"{{Prepared By}}"}</dd>
-                <dt>Date:</dt><dd>{"{{Report Date}}"}</dd>
-              </dl>
-              <div className={styles.previewBlock}>
-                <h3>1. {String(getPath(config, "labels.summary") || "Executive Summary")}</h3>
-                <p>{"{{Executive Summary}}"}</p>
-              </div>
-              <div className={styles.previewBlock}>
-                <h3>2. {String(getPath(config, "labels.progress_overview") || "Overall Progress")}</h3>
-                <table className={styles.previewTable}>
-                  <thead>
-                    <tr><th>Work Package</th><th>Planned %</th><th>Actual %</th><th>Variance</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr><td>{"{{Table}}"}</td><td>82%</td><td>78%</td><td>-4%</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            <div className={styles.pageStepper}>
-              <button className={styles.toolBtn} type="button" aria-label="Previous page">
-                <Icon name="chevronDown" size={16} className={styles.prevIcon} />
-              </button>
-              <span>1 / 6</span>
-              <button className={styles.toolBtn} type="button" aria-label="Next page">
-                <Icon name="chevronDown" size={16} className={styles.nextIcon} />
-              </button>
-            </div>
+            <BuilderPreview config={config} pageKey={section.key} name={name} />
           </main>
 
-          <aside className={styles.inspector} aria-label="Element properties">
-            <div className={styles.inspectorHead}>
-              <h2 className={styles.panelTitle}>Element Properties</h2>
-              <label className={styles.defaultToggle}>
-                <input
-                  type="checkbox"
-                  checked={isDefault}
-                  onChange={(e) => {
-                    setIsDefault(e.target.checked);
-                    setSaved(false);
-                  }}
-                />
-                Default
-              </label>
-            </div>
-            <div className={styles.sectionPicker}>
-              {BUILDER_SECTIONS.map((item) => (
-                <button
-                  key={item.title}
-                  className={`${styles.pickerBtn} ${item.title === activeSection ? styles.pickerActive : ""}`}
-                  onClick={() => setActiveSection(item.title)}
-                  type="button"
-                >
-                  {item.title}
-                </button>
-              ))}
-            </div>
+          <aside className={styles.inspector} aria-label="Page properties">
             <div className={styles.sectionHead}>
               <h3 className={styles.sectionTitle}>{section.title}</h3>
               {section.hint && <p className={styles.sectionHint}>{section.hint}</p>}
             </div>
             <div className={styles.fields}>
+              {section.enablePath && (
+                <BuilderField
+                  field={{ path: section.enablePath, label: `Show ${section.title} page`, type: "toggle" }}
+                  value={getPath(config, section.enablePath)}
+                  onChange={(value) => update(section.enablePath as string, value)}
+                />
+              )}
               {section.fields.map((field) => (
                 <BuilderField
                   key={field.path}

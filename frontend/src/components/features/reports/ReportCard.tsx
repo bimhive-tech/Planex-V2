@@ -1,7 +1,10 @@
 // One generated report: title, project, period, status badge, and actions
-// (view/download PDF, edit, delete).
+// (open detail, view/download PDF, edit, delete).
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
+import { ROUTES } from "@/lib/constants";
 import type { ReportRow, ReportStatus } from "@/types/report";
 import styles from "./reports.module.css";
 
@@ -28,7 +31,9 @@ export function ReportCard({ report, canManage, onView, onEdit, onDelete }: Prop
   return (
     <article className={styles.card}>
       <div className={styles.cardTop}>
-        <h3 className={styles.cardTitle}>{report.title}</h3>
+        <Link href={`${ROUTES.reports}/${report.id}`} className={styles.cardLink}>
+          <h3 className={styles.cardTitle}>{report.title}</h3>
+        </Link>
         <Badge tone={STATUS_TONE[report.status]}>{report.status}</Badge>
       </div>
 

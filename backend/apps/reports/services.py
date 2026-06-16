@@ -3,6 +3,8 @@ We only include data we actually have; missing fields are simply omitted."""
 from apps.projects.models import ProjectImage, ProjectScope
 from apps.projects.services import project_overall_progress, scope_progress_map
 
+from .models import ReportImage
+
 
 def _breakdown(project):
     """Count activities by progress bucket for the summary bars."""
@@ -49,15 +51,31 @@ def build_report_context(report):
     snapshots = list(
         project.snapshots.order_by("date").values("date", "overall_progress", "source")
     )
-    images = list(
+    # Logos stay on the project (constant branding); the cover/photos/attachments
+    # are per-report content that overrides any project-level fallback.
+    proj_images = list(
         project.images.order_by("image_type", "sort_order", "created_at")
         .values("image_type", "caption", "image")
     )
+    rep_images = list(
+        report.images.order_by("kind", "sort_order", "created_at").values("kind", "caption", "image")
+    )
+
+    def proj(kind):
+        return next((i for i in proj_images if i["image_type"] == kind), None)
+
+    def rep(kind):
+        return [i for i in rep_images if i["kind"] == kind]
+
+    rep_cover = rep(ReportImage.Kind.COVER)
+    rep_photos = rep(ReportImage.Kind.PROGRESS)
+    attachments = rep(ReportImage.Kind.ATTACHMENT)
 
     return {
         "report": {
             "title": report.title,
             "number": report.report_number,
+            "date": report.report_date,
             "period_start": report.period_start,
             "period_finish": report.period_finish,
             "status": report.get_status_display(),
@@ -67,7 +85,8 @@ def build_report_context(report):
             "code": project.code,
             "type": project.get_project_type_display(),
             "location": project.location,
-            "description": project.description,
+            # Report narrative wins; fall back to the project's description.
+            "description": report.description or project.description,
             "client": project.client_name,
             "consultant": project.consultant_name,
             "contractor": project.contractor_name,
@@ -84,11 +103,11 @@ def build_report_context(report):
         "zones": _zone_rows(project),
         "milestones": milestones,
         "snapshots": snapshots,
-        "images": images,
         "logos": {
-            "left": next((i for i in images if i["image_type"] == ProjectImage.ImageType.LOGO_LEFT), None),
-            "right": next((i for i in images if i["image_type"] == ProjectImage.ImageType.LOGO_RIGHT), None),
-            "cover": next((i for i in images if i["image_type"] == ProjectImage.ImageType.COVER), None),
+            "left": proj(ProjectImage.ImageType.LOGO_LEFT),
+            "right": proj(ProjectImage.ImageType.LOGO_RIGHT),
+            "cover": (rep_cover[0] if rep_cover else proj(ProjectImage.ImageType.COVER)),
         },
-        "photos": [i for i in images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],
+        "photos": rep_photos or [i for i in proj_images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],
+        "attachments": attachments,
     }

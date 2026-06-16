@@ -14,6 +14,8 @@ export interface BuilderField {
 
 export interface BuilderSection {
   title: string;
+  key: string;            // identifies the page type (drives the live preview)
+  enablePath?: string;    // toggles this whole page on/off
   hint?: string;
   fields: BuilderField[];
 }
@@ -24,116 +26,126 @@ const ORIENTATIONS = [
   { value: "landscape", label: "Landscape" },
 ];
 
+// Tabs mirror the report's page types (matches the reference monthly report).
+// Each non-Design page has an `enablePath` so it can be shown/hidden.
 export const BUILDER_SECTIONS: BuilderSection[] = [
   {
-    title: "Page",
+    title: "Cover",
+    key: "cover",
+    enablePath: "cover.enabled",
+    hint: "The front page: title, period, prepared-by, and project name.",
+    fields: [
+      { path: "cover.title", label: "Cover title", type: "text" },
+      { path: "cover.subtitle", label: "Cover subtitle", type: "text" },
+      { path: "cover.prepared_by", label: "Prepared-by label", type: "text" },
+      { path: "cover.org", label: "Organisation", type: "text" },
+      { path: "cover.show_overall", label: "Show overall %", type: "toggle" },
+      { path: "cover.show_logo", label: "Show logo", type: "toggle" },
+      { path: "colors.cover_bg", label: "Background", type: "color" },
+      { path: "colors.cover_accent", label: "Accent", type: "color" },
+      { path: "fonts.cover_title_size", label: "Title size", type: "number" },
+    ],
+  },
+  {
+    title: "Table of Contents",
+    key: "toc",
+    enablePath: "toc.enabled",
+    fields: [
+      { path: "toc.title", label: "Contents title", type: "text" },
+      { path: "colors.toc_title", label: "Title color", type: "color" },
+    ],
+  },
+  {
+    title: "Project Info",
+    key: "project_info",
+    enablePath: "sections.project_info",
+    hint: "The info table — values come from the project; rename the row labels here.",
+    fields: [
+      { path: "labels.project_info", label: "Section heading", type: "text" },
+      { path: "labels.info_name", label: "Row: Project name", type: "text" },
+      { path: "labels.info_client", label: "Row: Owner / Client", type: "text" },
+      { path: "labels.info_consultant", label: "Row: Consultant", type: "text" },
+      { path: "labels.info_contractor", label: "Row: Contractor", type: "text" },
+      { path: "labels.info_type", label: "Row: Type", type: "text" },
+      { path: "labels.info_location", label: "Row: Location", type: "text" },
+      { path: "labels.info_budget", label: "Row: Project value", type: "text" },
+      { path: "labels.info_start", label: "Row: Start", type: "text" },
+      { path: "labels.info_finish", label: "Row: Finish", type: "text" },
+      { path: "labels.info_size", label: "Row: Built-up area", type: "text" },
+    ],
+  },
+  {
+    title: "Description",
+    key: "description",
+    enablePath: "sections.description",
+    hint: "The narrative is typed per report (Report Builder); rename the heading here.",
+    fields: [{ path: "labels.description", label: "Section heading", type: "text" }],
+  },
+  {
+    title: "Progress Report",
+    key: "progress",
+    enablePath: "sections.progress_overview",
+    hint: "Summary, overall %, planned/actual chart, zones, milestones, and timeline.",
+    fields: [
+      { path: "sections.summary", label: "Show summary", type: "toggle" },
+      { path: "sections.progress_chart", label: "Show chart", type: "toggle" },
+      { path: "sections.zone_progress", label: "Show zone table", type: "toggle" },
+      { path: "sections.milestones", label: "Show milestones", type: "toggle" },
+      { path: "sections.timeline", label: "Show timeline", type: "toggle" },
+      { path: "labels.summary", label: "Summary heading", type: "text" },
+      { path: "labels.progress_overview", label: "Progress heading", type: "text" },
+      { path: "labels.progress_chart", label: "Chart heading", type: "text" },
+      { path: "labels.zone_progress", label: "Zones heading", type: "text" },
+      { path: "labels.milestones", label: "Milestones heading", type: "text" },
+      { path: "labels.timeline", label: "Timeline heading", type: "text" },
+      { path: "labels.col_zone", label: "Column: Zone", type: "text" },
+      { path: "labels.col_progress", label: "Column: Progress", type: "text" },
+      { path: "labels.completed", label: 'Word: "Completed"', type: "text" },
+      { path: "labels.in_progress", label: 'Word: "In Progress"', type: "text" },
+      { path: "labels.not_started", label: 'Word: "Not Started"', type: "text" },
+      { path: "colors.chart_planned", label: "Chart: planned", type: "color" },
+      { path: "colors.chart_actual", label: "Chart: actual", type: "color" },
+    ],
+  },
+  {
+    title: "Progress Images",
+    key: "photos",
+    enablePath: "sections.photos",
+    hint: "Site photos, 4 per page. Upload the photos per report (Report Builder).",
+    fields: [{ path: "labels.photos", label: "Section heading", type: "text" }],
+  },
+  {
+    title: "Attachments",
+    key: "attachments",
+    enablePath: "sections.attachments",
+    hint: "Documents, one per page. Upload them per report (Report Builder).",
+    fields: [{ path: "labels.attachments", label: "Section heading", type: "text" }],
+  },
+  {
+    title: "Design",
+    key: "design",
+    hint: "Global styling applied across every page.",
     fields: [
       { path: "page.size", label: "Page size", type: "select", options: PAGE_SIZES },
       { path: "page.orientation", label: "Orientation", type: "select", options: ORIENTATIONS },
       { path: "page.margin_mm", label: "Margin (mm)", type: "number" },
-    ],
-  },
-  {
-    title: "Colors",
-    hint: "Used across headings, tables, and the cover.",
-    fields: [
-      { path: "colors.primary", label: "Primary", type: "color" },
-      { path: "colors.heading", label: "Headings", type: "color" },
+      { path: "colors.section_heading", label: "Section headings", type: "color" },
       { path: "colors.text", label: "Body text", type: "color" },
       { path: "colors.muted", label: "Muted text", type: "color" },
       { path: "colors.table_header_bg", label: "Table header", type: "color" },
       { path: "colors.table_header_text", label: "Table header text", type: "color" },
       { path: "colors.table_border", label: "Table border", type: "color" },
       { path: "colors.table_row_alt", label: "Zebra row", type: "color" },
-      { path: "colors.cover_bg", label: "Cover background", type: "color" },
-      { path: "colors.cover_accent", label: "Cover accent", type: "color" },
-    ],
-  },
-  {
-    title: "Typography",
-    hint: "Font sizes in points (Amiri — supports Arabic + Latin).",
-    fields: [
-      { path: "fonts.cover_title_size", label: "Cover title", type: "number" },
-      { path: "fonts.h1_size", label: "Heading 1", type: "number" },
-      { path: "fonts.h2_size", label: "Heading 2", type: "number" },
-      { path: "fonts.h3_size", label: "Heading 3", type: "number" },
-      { path: "fonts.base_size", label: "Body", type: "number" },
+      { path: "fonts.h2_size", label: "Heading size", type: "number" },
+      { path: "fonts.base_size", label: "Body size", type: "number" },
       { path: "fonts.line_spacing", label: "Line spacing", type: "number" },
-    ],
-  },
-  {
-    title: "Cover page",
-    fields: [
-      { path: "cover.enabled", label: "Show cover page", type: "toggle" },
-      { path: "cover.title", label: "Cover title", type: "text" },
-      { path: "cover.subtitle", label: "Cover subtitle", type: "text" },
-      { path: "cover.show_overall", label: "Show overall %", type: "toggle" },
-      { path: "cover.show_logo", label: "Show logo", type: "toggle" },
-    ],
-  },
-  {
-    title: "Table of contents",
-    fields: [
-      { path: "toc.enabled", label: "Show contents page", type: "toggle" },
-      { path: "toc.title", label: "Contents title", type: "text" },
-    ],
-  },
-  {
-    title: "Header & footer",
-    fields: [
       { path: "header.enabled", label: "Show header", type: "toggle" },
-      { path: "header.show_project", label: "Header: project name", type: "toggle" },
-      { path: "header.show_report_no", label: "Header: report number", type: "toggle" },
+      { path: "header.org_left", label: "Header: left text", type: "text" },
+      { path: "header.org_right", label: "Header: right text", type: "text" },
       { path: "footer.enabled", label: "Show footer", type: "toggle" },
       { path: "footer.show_page_number", label: "Footer: page number", type: "toggle" },
-      { path: "footer.text", label: "Footer text", type: "text" },
-    ],
-  },
-  {
-    title: "Sections",
-    hint: "Toggle which sections appear in the report.",
-    fields: [
-      { path: "sections.summary", label: "Executive summary", type: "toggle" },
-      { path: "sections.project_info", label: "Project information", type: "toggle" },
-      { path: "sections.progress_overview", label: "Overall progress", type: "toggle" },
-      { path: "sections.zone_progress", label: "Progress by zone", type: "toggle" },
-      { path: "sections.milestones", label: "Key milestones", type: "toggle" },
-      { path: "sections.timeline", label: "Progress timeline", type: "toggle" },
-      { path: "sections.notes", label: "Notes", type: "toggle" },
-      { path: "sections.photos", label: "Site photos", type: "toggle" },
-    ],
-  },
-  {
-    title: "Tables",
-    fields: [
-      { path: "table.header_bold", label: "Bold header", type: "toggle" },
       { path: "table.zebra", label: "Zebra rows", type: "toggle" },
-      { path: "table.border", label: "Borders", type: "toggle" },
-    ],
-  },
-  {
-    title: "Labels & headings",
-    hint: "Rename any heading or column — set Arabic text for a fully Arabic report.",
-    fields: [
-      { path: "labels.summary", label: "Summary heading", type: "text" },
-      { path: "labels.project_info", label: "Project info heading", type: "text" },
-      { path: "labels.progress_overview", label: "Progress heading", type: "text" },
-      { path: "labels.zone_progress", label: "Zones heading", type: "text" },
-      { path: "labels.milestones", label: "Milestones heading", type: "text" },
-      { path: "labels.timeline", label: "Timeline heading", type: "text" },
-      { path: "labels.notes", label: "Notes heading", type: "text" },
-      { path: "labels.photos", label: "Photos heading", type: "text" },
-      { path: "labels.col_zone", label: "Column: Zone", type: "text" },
-      { path: "labels.col_progress", label: "Column: Progress", type: "text" },
-      { path: "labels.col_milestone", label: "Column: Milestone", type: "text" },
-      { path: "labels.col_date", label: "Column: Date", type: "text" },
-      { path: "labels.col_status", label: "Column: Status", type: "text" },
-      { path: "labels.col_source", label: "Column: Source", type: "text" },
-      { path: "labels.overall_complete", label: 'Word: "Complete"', type: "text" },
-      { path: "labels.completed", label: 'Word: "Completed"', type: "text" },
-      { path: "labels.in_progress", label: 'Word: "In Progress"', type: "text" },
-      { path: "labels.not_started", label: 'Word: "Not Started"', type: "text" },
-      { path: "labels.activities", label: 'Word: "activities"', type: "text" },
+      { path: "table.border", label: "Table borders", type: "toggle" },
     ],
   },
 ];

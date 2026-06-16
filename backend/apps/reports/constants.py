@@ -64,6 +64,7 @@ DEFAULT_CONFIG = {
         "timeline": True,
         "notes": True,
         "photos": True,
+        "attachments": True,
     },
     "table": {"header_bold": True, "zebra": True, "border": True},
     # Every visible heading/column/field label — editable so a template can be
@@ -79,6 +80,7 @@ DEFAULT_CONFIG = {
         "timeline": "Progress Timeline",
         "notes": "Notes",
         "photos": "Site Photos",
+        "attachments": "Attachments",
         "col_zone": "Zone",
         "col_progress": "Progress",
         "col_milestone": "Milestone",

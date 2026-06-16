@@ -1,9 +1,13 @@
 """Project image upload/list/delete endpoints for private report assets."""
+import mimetypes
+
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
@@ -68,3 +72,18 @@ class ProjectImageDetailView(ProjectImageAccessMixin, generics.RetrieveDestroyAP
             instance.image.delete(save=False)
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProjectImageFileView(ProjectImageAccessMixin, APIView):
+    """Stream a private image's bytes through an authed, tenant-scoped endpoint.
+
+    Works the same in dev (filesystem) and prod (R2) without exposing a public
+    URL — the storage backend reads the object by key on demand."""
+
+    def get(self, request, project_id, pk):
+        self.check_read_permission()
+        image = get_object_or_404(ProjectImage, pk=pk, project=self.get_project())
+        if not image.image:
+            raise Http404
+        content_type = mimetypes.guess_type(image.image.name)[0] or "application/octet-stream"
+        return FileResponse(image.image.open("rb"), content_type=content_type)
