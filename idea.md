@@ -349,7 +349,7 @@ companies via a company selector; others are locked to their own company.
 | Approvals | Reviewer/PM queue to approve or reject pending submissions. |
 | Delays / Issues | Delay records, causes, affected scopes, remarks. |
 | Reports & Exports | Visual reports, monthly PDF, Primavera-compatible export. |
-| Team & Access | Project team assignments, scope configuration, visibility. |
+| Team & Access | Members + project roles (PM/Reviewer/Engineer) **[built]**; per-user scope config **[next]**. |
 
 ---
 
