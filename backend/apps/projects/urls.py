@@ -11,6 +11,11 @@ from .structure_views import (
     ScopeDetailView,
     ScopeListCreateView,
 )
+from .team_views import (
+    AssignableUsersView,
+    ProjectMemberDetailView,
+    ProjectMemberListView,
+)
 from .views import ProjectViewSet
 
 router = SimpleRouter(trailing_slash=True)
@@ -21,6 +26,9 @@ urlpatterns = [
     path("projects/<uuid:project_id>/structure/", ProjectStructureView.as_view(), name="project-structure"),
     path("projects/<uuid:project_id>/zones/<uuid:zone_id>/grid/", ProjectZoneGridView.as_view(), name="project-zone-grid"),
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
+    path("projects/<uuid:project_id>/members/", ProjectMemberListView.as_view(), name="project-members"),
+    path("projects/<uuid:project_id>/members/<uuid:member_id>/", ProjectMemberDetailView.as_view(), name="project-member"),
+    path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
     path("projects/<uuid:project_id>/scopes/", ScopeListCreateView.as_view(), name="scope-create"),
     path("projects/<uuid:project_id>/scopes/<uuid:scope_id>/", ScopeDetailView.as_view(), name="scope-detail"),
     path("projects/<uuid:project_id>/activities/", ActivityListCreateView.as_view(), name="activity-create"),

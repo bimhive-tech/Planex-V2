@@ -61,10 +61,12 @@ class ProjectApiTests(TestCase):
             email="viewer@acme.com", password=STRONG_PW, company=self.company_a)
         Membership.objects.create(company=self.company_a, user=self.viewer, role=self.viewer_role)
 
-        # Other tenant + its project (must stay invisible to company A).
+        # Other tenant + its project + user (must stay invisible to company A).
         self.company_b = Company.objects.create(name="Globex")
         self.project_b = Project.objects.create(
             company=self.company_b, name="B Tower", project_type="commercial")
+        self.user_b = User.objects.create_user(
+            email="bob@globex.com", password=STRONG_PW, company=self.company_b)
 
     def login(self, email):
         resp = self.client.post(
@@ -167,3 +169,41 @@ class ProjectApiTests(TestCase):
         resp = self.client.post(f"/api/projects/{self.project_b.id}/scopes/",
                                 {"scope_type": "phase", "name": "X"}, content_type="application/json")
         self.assertEqual(resp.status_code, 404)
+
+    # ── Team ──────────────────────────────────────────────────────────────
+    def test_add_member_and_manager_surfaces_on_detail(self):
+        p = Project.objects.create(company=self.company_a, name="Clinic", project_type="commercial")
+        self.login("admin@acme.com")
+        resp = self.client.post(
+            f"/api/projects/{p.id}/members/",
+            {"user_id": str(self.viewer.id), "role": "manager"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["role_display"], "Project Manager")
+        detail = self.client.get(f"/api/projects/{p.id}/").json()
+        self.assertEqual(detail["manager_name"], self.viewer.full_name)
+        self.assertEqual(detail["team_count"], 1)
+
+    def test_cannot_add_user_from_other_company(self):
+        p = Project.objects.create(company=self.company_a, name="Bridge2", project_type="infrastructure")
+        self.login("admin@acme.com")
+        resp = self.client.post(
+            f"/api/projects/{p.id}/members/", {"user_id": str(self.user_b.id), "role": "member"},
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_viewer_cannot_add_member(self):
+        p = Project.objects.create(company=self.company_a, name="Depot3", project_type="industrial")
+        self.login("viewer@acme.com")
+        resp = self.client.post(
+            f"/api/projects/{p.id}/members/", {"user_id": str(self.admin.id), "role": "member"},
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_assignable_users_excludes_existing_members(self):
+        p = Project.objects.create(company=self.company_a, name="Plaza", project_type="commercial")
+        self.login("admin@acme.com")
+        self.client.post(f"/api/projects/{p.id}/members/",
+                         {"user_id": str(self.viewer.id), "role": "engineer"}, content_type="application/json")
+        emails = {u["email"] for u in self.client.get(f"/api/projects/{p.id}/assignable-users/").json()}
+        self.assertIn("admin@acme.com", emails)
+        self.assertNotIn("viewer@acme.com", emails)  # already a member

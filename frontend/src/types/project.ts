@@ -44,9 +44,27 @@ export interface ProjectDetail {
   overall_progress: number;
   activity_count: number;
   progress_breakdown: ProgressBreakdown;
+  manager_name: string;
+  team_count: number;
   created_at: string;
   updated_at: string;
 }
+
+export interface ProjectMember {
+  id: string;
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  role_display: string;
+}
+
+export const PROJECT_ROLES = [
+  { value: "manager", label: "Project Manager" },
+  { value: "reviewer", label: "Reviewer" },
+  { value: "engineer", label: "Site Engineer" },
+  { value: "member", label: "Member" },
+] as const;
 
 export interface ProgressBreakdown {
   total: number;

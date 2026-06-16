@@ -42,7 +42,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # Search/type/archive filters apply to the list only — detail, update, and
         # delete must still reach archived projects.
         if self.action != "list":
-            return qs
+            # Detail/write responses include manager_name + team_count.
+            return qs.prefetch_related("members__user")
 
         params = self.request.query_params
         status_filter = params.get("status", "active")

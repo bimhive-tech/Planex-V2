@@ -1,7 +1,7 @@
 """Project serializers: list/detail/write, plus the work-hierarchy serializers."""
 from rest_framework import serializers
 
-from .models import Activity, Project, ProjectScope
+from .models import Activity, Project, ProjectMember, ProjectScope
 from .services import project_overall_progress
 
 STAKEHOLDER_FIELDS = [
@@ -31,6 +31,8 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     overall_progress = serializers.SerializerMethodField()
     activity_count = serializers.SerializerMethodField()
     progress_breakdown = serializers.SerializerMethodField()
+    manager_name = serializers.SerializerMethodField()
+    team_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -39,8 +41,15 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             "priority", "priority_display", "location", "description",
             "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
-            "created_at", "updated_at",
+            "manager_name", "team_count", "created_at", "updated_at",
         ]
+
+    def get_manager_name(self, obj):
+        m = next((m for m in obj.members.all() if m.role == ProjectMember.ProjectRole.MANAGER), None)
+        return m.user.full_name if m else ""
+
+    def get_team_count(self, obj):
+        return obj.members.count()
 
     def get_overall_progress(self, obj):
         return project_overall_progress(obj)
@@ -124,3 +133,21 @@ class ActivityWriteSerializer(serializers.ModelSerializer):
         if value < 0 or value > 100:
             raise serializers.ValidationError("Progress must be between 0 and 100.")
         return value
+
+
+# ── Team ───────────────────────────────────────────────────────────────────
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+    user_id = serializers.CharField(source="user.id", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    full_name = serializers.CharField(source="user.full_name", read_only=True)
+
+    class Meta:
+        model = ProjectMember
+        fields = ["id", "user_id", "email", "full_name", "role", "role_display"]
+
+
+class ProjectMemberWriteSerializer(serializers.Serializer):
+    user_id = serializers.UUIDField()
+    role = serializers.ChoiceField(choices=ProjectMember.ProjectRole.choices,
+                                   default=ProjectMember.ProjectRole.MEMBER)

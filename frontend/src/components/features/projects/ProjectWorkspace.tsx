@@ -14,6 +14,7 @@ import { formatDate } from "@/lib/format";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
+import { ProjectTeam } from "./ProjectTeam";
 import type { ProgressBreakdown, ProjectDetail } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
 
@@ -22,7 +23,7 @@ export interface ProjectStats {
   breakdown: ProgressBreakdown;
 }
 
-const TABS = ["Overview", "Schedule"] as const;
+const TABS = ["Overview", "Schedule", "Team"] as const;
 type Tab = (typeof TABS)[number];
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
@@ -83,11 +84,11 @@ export function ProjectWorkspace({ project, canManage }: { project: ProjectDetai
       </nav>
 
       <div className={styles.content}>
-        {tab === "Overview" ? (
-          <ProjectOverview project={project} stats={stats} />
-        ) : (
+        {tab === "Overview" && <ProjectOverview project={project} stats={stats} />}
+        {tab === "Schedule" && (
           <ProjectSchedule projectId={project.id} canManage={canManage} onStatsChange={setStats} />
         )}
+        {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
       </div>
 
       <ProjectFormDrawer
