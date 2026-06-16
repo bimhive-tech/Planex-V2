@@ -203,6 +203,43 @@ class ProjectApiTests(TestCase):
             content_type="application/json")
         self.assertEqual(resp.status_code, 403)
 
+    # ── Scope access ──────────────────────────────────────────────────────
+    def test_scope_access_restricts_visible_zones(self):
+        from .models import ProjectScope, ProjectScopeAccess
+        p = Project.objects.create(company=self.company_a, name="Mall2", project_type="commercial")
+        z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
+        z2 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z2")
+        ProjectScope.objects.create(company=self.company_a, project=p, parent=z1, scope_type="area", name="Z1-A")
+
+        # viewer has only VIEW_PROJECTS -> can be restricted
+        self.login("viewer@acme.com")
+        names = {s["name"] for s in self.client.get(f"/api/projects/{p.id}/structure/").json()["scopes"]}
+        self.assertEqual(names, {"Z1", "Z2", "Z1-A"})  # no grants -> full
+
+        ProjectScopeAccess.objects.create(company=self.company_a, project=p, user=self.viewer, scope=z1)
+        names = {s["name"] for s in self.client.get(f"/api/projects/{p.id}/structure/").json()["scopes"]}
+        self.assertEqual(names, {"Z1", "Z1-A"})  # restricted to Z1 + descendants
+
+        # ...but the admin (MANAGE_PROJECTS) still sees everything.
+        self.login("admin@acme.com")
+        names = {s["name"] for s in self.client.get(f"/api/projects/{p.id}/structure/").json()["scopes"]}
+        self.assertEqual(names, {"Z1", "Z2", "Z1-A"})
+
+    def test_manage_member_scope_access(self):
+        from .models import ProjectScope
+        p = Project.objects.create(company=self.company_a, name="Mall3", project_type="commercial")
+        z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
+        self.login("admin@acme.com")
+        m = self.client.post(f"/api/projects/{p.id}/members/",
+                             {"user_id": str(self.viewer.id), "role": "engineer"},
+                             content_type="application/json").json()
+        put = self.client.put(f"/api/projects/{p.id}/members/{m['id']}/scope-access/",
+                              {"zone_ids": [str(z1.id)]}, content_type="application/json")
+        self.assertEqual(put.status_code, 200, put.content)
+        self.assertEqual(put.json()["zone_ids"], [str(z1.id)])
+        got = self.client.get(f"/api/projects/{p.id}/members/{m['id']}/scope-access/").json()
+        self.assertEqual(got["zone_ids"], [str(z1.id)])
+
     # ── Approval chain ────────────────────────────────────────────────────
     def _activity(self):
         p = Project.objects.create(company=self.company_a, name="Lab", project_type="commercial")

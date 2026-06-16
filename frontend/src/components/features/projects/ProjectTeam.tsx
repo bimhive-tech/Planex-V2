@@ -14,6 +14,7 @@ import { StateView } from "@/components/ui/StateView";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import { PROJECT_ROLES, type ProjectMember } from "@/types/project";
+import { ScopeAccessModal } from "./ScopeAccessModal";
 import styles from "./projectTeam.module.css";
 
 const ROLE_TONE: Record<string, "info" | "success" | "warning" | "neutral"> = {
@@ -32,6 +33,7 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
     [projectId],
   );
   const [addOpen, setAddOpen] = useState(false);
+  const [accessFor, setAccessFor] = useState<ProjectMember | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const members = data ?? [];
 
@@ -94,9 +96,14 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
                 </div>
               </div>
               {canManage && (
-                <button className={styles.remove} aria-label="Remove member" onClick={() => remove(m)}>
-                  <Icon name="close" size={16} />
-                </button>
+                <div className={styles.cardActions}>
+                  <button className={styles.accessBtn} title="Manage zone access" onClick={() => setAccessFor(m)}>
+                    Access
+                  </button>
+                  <button className={styles.remove} aria-label="Remove member" onClick={() => remove(m)}>
+                    <Icon name="close" size={16} />
+                  </button>
+                </div>
               )}
             </div>
           ))}
@@ -105,6 +112,12 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
 
       {addOpen && (
         <AddMemberModal projectId={projectId} onClose={() => setAddOpen(false)} onAdded={reload} />
+      )}
+      {accessFor && (
+        <ScopeAccessModal
+          projectId={projectId} memberId={accessFor.id} memberName={accessFor.full_name || accessFor.email}
+          onClose={() => setAccessFor(null)} onSaved={reload}
+        />
       )}
     </div>
   );

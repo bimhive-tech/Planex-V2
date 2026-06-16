@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
+from .access import accessible_scope_ids
 from .imports import import_workbook
 from .models import Activity, Project, ProjectScope
 from .serializers import (
@@ -60,9 +61,14 @@ class ProjectStructureView(APIView):
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view(request)
+        accessible = accessible_scope_ids(project, request.user)
+        scopes_qs = project.scopes.all()
+        if accessible is not None:
+            scopes_qs = scopes_qs.filter(id__in=accessible)
         counts = {
             str(r["scope_id"]): r["n"]
             for r in project.activities.values("scope_id").annotate(n=Count("id"))
+            if accessible is None or r["scope_id"] in accessible
         }
         from django.db.models import Q
         agg = project.activities.aggregate(
@@ -74,7 +80,7 @@ class ProjectStructureView(APIView):
         return Response({
             "overall_progress": project_overall_progress(project),
             "scope_progress": scope_progress_map(project),
-            "scopes": ScopeSerializer(project.scopes.all(), many=True).data,
+            "scopes": ScopeSerializer(scopes_qs, many=True).data,
             "scope_activity_counts": counts,
             "activity_count": total,
             "progress_breakdown": {
@@ -96,6 +102,9 @@ class ScopeActivitiesView(APIView):
             scope = ProjectScope.objects.get(pk=scope_id, project=project)
         except (ProjectScope.DoesNotExist, ValueError, TypeError):
             raise NotFound("Scope not found.")
+        accessible = accessible_scope_ids(project, request.user)
+        if accessible is not None and scope.id not in accessible:
+            raise PermissionDenied("You don't have access to this part of the project.")
         acts = scope.activities.order_by("row_index", "name")
         return Response(ActivitySerializer(acts, many=True).data)
 
@@ -113,6 +122,9 @@ class ProjectZoneGridView(APIView):
             zone = ProjectScope.objects.get(pk=zone_id, project=project)
         except (ProjectScope.DoesNotExist, ValueError, TypeError):
             raise NotFound("Zone not found.")
+        accessible = accessible_scope_ids(project, request.user)
+        if accessible is not None and zone.id not in accessible:
+            raise PermissionDenied("You don't have access to this zone.")
 
         # Tree is Zone -> Subzone -> Phase -> Activity(cell). Columns are subzones
         # (subzone_index), rows are tasks (row_index); cells come from the activities

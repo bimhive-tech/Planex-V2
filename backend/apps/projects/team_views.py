@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 from apps.accounts.models import User
 
-from .models import Project, ProjectMember
+from .models import Project, ProjectMember, ProjectScope, ProjectScopeAccess
 from .serializers import ProjectMemberSerializer, ProjectMemberWriteSerializer
 
 
@@ -89,6 +89,51 @@ class ProjectMemberDetailView(APIView):
         _require(request, Permission.MANAGE_PROJECTS.value)
         self._get(project, member_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProjectZonesView(APIView):
+    """List the project's zones — for the access picker."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = _project(request, project_id)
+        _require(request, Permission.MANAGE_PROJECTS.value)
+        zones = project.scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order", "name")
+        return Response([{"id": str(z.id), "name": z.name} for z in zones])
+
+
+class MemberScopeAccessView(APIView):
+    """GET the zones a member is restricted to (empty = full access); PUT to set them."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _member(self, project, member_id):
+        try:
+            return ProjectMember.objects.select_related("user").get(pk=member_id, project=project)
+        except (ProjectMember.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Member not found.")
+
+    def get(self, request, project_id, member_id):
+        project = _project(request, project_id)
+        _require(request, Permission.MANAGE_PROJECTS.value)
+        member = self._member(project, member_id)
+        zone_ids = list(ProjectScopeAccess.objects.filter(project=project, user=member.user)
+                        .values_list("scope_id", flat=True))
+        return Response({"zone_ids": [str(z) for z in zone_ids]})
+
+    def put(self, request, project_id, member_id):
+        project = _project(request, project_id)
+        _require(request, Permission.MANAGE_PROJECTS.value)
+        member = self._member(project, member_id)
+        ids = request.data.get("zone_ids", [])
+        zones = list(project.scopes.filter(id__in=ids, scope_type=ProjectScope.ScopeType.ZONE))
+        ProjectScopeAccess.objects.filter(project=project, user=member.user).delete()
+        ProjectScopeAccess.objects.bulk_create([
+            ProjectScopeAccess(company=project.company, project=project, user=member.user, scope=z)
+            for z in zones
+        ])
+        return Response({"zone_ids": [str(z.id) for z in zones]})
 
 
 class AssignableUsersView(APIView):

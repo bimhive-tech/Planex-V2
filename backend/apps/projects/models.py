@@ -173,6 +173,26 @@ class ProjectMember(TimestampedModel):
         return f"{self.user.email} · {self.get_role_display()}"
 
 
+class ProjectScopeAccess(TimestampedModel):
+    """Restricts a member to specific scopes (zones). Following Planex: a user with
+    NO grants sees the whole project; grants narrow them to those zones."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="scope_access")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="scope_access")
+    user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="project_scope_access")
+    scope = models.ForeignKey("ProjectScope", on_delete=models.CASCADE, related_name="access_grants")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["project", "user", "scope"], name="uniq_scope_access"),
+        ]
+        indexes = [models.Index(fields=["project", "user"])]
+
+    def __str__(self):
+        return f"{self.user.email} → {self.scope.name}"
+
+
 class ProjectScope(TimestampedModel):
     """A node in a project's flexible work hierarchy
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""

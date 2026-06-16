@@ -17,8 +17,10 @@ from .milestone_views import MilestoneDetailView, MilestoneListView
 from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
 from .team_views import (
     AssignableUsersView,
+    MemberScopeAccessView,
     ProjectMemberDetailView,
     ProjectMemberListView,
+    ProjectZonesView,
 )
 from .views import ProjectViewSet
 
@@ -34,6 +36,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/members/", ProjectMemberListView.as_view(), name="project-members"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/", ProjectMemberDetailView.as_view(), name="project-member"),
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
+    path("projects/<uuid:project_id>/project-zones/", ProjectZonesView.as_view(), name="project-zones-list"),
+    path("projects/<uuid:project_id>/members/<uuid:member_id>/scope-access/", MemberScopeAccessView.as_view(), name="member-scope-access"),
     path("projects/<uuid:project_id>/submissions/", ProjectSubmissionsView.as_view(), name="project-submissions"),
     path("projects/<uuid:project_id>/submissions/<uuid:submission_id>/review/",
          SubmissionDecisionView.as_view(stage="review"), name="submission-review"),

@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
+from .access import accessible_scope_ids
 from .models import Activity, ProgressSubmission, Project
 
 
@@ -88,6 +89,9 @@ class ProjectSubmissionsView(APIView):
             activity = Activity.objects.get(pk=activity_id, project=project)
         except (Activity.DoesNotExist, ValueError, TypeError):
             raise ValidationError({"activity": "Activity not found."})
+        accessible = accessible_scope_ids(project, request.user)
+        if accessible is not None and activity.scope_id not in accessible:
+            raise PermissionDenied("You can't submit progress for this part of the project.")
         try:
             value = round(float(request.data.get("submitted_progress")), 2)
         except (TypeError, ValueError):
