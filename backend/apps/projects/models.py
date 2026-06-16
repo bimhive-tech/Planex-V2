@@ -60,6 +60,30 @@ class Project(TimestampedModel):
         return self.name
 
 
+class ProgressSnapshot(TimestampedModel):
+    """A dated snapshot of a project's aggregate progress, captured on each import.
+    Importing monthly trackers builds a history you can chart and filter by date."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="progress_snapshots")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="snapshots")
+    date = models.DateField()
+    overall_progress = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    breakdown = models.JSONField(default=dict, blank=True)   # {total, completed, in_progress, not_started}
+    zones = models.JSONField(default=list, blank=True)        # [{name, progress}]
+    source = models.CharField(max_length=200, blank=True)     # e.g. the workbook file name
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["project", "date"], name="uniq_snapshot_per_date"),
+        ]
+        indexes = [models.Index(fields=["project", "date"])]
+        ordering = ["date"]
+
+    def __str__(self):
+        return f"{self.project.name} @ {self.date}"
+
+
 class Milestone(TimestampedModel):
     """A key project milestone (kickoff, design approval, handover, ...)."""
 

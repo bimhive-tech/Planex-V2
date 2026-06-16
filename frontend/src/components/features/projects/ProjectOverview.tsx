@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/format";
 import type { ProjectDetail } from "@/types/project";
 import type { ProjectStats } from "./ProjectWorkspace";
 import { MilestonesPanel } from "./MilestonesPanel";
+import { ProgressTimeline } from "./ProgressTimeline";
 import styles from "./projectOverview.module.css";
 
 const DAY = 1000 * 60 * 60 * 24;
@@ -166,6 +167,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
         </section>
       )}
 
+      <ProgressTimeline projectId={p.id} />
       <MilestonesPanel projectId={p.id} canManage={canManage} />
     </div>
   );

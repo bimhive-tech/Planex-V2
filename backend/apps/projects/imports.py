@@ -9,11 +9,34 @@ Layout is detected per sheet (the subzone-label row, the name column, and an
 optional leading weight column). Phase/summary rows (col-A "W") are skipped.
 The Primavera 'FOR (P6)' and 'Summary' sheets are skipped in this version.
 """
+import datetime
+import re
+
 import openpyxl
 from django.db import transaction
+from django.db.models import Count, Q
+from django.utils import timezone
 
-from .models import Activity, ProjectScope
-from .services import project_overall_progress
+from .models import Activity, ProgressSnapshot, ProjectScope
+from .services import project_overall_progress, scope_progress_map
+
+# Dates embedded in tracker file names, e.g. "... - 3-Mar-2026.xlsm" or "2026-03-03".
+# The month group captures the first 3 letters (Mar/March both -> "Mar" -> %b).
+_DATE_PATTERNS = [
+    (re.compile(r"(\d{1,2})[-_ ]([A-Za-z]{3})[a-z]*[-_ ](\d{4})"), "%d %b %Y"),
+    (re.compile(r"(\d{4})[-_](\d{1,2})[-_](\d{1,2})"), "%Y %m %d"),
+]
+
+
+def parse_date_from_name(name: str):
+    for rx, fmt in _DATE_PATTERNS:
+        m = rx.search(name or "")
+        if m:
+            try:
+                return datetime.datetime.strptime(" ".join(m.groups()), fmt).date()
+            except ValueError:
+                continue
+    return None
 
 SKIP_SHEETS = {"for (p6)", "summary"}
 MAX_TASKS_PER_ZONE = 2000
@@ -126,8 +149,32 @@ def parse_workbook(file_obj) -> dict:
     return result
 
 
+def _save_snapshot(project, *, date, source):
+    """Capture the project's aggregate progress as a dated snapshot (upsert by date)."""
+    agg = project.activities.aggregate(
+        total=Count("id"),
+        completed=Count("id", filter=Q(progress_percent__gte=100)),
+        not_started=Count("id", filter=Q(progress_percent__lte=0)),
+    )
+    total = agg["total"]
+    breakdown = {
+        "total": total, "completed": agg["completed"], "not_started": agg["not_started"],
+        "in_progress": total - agg["completed"] - agg["not_started"],
+    }
+    progress = scope_progress_map(project)
+    zones = [
+        {"name": z.name, "progress": progress.get(str(z.id), 0.0)}
+        for z in project.scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order")
+    ]
+    ProgressSnapshot.objects.update_or_create(
+        project=project, date=date,
+        defaults={"company": project.company, "overall_progress": project_overall_progress(project),
+                  "breakdown": breakdown, "zones": zones, "source": source[:200]},
+    )
+
+
 @transaction.atomic
-def import_workbook(project, file_obj, *, replace=True) -> dict:
+def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, source="") -> dict:
     parsed = parse_workbook(file_obj)
     if not parsed:
         return {"zones": 0, "subzones": 0, "activities": 0, "overall_progress": 0.0,
@@ -183,10 +230,14 @@ def import_workbook(project, file_obj, *, replace=True) -> dict:
     Scope.objects.bulk_create(phases, batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
 
+    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
+    _save_snapshot(project, date=snap_date, source=source)
+
     return {
         "zones": len(zones),
         "subzones": subzone_total,
         "phases": len(phases),
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
+        "snapshot_date": snap_date.isoformat(),
     }

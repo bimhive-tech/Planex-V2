@@ -257,7 +257,24 @@ class ProjectImportView(APIView):
         if upload.size > MAX_IMPORT_BYTES:
             raise ValidationError({"file": "File is too large (max 40 MB)."})
         try:
-            result = import_workbook(project, upload)
+            result = import_workbook(project, upload, source=upload.name)
         except Exception as exc:  # parsing failures shouldn't 500
             raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
         return Response(result)
+
+
+class ProjectSnapshotsView(APIView):
+    """GET the project's dated progress snapshots (one per import) for the timeline."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = _project(request, project_id)
+        _require_view(request)
+        snaps = project.snapshots.order_by("date").values(
+            "date", "overall_progress", "breakdown", "zones", "source")
+        return Response([
+            {"date": s["date"], "overall_progress": float(s["overall_progress"]),
+             "breakdown": s["breakdown"], "zones": s["zones"], "source": s["source"]}
+            for s in snaps
+        ])

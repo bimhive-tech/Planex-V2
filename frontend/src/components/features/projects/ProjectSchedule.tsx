@@ -55,9 +55,9 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     setActionError(null);
     setImportMsg(null);
     try {
-      const r = await api.upload<{ zones: number; phases: number; subzones: number; activities: number; overall_progress: number }>(
+      const r = await api.upload<{ zones: number; subzones: number; activities: number; overall_progress: number; snapshot_date: string }>(
         `/upload/import/${projectId}`, file);
-      setImportMsg(`Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall). Expand a subzone to see its phases and tasks, or open the zone grid.`);
+      setImportMsg(`Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall) — snapshot dated ${r.snapshot_date}. Expand a subzone for its phases/tasks, or open the zone grid.`);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
