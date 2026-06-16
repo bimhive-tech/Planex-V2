@@ -18,7 +18,7 @@ from .serializers import (
 )
 from .services import build_report_context
 
-READ_ACTIONS = {"list", "retrieve", "pdf"}
+READ_ACTIONS = {"list", "retrieve", "pdf", "data"}
 
 
 class ReportsAccess(BasePermission):
@@ -65,6 +65,16 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company, created_by=self.request.user)
+
+    @action(detail=True, methods=["get"])
+    def data(self, request, pk=None):
+        """The computed report data (project info + progress tables) so the
+        builder can show what's pulled from the chosen project, live."""
+        report = self.get_object()
+        ctx = build_report_context(report)
+        for key in ("logos", "photos", "attachments", "images"):
+            ctx.pop(key, None)
+        return Response(ctx)
 
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):

@@ -22,12 +22,14 @@ export function ReportAssets({
   reportId,
   canManage,
   onChanged,
+  only,
 }: {
   reportId: string;
   canManage: boolean;
   onChanged?: () => void;
+  only?: ReportImageKind; // lock to one kind (per-tab uploads)
 }) {
-  const [kind, setKind] = useState<ReportImageKind>("progress");
+  const [kind, setKind] = useState<ReportImageKind>(only ?? "progress");
   const [caption, setCaption] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +39,8 @@ export function ReportAssets({
     () => api.get<ReportImage[]>(`/reports/${reportId}/images/`),
     [reportId],
   );
-  const images = Array.isArray(data) ? data : [];
+  const all = Array.isArray(data) ? data : [];
+  const images = only ? all.filter((i) => i.kind === only) : all;
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();
@@ -81,9 +84,11 @@ export function ReportAssets({
 
       {canManage && (
         <form className={styles.assetForm} onSubmit={upload}>
-          <select className={styles.assetSelect} value={kind} onChange={(e) => setKind(e.target.value as ReportImageKind)}>
-            {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-          </select>
+          {!only && (
+            <select className={styles.assetSelect} value={kind} onChange={(e) => setKind(e.target.value as ReportImageKind)}>
+              {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+            </select>
+          )}
           <input className={styles.assetInput} value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Caption (optional)" />
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           <Button size="sm" disabled={!file || busy} leadingIcon={<Icon name="image" size={15} />}>

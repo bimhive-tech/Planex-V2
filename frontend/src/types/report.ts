@@ -31,6 +31,21 @@ export interface ReportRow {
   created_at: string;
 }
 
+// Computed report data pulled from the chosen project (for the builder's
+// read-only Project Info + Progress Report tabs).
+export interface ReportData {
+  overall: number;
+  breakdown: { total: number; completed: number; in_progress: number; not_started: number };
+  zones: { name: string; progress: number }[];
+  milestones: { title: string; date: string | null; status: string }[];
+  snapshots: { date: string | null; overall_progress: number; source: string }[];
+  project: {
+    name: string; type: string; location: string; client: string;
+    consultant: string; contractor: string; planned_start: string | null;
+    planned_finish: string | null; size_sqm: string | null; budget: string | null; currency: string;
+  };
+}
+
 // Per-report content image (cover / progress photo / attachment).
 export type ReportImageKind = "cover" | "progress" | "attachment";
 

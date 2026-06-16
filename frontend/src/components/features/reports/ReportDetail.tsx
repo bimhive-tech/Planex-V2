@@ -1,10 +1,10 @@
 "use client";
 
-// Report Builder: one page to assign the project (pulls its data) + template,
-// set the date/period, type the description, manage images (cover / progress /
-// attachments), and see a live PDF preview. Mirrors the Template Builder.
+// Report Builder: page-type sub-tabs (Setup, Cover, Project Info, Description,
+// Progress Report, Progress Images, Attachments), live project data on the
+// read-only tabs, and a real-time PDF preview (debounced auto-save → re-render).
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -16,7 +16,7 @@ import { api, ApiError, type Paginated } from "@/lib/api";
 import { API_BASE, ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
-import type { ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
+import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
 import styles from "./reports.module.css";
 
@@ -28,20 +28,37 @@ const STATUS_OPTIONS = [
 const STATUS_TONE: Record<ReportStatus, "neutral" | "info" | "success"> = {
   draft: "neutral", submitted: "info", approved: "success",
 };
+const TABS = [
+  { key: "setup", label: "Setup" },
+  { key: "cover", label: "Cover" },
+  { key: "info", label: "Project Info" },
+  { key: "description", label: "Description" },
+  { key: "progress", label: "Progress Report" },
+  { key: "photos", label: "Progress Images" },
+  { key: "attachments", label: "Attachments" },
+] as const;
 
 type Form = {
   project: string; template: string; title: string; report_number: string;
   report_date: string; period_start: string; period_finish: string; status: string; description: string;
 };
 
+const fmtDate = (d: string | null) =>
+  d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
-  const [previewKey, setPreviewKey] = useState(0);
   const [form, setForm] = useState<Form | null>(null);
   const [projects, setProjects] = useState<ProjectListRow[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("setup");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [data, setData] = useState<ReportData | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const firstChange = useRef(true);
 
   const { loading, error, reload } = useFetch(async () => {
     const [r, ps, ts] = await Promise.all([
@@ -60,49 +77,31 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     return r;
   }, [reportId]);
 
-  const projectOptions = useMemo(
-    () => projects.map((p) => ({ value: p.id, label: p.name })),
-    [projects],
-  );
-  const templateOptions = useMemo(
-    () => [{ value: "", label: "Default styling" }, ...templates.map((t) => ({ value: t.id, label: t.name }))],
-    [templates],
-  );
-
   const pdfUrl = `${API_BASE}/reports/${reportId}/pdf/`;
 
-  // The PDF response sends X-Frame-Options: deny, so it can't be embedded by URL.
-  // Fetch it as a blob and preview that — blob: URLs aren't framing-restricted.
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [previewLoading, setPreviewLoading] = useState(true);
+  // Live project data (progress tables / info) — refetched after each save.
+  useEffect(() => {
+    let alive = true;
+    api.get<ReportData>(`/reports/${reportId}/data/`).then((d) => alive && setData(d)).catch(() => {});
+    return () => { alive = false; };
+  }, [reportId, refreshKey]);
+
+  // Real-time preview: fetch the PDF as a blob (bypasses X-Frame-Options).
   useEffect(() => {
     let revoked = false;
     let objectUrl = "";
     setPreviewLoading(true);
     fetch(pdfUrl, { credentials: "include" })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("preview failed"))))
-      .then((blob) => {
-        if (revoked) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewUrl(objectUrl);
-      })
+      .then((blob) => { if (!revoked) { objectUrl = URL.createObjectURL(blob); setPreviewUrl(objectUrl); } })
       .catch(() => setPreviewUrl(""))
       .finally(() => !revoked && setPreviewLoading(false));
-    return () => {
-      revoked = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [pdfUrl, previewKey]);
+    return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [pdfUrl, refreshKey]);
 
-  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setForm((f) => (f ? { ...f, [k]: e.target.value } : f));
-    setSaved(false);
-  };
-
-  async function save() {
+  const save = useCallback(async () => {
     if (!form) return;
     setSaving(true);
-    setSaved(false);
     setSaveError(null);
     try {
       await api.patch(`/reports/${reportId}/`, {
@@ -113,13 +112,34 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
         period_finish: form.period_finish || null,
       });
       setSaved(true);
-      setPreviewKey((k) => k + 1); // reflect new project data / styling
+      setRefreshKey((k) => k + 1); // re-pull data + re-render preview
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : "Couldn't save report.");
     } finally {
       setSaving(false);
     }
-  }
+  }, [form, reportId]);
+
+  // Debounced auto-save for a real-time feel.
+  useEffect(() => {
+    if (!form) return;
+    if (firstChange.current) { firstChange.current = false; return; }
+    const t = setTimeout(() => { void save(); }, 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+
+  const projectOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
+  const templateOptions = useMemo(
+    () => [{ value: "", label: "Default styling" }, ...templates.map((t) => ({ value: t.id, label: t.name }))],
+    [templates],
+  );
+
+  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    setForm((f) => (f ? { ...f, [k]: e.target.value } : f));
+    setSaved(false);
+  };
+  const bump = () => setRefreshKey((k) => k + 1);
 
   return (
     <div className={styles.page}>
@@ -135,23 +155,33 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
               <div className={styles.headRow}>
                 <div>
                   <h1 className={styles.title}>{form.title || "Report"}</h1>
-                  <Badge tone={STATUS_TONE[form.status as ReportStatus] ?? "neutral"}>{form.status}</Badge>
+                  <Badge tone={STATUS_TONE[form.status as ReportStatus] ?? "neutral"}>
+                    {saving ? "Saving…" : saved ? "Saved" : "Unsaved"}
+                  </Badge>
                 </div>
                 <div className={styles.detailActions}>
-                  {canManage && <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save report"}</Button>}
+                  {canManage && <Button onClick={save} disabled={saving}>Save report</Button>}
                   <Button variant="secondary" leadingIcon={<Icon name="download" size={16} />}
                     onClick={() => window.open(pdfUrl, "_blank", "noopener")}>
                     Open / download PDF
                   </Button>
-                  {saved && <span className={styles.assetTag}>Saved</span>}
                 </div>
               </div>
+              <nav className={styles.tabs}>
+                {TABS.map((t) => (
+                  <button key={t.key} type="button"
+                    className={`${styles.tab} ${t.key === tab ? styles.tabActive : ""}`}
+                    onClick={() => setTab(t.key)}>
+                    {t.label}
+                  </button>
+                ))}
+              </nav>
             </header>
 
             <div className={styles.detailGrid}>
               <div>
-                {canManage && (
-                  <section className={styles.editCard}>
+                {tab === "setup" && canManage && (
+                  <section className={styles.tabPanel}>
                     <div className={styles.fieldRow}>
                       <Select label="Project (data source)" name="project" options={projectOptions} value={form.project} onChange={set("project")} />
                       <Select label="Template (design)" name="template" options={templateOptions} value={form.template} onChange={set("template")} />
@@ -168,20 +198,74 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />
                     </div>
-                    <div className={styles.field}>
-                      <label className={styles.label} htmlFor="description">Description (one line per bullet)</label>
-                      <textarea id="description" className={styles.textarea} value={form.description}
-                        onChange={set("description")} placeholder="وصف المشروع — اكتب كل نقطة في سطر…" />
-                      <span className={styles.hint}>Shown in the «Project Description» section. Falls back to the project description when empty.</span>
-                    </div>
-                    {saveError && <p className="formError">{saveError}</p>}
-                    <div className={styles.detailActions}>
-                      <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save report"}</Button>
-                      {saved && <span className={styles.assetTag}>Saved</span>}
-                    </div>
                   </section>
                 )}
-                <ReportAssets reportId={reportId} canManage={canManage} onChanged={() => setPreviewKey((k) => k + 1)} />
+
+                {tab === "cover" && (
+                  <ReportAssets reportId={reportId} canManage={canManage} only="cover" onChanged={bump} />
+                )}
+
+                {tab === "info" && (
+                  <section className={styles.tabPanel}>
+                    <h2 className={styles.panelTitle}>Project information (from {data?.project.name ?? "the project"})</h2>
+                    <table className={styles.dataTable}>
+                      <tbody>
+                        {data && ([
+                          ["Client", data.project.client], ["Consultant", data.project.consultant],
+                          ["Contractor", data.project.contractor], ["Type", data.project.type],
+                          ["Location", data.project.location],
+                          ["Value", data.project.budget ? `${data.project.budget} ${data.project.currency}` : "—"],
+                          ["Planned start", fmtDate(data.project.planned_start)],
+                          ["Planned finish", fmtDate(data.project.planned_finish)],
+                          ["Built-up area (m²)", data.project.size_sqm ?? "—"],
+                        ] as [string, string][]).map(([k, v]) => (
+                          <tr key={k}><th>{k}</th><td>{v || "—"}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </section>
+                )}
+
+                {tab === "description" && canManage && (
+                  <section className={styles.tabPanel}>
+                    <label className={styles.label} htmlFor="description">Description (one line per bullet)</label>
+                    <textarea id="description" className={styles.textarea} value={form.description}
+                      onChange={set("description")} placeholder="وصف المشروع — اكتب كل نقطة في سطر…" />
+                    <span className={styles.hint}>Shown in the «Project Description» section. Falls back to the project description when empty.</span>
+                  </section>
+                )}
+
+                {tab === "progress" && (
+                  <section className={styles.tabPanel}>
+                    <h2 className={styles.panelTitle}>Overall progress</h2>
+                    <div className={styles.bigStat}>{data ? `${data.overall.toFixed(1)}%` : "…"}</div>
+                    {data && (
+                      <div className={styles.statRow}>
+                        <div className={styles.statChip}><strong>{data.breakdown.completed}</strong><span>Completed</span></div>
+                        <div className={styles.statChip}><strong>{data.breakdown.in_progress}</strong><span>In progress</span></div>
+                        <div className={styles.statChip}><strong>{data.breakdown.not_started}</strong><span>Not started</span></div>
+                      </div>
+                    )}
+                    <h2 className={styles.panelTitle}>Progress by zone</h2>
+                    <table className={styles.dataTable}>
+                      <thead><tr><th>Zone</th><th>Progress</th></tr></thead>
+                      <tbody>
+                        {data?.zones.length
+                          ? data.zones.map((z) => <tr key={z.name}><th>{z.name}</th><td>{z.progress.toFixed(1)}%</td></tr>)
+                          : <tr><td colSpan={2}>No zones in this project yet.</td></tr>}
+                      </tbody>
+                    </table>
+                  </section>
+                )}
+
+                {tab === "photos" && (
+                  <ReportAssets reportId={reportId} canManage={canManage} only="progress" onChanged={bump} />
+                )}
+                {tab === "attachments" && (
+                  <ReportAssets reportId={reportId} canManage={canManage} only="attachment" onChanged={bump} />
+                )}
+
+                {saveError && <p className="formError">{saveError}</p>}
               </div>
 
               {previewUrl ? (
