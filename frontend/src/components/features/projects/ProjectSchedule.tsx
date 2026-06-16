@@ -60,9 +60,9 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     setActionError(null);
     setImportMsg(null);
     try {
-      const r = await api.upload<{ zones: number; subzones: number; activities: number; overall_progress: number }>(
+      const r = await api.upload<{ zones: number; phases: number; subzones: number; activities: number; overall_progress: number }>(
         `/upload/import/${projectId}`, file);
-      setImportMsg(`Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} cells (${r.overall_progress}% overall). Open a zone’s grid to view it.`);
+      setImportMsg(`Imported ${r.zones} zones, ${r.phases} phases, ${r.subzones} subzones, ${r.activities} cells (${r.overall_progress}% overall). Open a zone’s grid to view it.`);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");

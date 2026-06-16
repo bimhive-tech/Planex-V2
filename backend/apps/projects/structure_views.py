@@ -88,12 +88,22 @@ class ProjectZoneGridView(APIView):
         except (ProjectScope.DoesNotExist, ValueError, TypeError):
             raise NotFound("Zone not found.")
 
-        subzones = list(zone.children.order_by("sort_order", "name"))
-        col_index = {sz.id: i for i, sz in enumerate(subzones)}
+        # Subzones live under each phase (zone -> phase -> subzone). Columns are the
+        # distinct subzone names; cells from different phases land in different rows.
+        phase_ids = list(zone.children.values_list("id", flat=True))
+        subzone_scopes = list(
+            ProjectScope.objects.filter(parent_id__in=phase_ids, scope_type=ProjectScope.ScopeType.AREA)
+            .order_by("sort_order", "name")
+        )
+        columns, col_of_name, col_of_scope = [], {}, {}
+        for sz in subzone_scopes:
+            if sz.name not in col_of_name:
+                col_of_name[sz.name] = len(columns)
+                columns.append({"id": str(sz.id), "name": sz.name})
+            col_of_scope[sz.id] = col_of_name[sz.name]
 
-        rows_by_index = {}
-        order = []
-        acts = (Activity.objects.filter(scope__in=subzones)
+        rows_by_index, order = {}, []
+        acts = (Activity.objects.filter(scope_id__in=col_of_scope.keys())
                 .order_by("row_index", "name")
                 .values("id", "scope_id", "name", "phase_name", "weight", "progress_percent", "row_index"))
         for a in acts:
@@ -101,16 +111,16 @@ class ProjectZoneGridView(APIView):
             row = rows_by_index.get(ri)
             if row is None:
                 row = {"row_index": ri, "name": a["name"], "phase": a["phase_name"],
-                       "weight": str(a["weight"]), "cells": [None] * len(subzones)}
+                       "weight": str(a["weight"]), "cells": [None] * len(columns)}
                 rows_by_index[ri] = row
                 order.append(ri)
-            ci = col_index.get(a["scope_id"])
+            ci = col_of_scope.get(a["scope_id"])
             if ci is not None:
                 row["cells"][ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
 
         return Response({
             "zone": {"id": str(zone.id), "name": zone.name},
-            "subzones": [{"id": str(sz.id), "name": sz.name} for sz in subzones],
+            "subzones": columns,
             "rows": [rows_by_index[i] for i in order],
         })
 

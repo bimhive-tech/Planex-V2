@@ -87,7 +87,9 @@ def parse_sheet(rows):
         if not isinstance(name, str) or not name.strip():
             continue
         if skip_first_summary:
+            # No "W" column on this sheet — the first named row is the phase/summary.
             skip_first_summary = False
+            phase = name.strip()[:180]
             continue
 
         cells, any_num = [], False
@@ -135,35 +137,54 @@ def import_workbook(project, file_obj, *, replace=True) -> dict:
         project.scopes.all().delete()  # cascades subzones + activities
 
     company = project.company
-    subzone_total, activities = 0, []
+    subzone_total, phase_total, activities = 0, 0, []
     for z, (zone_name, sheet) in enumerate(parsed.items()):
         zone = ProjectScope.objects.create(
             company=company, project=project,
             scope_type=ProjectScope.ScopeType.ZONE, name=zone_name, sort_order=z,
         )
-        subzone_scopes = [
-            ProjectScope.objects.create(
-                company=company, project=project, parent=zone,
-                scope_type=ProjectScope.ScopeType.AREA, name=label or f"SZ{c + 1}", sort_order=c,
-            )
-            for c, label in enumerate(sheet["subzones"])
-        ]
-        subzone_total += len(subzone_scopes)
 
+        # Group tasks by phase (preserving order). Tree becomes Zone -> Phase ->
+        # Subzone -> cell, so phases are visible in the normal view; the grid
+        # unions subzones across phases by name.
+        order, by_phase = [], {}
         for task in sheet["tasks"]:
-            for c, val in enumerate(task["cells"]):
-                if val is None:
-                    continue
-                activities.append(Activity(
-                    company=company, project=project, scope=subzone_scopes[c],
-                    name=task["name"], weight=task["weight"], progress_percent=val,
-                    phase_name=task["phase"], row_index=task["row_index"], sort_order=task["row_index"],
-                    progress_type=Activity.ProgressType.PERCENTAGE,
-                ))
+            ph = task["phase"] or "Tasks"
+            if ph not in by_phase:
+                by_phase[ph] = []
+                order.append(ph)
+            by_phase[ph].append(task)
+
+        for pi, ph in enumerate(order):
+            phase_scope = ProjectScope.objects.create(
+                company=company, project=project, parent=zone,
+                scope_type=ProjectScope.ScopeType.PHASE, name=ph, sort_order=pi,
+            )
+            phase_total += 1
+            subzone_scopes = [
+                ProjectScope.objects.create(
+                    company=company, project=project, parent=phase_scope,
+                    scope_type=ProjectScope.ScopeType.AREA, name=label or f"SZ{c + 1}", sort_order=c,
+                )
+                for c, label in enumerate(sheet["subzones"])
+            ]
+            subzone_total += len(subzone_scopes)
+
+            for task in by_phase[ph]:
+                for c, val in enumerate(task["cells"]):
+                    if val is None:
+                        continue
+                    activities.append(Activity(
+                        company=company, project=project, scope=subzone_scopes[c],
+                        name=task["name"], weight=task["weight"], progress_percent=val,
+                        phase_name=ph, row_index=task["row_index"], sort_order=task["row_index"],
+                        progress_type=Activity.ProgressType.PERCENTAGE,
+                    ))
     Activity.objects.bulk_create(activities, batch_size=2000)
 
     return {
         "zones": len(parsed),
+        "phases": phase_total,
         "subzones": subzone_total,
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
