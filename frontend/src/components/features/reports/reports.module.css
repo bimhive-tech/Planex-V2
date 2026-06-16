@@ -207,6 +207,21 @@
   background: var(--bg-surface);
 }
 
+.previewEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 70vh;
+  min-height: 420px;
+  padding: var(--space-5);
+  color: var(--text-secondary);
+  text-align: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
 .cardLink {
   text-decoration: none;
   color: inherit;

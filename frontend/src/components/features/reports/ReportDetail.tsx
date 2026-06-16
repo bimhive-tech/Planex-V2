@@ -4,7 +4,7 @@
 // set the date/period, type the description, manage images (cover / progress /
 // attachments), and see a live PDF preview. Mirrors the Template Builder.
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -70,6 +70,30 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   );
 
   const pdfUrl = `${API_BASE}/reports/${reportId}/pdf/`;
+
+  // The PDF response sends X-Frame-Options: deny, so it can't be embedded by URL.
+  // Fetch it as a blob and preview that — blob: URLs aren't framing-restricted.
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(true);
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl = "";
+    setPreviewLoading(true);
+    fetch(pdfUrl, { credentials: "include" })
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("preview failed"))))
+      .then((blob) => {
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
+      })
+      .catch(() => setPreviewUrl(""))
+      .finally(() => !revoked && setPreviewLoading(false));
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [pdfUrl, previewKey]);
+
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm((f) => (f ? { ...f, [k]: e.target.value } : f));
     setSaved(false);
@@ -160,7 +184,13 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                 <ReportAssets reportId={reportId} canManage={canManage} onChanged={() => setPreviewKey((k) => k + 1)} />
               </div>
 
-              <iframe key={previewKey} className={styles.previewFrame} src={pdfUrl} title="Report PDF preview" />
+              {previewUrl ? (
+                <iframe className={styles.previewFrame} src={previewUrl} title="Report PDF preview" />
+              ) : (
+                <div className={styles.previewEmpty}>
+                  {previewLoading ? "Generating preview…" : "Preview unavailable — use Open / download PDF."}
+                </div>
+              )}
             </div>
           </>
         )}
