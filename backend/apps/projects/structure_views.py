@@ -47,31 +47,57 @@ def _validate_parent(project, parent):
         raise ValidationError({"parent": "Parent scope belongs to another project."})
 
 
-# Above this many activities (zone trackers), the tree omits the activity list —
-# they're viewed/edited per-zone in the Excel grid instead.
-ACTIVITY_INLINE_LIMIT = 600
+from django.db.models import Count
 
 
 class ProjectStructureView(APIView):
-    """GET the scope tree + rolled-up progress. Activities are inlined only for
-    small (manually-built) structures; large zone imports use the grid view."""
+    """GET the scope tree + rolled-up progress + a per-scope activity count.
+    Activities themselves are loaded lazily per scope (a zone tracker has tens of
+    thousands), via ScopeActivitiesView."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view(request)
-        scopes = project.scopes.all()
-        activity_count = project.activities.count()
-        inline = activity_count <= ACTIVITY_INLINE_LIMIT
+        counts = {
+            str(r["scope_id"]): r["n"]
+            for r in project.activities.values("scope_id").annotate(n=Count("id"))
+        }
+        from django.db.models import Q
+        agg = project.activities.aggregate(
+            total=Count("id"),
+            completed=Count("id", filter=Q(progress_percent__gte=100)),
+            not_started=Count("id", filter=Q(progress_percent__lte=0)),
+        )
+        total = agg["total"]
         return Response({
             "overall_progress": project_overall_progress(project),
             "scope_progress": scope_progress_map(project),
-            "scopes": ScopeSerializer(scopes, many=True).data,
-            "activities": ActivitySerializer(project.activities.all(), many=True).data if inline else [],
-            "activity_count": activity_count,
-            "activities_inlined": inline,
+            "scopes": ScopeSerializer(project.scopes.all(), many=True).data,
+            "scope_activity_counts": counts,
+            "activity_count": total,
+            "progress_breakdown": {
+                "total": total, "completed": agg["completed"], "not_started": agg["not_started"],
+                "in_progress": total - agg["completed"] - agg["not_started"],
+            },
         })
+
+
+class ScopeActivitiesView(APIView):
+    """GET the activities directly under one scope (lazy tree expansion)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, scope_id):
+        project = _project(request, project_id)
+        _require_view(request)
+        try:
+            scope = ProjectScope.objects.get(pk=scope_id, project=project)
+        except (ProjectScope.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Scope not found.")
+        acts = scope.activities.order_by("row_index", "name")
+        return Response(ActivitySerializer(acts, many=True).data)
 
 
 class ProjectZoneGridView(APIView):
@@ -88,18 +114,17 @@ class ProjectZoneGridView(APIView):
         except (ProjectScope.DoesNotExist, ValueError, TypeError):
             raise NotFound("Zone not found.")
 
-        # Tree is Zone -> Phase -> Task; each task carries (subzone) cells. Rows are
-        # the task scopes; columns are the distinct subzone codes from the cells.
-        phase_ids = list(zone.children.values_list("id", flat=True))
-        task_scopes = list(
-            ProjectScope.objects.filter(parent_id__in=phase_ids, scope_type=ProjectScope.ScopeType.TASK)
-            .select_related("parent").order_by("parent__sort_order", "sort_order")
-        )
-        task_ids = [t.id for t in task_scopes]
-        acts = list(Activity.objects.filter(scope_id__in=task_ids)
-                    .values("id", "scope_id", "subzone_code", "subzone_index", "weight", "progress_percent"))
+        # Tree is Zone -> Subzone -> Phase -> Activity(cell). Columns are subzones
+        # (subzone_index), rows are tasks (row_index); cells come from the activities
+        # under this zone's phase scopes.
+        subzone_ids = list(zone.children.values_list("id", flat=True))
+        phase_ids = list(ProjectScope.objects.filter(
+            parent_id__in=subzone_ids, scope_type=ProjectScope.ScopeType.PHASE
+        ).values_list("id", flat=True))
+        acts = list(Activity.objects.filter(scope_id__in=phase_ids).values(
+            "id", "name", "phase_name", "weight", "progress_percent",
+            "row_index", "subzone_index", "subzone_code"))
 
-        # Columns: distinct subzone indices (ordered), mapped to their code/name.
         index_name = {}
         for a in acts:
             index_name.setdefault(a["subzone_index"], a["subzone_code"])
@@ -107,26 +132,23 @@ class ProjectZoneGridView(APIView):
         col_pos = {idx: i for i, idx in enumerate(col_order)}
         columns = [{"id": str(idx), "name": index_name[idx]} for idx in col_order]
 
-        by_task = {}
-        for a in acts:
-            by_task.setdefault(a["scope_id"], []).append(a)
-
-        rows = []
-        for i, t in enumerate(task_scopes):
-            cells = [None] * len(col_order)
-            weight = "1"
-            for a in by_task.get(t.id, []):
-                weight = str(a["weight"])
-                ci = col_pos.get(a["subzone_index"])
-                if ci is not None:
-                    cells[ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
-            rows.append({"row_index": i, "name": t.name, "phase": t.parent.name,
-                         "weight": weight, "cells": cells})
+        rows_by_index, order = {}, []
+        for a in sorted(acts, key=lambda x: (x["row_index"], x["name"])):
+            ri = a["row_index"]
+            row = rows_by_index.get(ri)
+            if row is None:
+                row = {"row_index": ri, "name": a["name"], "phase": a["phase_name"],
+                       "weight": str(a["weight"]), "cells": [None] * len(col_order)}
+                rows_by_index[ri] = row
+                order.append(ri)
+            ci = col_pos.get(a["subzone_index"])
+            if ci is not None:
+                row["cells"][ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
 
         return Response({
             "zone": {"id": str(zone.id), "name": zone.name},
             "subzones": columns,
-            "rows": rows,
+            "rows": [rows_by_index[i] for i in order],
         })
 
 

@@ -137,17 +137,17 @@ def import_workbook(project, file_obj, *, replace=True) -> dict:
         project.scopes.all().delete()  # cascades subzones + activities
 
     company = project.company
-    phase_total, task_total, activities = 0, 0, []
     Scope = ProjectScope
+    zones, subz, phases, activities = [], [], [], []
+    subzone_total = 0
     for z, (zone_name, sheet) in enumerate(parsed.items()):
-        zone = Scope.objects.create(
-            company=company, project=project,
-            scope_type=Scope.ScopeType.ZONE, name=zone_name, sort_order=z,
-        )
-        subzones = sheet["subzones"]
+        zone = Scope(company=company, project=project,
+                     scope_type=Scope.ScopeType.ZONE, name=zone_name, sort_order=z)
+        zones.append(zone)
 
-        # Group tasks by phase (preserving order). Tree = Zone -> Phase -> Task;
-        # each task carries its (subzone) cells as activities, surfaced in the grid.
+        # Group tasks by phase (preserving order). Tree is
+        # Zone -> Subzone -> Phase -> Task: each subzone holds the phases, each phase
+        # holds that subzone's task cells (an Activity per cell).
         order, by_phase = [], {}
         for task in sheet["tasks"]:
             ph = task["phase"] or "Tasks"
@@ -156,35 +156,37 @@ def import_workbook(project, file_obj, *, replace=True) -> dict:
                 order.append(ph)
             by_phase[ph].append(task)
 
-        for pi, ph in enumerate(order):
-            phase_scope = Scope.objects.create(
-                company=company, project=project, parent=zone,
-                scope_type=Scope.ScopeType.PHASE, name=ph, sort_order=pi,
-            )
-            phase_total += 1
-            for ti, task in enumerate(by_phase[ph]):
-                task_scope = Scope.objects.create(
-                    company=company, project=project, parent=phase_scope,
-                    scope_type=Scope.ScopeType.TASK, name=task["name"], sort_order=ti,
-                )
-                task_total += 1
-                for c, val in enumerate(task["cells"]):
+        for c, label in enumerate(sheet["subzones"]):
+            subzone = Scope(company=company, project=project, parent=zone,
+                            scope_type=Scope.ScopeType.AREA, name=label or f"SZ{c + 1}", sort_order=c)
+            subz.append(subzone)
+            subzone_total += 1
+            for pi, ph in enumerate(order):
+                phase = Scope(company=company, project=project, parent=subzone,
+                              scope_type=Scope.ScopeType.PHASE, name=ph, sort_order=pi)
+                phases.append(phase)
+                for task in by_phase[ph]:
+                    val = task["cells"][c]
                     if val is None:
                         continue
                     activities.append(Activity(
-                        company=company, project=project, scope=task_scope,
+                        company=company, project=project, scope=phase,
                         name=task["name"], weight=task["weight"], progress_percent=val,
                         phase_name=ph, row_index=task["row_index"],
-                        subzone_code=subzones[c] or f"SZ{c + 1}", subzone_index=c,
+                        subzone_code=label or f"SZ{c + 1}", subzone_index=c,
                         progress_type=Activity.ProgressType.PERCENTAGE,
                     ))
+
+    # Insert parents before children (UUID PKs are generated client-side).
+    Scope.objects.bulk_create(zones, batch_size=1000)
+    Scope.objects.bulk_create(subz, batch_size=1000)
+    Scope.objects.bulk_create(phases, batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
 
     return {
-        "zones": len(parsed),
-        "phases": phase_total,
-        "tasks": task_total,
-        "subzones": len(next(iter(parsed.values()))["subzones"]) if parsed else 0,
+        "zones": len(zones),
+        "subzones": subzone_total,
+        "phases": len(phases),
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
     }

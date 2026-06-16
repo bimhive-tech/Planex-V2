@@ -13,6 +13,7 @@ import { useFetch } from "@/hooks/useFetch";
 import type { Activity, ProjectStructure, Scope } from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
+import { ScopeActivities } from "./ScopeActivities";
 import { ZoneGridView } from "./ZoneGridView";
 import styles from "./scheduleTree.module.css";
 
@@ -33,13 +34,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
   // Bubble live stats (overall + status breakdown) up to the Overview tab.
   useEffect(() => {
     if (!data) return;
-    const acts = data.activities;
-    const completed = acts.filter((a) => Number(a.progress_percent) >= 100).length;
-    const notStarted = acts.filter((a) => Number(a.progress_percent) <= 0).length;
-    onStatsChange({
-      overall: data.overall_progress,
-      breakdown: { total: acts.length, completed, in_progress: acts.length - completed - notStarted, not_started: notStarted },
-    });
+    onStatsChange({ overall: data.overall_progress, breakdown: data.progress_breakdown });
   }, [data, onStatsChange]);
 
   const [scopeModal, setScopeModal] = useState<{ parentId: string | null; scope: Scope | null; type: string } | null>(null);
@@ -60,9 +55,9 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     setActionError(null);
     setImportMsg(null);
     try {
-      const r = await api.upload<{ zones: number; phases: number; tasks: number; subzones: number; activities: number; overall_progress: number }>(
+      const r = await api.upload<{ zones: number; phases: number; subzones: number; activities: number; overall_progress: number }>(
         `/upload/import/${projectId}`, file);
-      setImportMsg(`Imported ${r.zones} zones, ${r.phases} phases, ${r.tasks} tasks, ${r.subzones} subzones (${r.overall_progress}% overall). Open a zone’s grid for the subzone detail.`);
+      setImportMsg(`Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall). Expand a subzone to see its phases and tasks, or open the zone grid.`);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
@@ -71,7 +66,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     }
   }
 
-  const { childrenOf, activitiesOf, progressOf } = useMemo(() => buildTree(data), [data]);
+  const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
 
   async function del(url: string, confirmText: string) {
     if (!window.confirm(confirmText)) return;
@@ -84,17 +79,6 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     }
   }
 
-  async function setProgress(activity: Activity, value: string) {
-    const v = Math.max(0, Math.min(100, Number(value)));
-    if (Number.isNaN(v) || String(v) === activity.progress_percent) return;
-    setActionError(null);
-    try {
-      await api.patch(`/projects/${projectId}/activities/${activity.id}/`, { progress_percent: v });
-      reload();
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't save progress.");
-    }
-  }
 
   const roots = childrenOf.get(null) ?? [];
 
@@ -115,7 +99,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     <div>
       <div className={styles.toolbar}>
         <span className={styles.muted}>
-          {data ? `${data.scopes.length} scopes · ${data.activities.length} activities · ${data.overall_progress}% overall` : "Structure"}
+          {data ? `${data.scopes.length} scopes · ${data.activity_count} tasks · ${data.overall_progress}% overall` : "Structure"}
         </span>
         {canManage && (
           <div className={styles.toolbarActions}>
@@ -147,7 +131,8 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
           {roots.map((s) => (
             <ScopeNode
               key={s.id} scope={s} depth={0}
-              childrenOf={childrenOf} activitiesOf={activitiesOf} progressOf={progressOf}
+              projectId={projectId}
+              childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
               canManage={canManage}
               onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
               onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
@@ -155,9 +140,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
                 `Delete “${scope.name}” and everything under it?`)}
               onAddActivity={(scopeId) => setActivityModal({ scopeId, activity: null })}
               onEditActivity={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
-              onDeleteActivity={(activity) => del(`/projects/${projectId}/activities/${activity.id}/`,
-                `Delete activity “${activity.name}”?`)}
-              onSetProgress={setProgress}
+              onChanged={reload}
               onOpenGrid={(id, name) => setGridZone({ id, name })}
             />
           ))}
@@ -185,27 +168,27 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
 interface NodeProps {
   scope: Scope;
   depth: number;
+  projectId: string;
   childrenOf: Map<string | null, Scope[]>;
-  activitiesOf: Map<string, Activity[]>;
   progressOf: (scopeId: string) => number;
+  activityCountOf: Record<string, number>;
   canManage: boolean;
   onAddScope: (parentId: string, type: string) => void;
   onEditScope: (scope: Scope) => void;
   onDeleteScope: (scope: Scope) => void;
   onAddActivity: (scopeId: string) => void;
   onEditActivity: (activity: Activity) => void;
-  onDeleteActivity: (activity: Activity) => void;
-  onSetProgress: (activity: Activity, value: string) => void;
+  onChanged: () => void;
   onOpenGrid: (id: string, name: string) => void;
 }
 
 function ScopeNode(props: NodeProps) {
-  const { scope, depth, childrenOf, activitiesOf, progressOf, canManage } = props;
+  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage } = props;
   const childScopes = childrenOf.get(scope.id) ?? [];
-  // Collapse nodes with many children by default (e.g. a phase with 90+ tasks).
-  const [open, setOpen] = useState(childScopes.length <= 25);
-  const activities = activitiesOf.get(scope.id) ?? [];
-  const hasChildren = childScopes.length > 0 || activities.length > 0;
+  const activityCount = activityCountOf[scope.id] ?? 0;
+  // Collapse nodes with many children/tasks by default.
+  const [open, setOpen] = useState(childScopes.length <= 25 && activityCount <= 25);
+  const hasChildren = childScopes.length > 0 || activityCount > 0;
   const pct = progressOf(scope.id);
   const indent = { "--depth": String(depth) } as CSSProperties;
 
@@ -251,40 +234,13 @@ function ScopeNode(props: NodeProps) {
       {open && (
         <>
           {childScopes.map((c) => <ScopeNode key={c.id} {...props} scope={c} depth={depth + 1} />)}
-          {activities.map((a) => (
-            <div key={a.id} className={styles.activityRow} style={{ "--depth": String(depth + 1) } as CSSProperties}>
-              <span className={styles.activityName}>
-                {a.name}
-                {a.code && <span className={styles.activityMeta}> · {a.code}</span>}
-                {a.unit && <span className={styles.activityMeta}> · {a.unit}</span>}
-                <span className={styles.activityMeta}> · w{a.weight}</span>
-              </span>
-              {canManage ? (
-                <input
-                  key={a.progress_percent}
-                  className={styles.progressInput}
-                  type="number" min="0" max="100" step="1"
-                  defaultValue={a.progress_percent}
-                  onBlur={(e) => props.onSetProgress(a, e.target.value)}
-                  aria-label={`Progress for ${a.name}`}
-                />
-              ) : (
-                <span className={`${styles.pct} tnum`}>{a.progress_percent}%</span>
-              )}
-              {canManage && (
-                <div className={styles.actions}>
-                  <button className={styles.actionBtn} title="Edit" aria-label="Edit activity"
-                    onClick={() => props.onEditActivity(a)}>
-                    <Icon name="edit" size={14} />
-                  </button>
-                  <button className={`${styles.actionBtn} ${styles.danger}`} title="Delete" aria-label="Delete activity"
-                    onClick={() => props.onDeleteActivity(a)}>
-                    <Icon name="trash" size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+          {/* Leaf scope with tasks → lazy-load its activities. */}
+          {childScopes.length === 0 && activityCount > 0 && (
+            <ScopeActivities
+              projectId={props.projectId} scopeId={scope.id} depth={depth + 1}
+              canManage={canManage} onEdit={props.onEditActivity} onChanged={props.onChanged}
+            />
+          )}
         </>
       )}
     </div>
@@ -294,23 +250,15 @@ function ScopeNode(props: NodeProps) {
 // ── Tree helpers ────────────────────────────────────────────────────────────
 function buildTree(data: ProjectStructure | null) {
   const childrenOf = new Map<string | null, Scope[]>();
-  const activitiesOf = new Map<string, Activity[]>();
   if (data) {
     for (const s of data.scopes) {
       const key = s.parent;
       if (!childrenOf.has(key)) childrenOf.set(key, []);
       childrenOf.get(key)!.push(s);
     }
-    for (const a of data.activities) {
-      if (!activitiesOf.has(a.scope)) activitiesOf.set(a.scope, []);
-      activitiesOf.get(a.scope)!.push(a);
-    }
   }
-
-  // Progress comes from the backend (subtree roll-up), so it works even when the
-  // activity list is omitted for large zone imports.
   const progress = data?.scope_progress ?? {};
   const progressOf = (scopeId: string): number => progress[scopeId] ?? 0;
-
-  return { childrenOf, activitiesOf, progressOf };
+  const activityCountOf = data?.scope_activity_counts ?? {};
+  return { childrenOf, progressOf, activityCountOf };
 }

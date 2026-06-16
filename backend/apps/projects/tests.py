@@ -140,7 +140,11 @@ class ProjectApiTests(TestCase):
         struct = self.client.get(f"{base}/structure/").json()
         self.assertEqual(struct["overall_progress"], 75.0)
         self.assertEqual(len(struct["scopes"]), 1)
-        self.assertEqual(len(struct["activities"]), 2)
+        self.assertEqual(struct["activity_count"], 2)
+        self.assertEqual(struct["scope_activity_counts"][phase["id"]], 2)
+        # activities are lazy-loaded per scope
+        acts = self.client.get(f"{base}/scopes/{phase['id']}/activities/").json()
+        self.assertEqual(len(acts), 2)
 
     def test_update_activity_progress_recomputes(self):
         p = Project.objects.create(company=self.company_a, name="Bridge", project_type="infrastructure")

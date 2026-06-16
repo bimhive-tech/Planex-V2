@@ -102,9 +102,9 @@ export interface ProjectStructure {
   overall_progress: number;
   scope_progress: Record<string, number>;
   scopes: Scope[];
-  activities: Activity[];
+  scope_activity_counts: Record<string, number>;
   activity_count: number;
-  activities_inlined: boolean;
+  progress_breakdown: ProgressBreakdown;
 }
 
 // Excel grid (one zone): subzones across columns, tasks down the rows.
