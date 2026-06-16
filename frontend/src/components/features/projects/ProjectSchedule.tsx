@@ -13,6 +13,7 @@ import { useFetch } from "@/hooks/useFetch";
 import type { Activity, ProjectStructure, Scope } from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
+import { ZoneGridView } from "./ZoneGridView";
 import styles from "./scheduleTree.module.css";
 
 const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", building: "area", area: "area" };
@@ -44,6 +45,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
   const [scopeModal, setScopeModal] = useState<{ parentId: string | null; scope: Scope | null; type: string } | null>(null);
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [gridZone, setGridZone] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -58,9 +60,9 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
     setActionError(null);
     setImportMsg(null);
     try {
-      const r = await api.upload<{ zones: number; activities: number; overall_progress: number }>(
+      const r = await api.upload<{ zones: number; subzones: number; activities: number; overall_progress: number }>(
         `/upload/import/${projectId}`, file);
-      setImportMsg(`Imported ${r.zones} zones and ${r.activities} activities (${r.overall_progress}% overall).`);
+      setImportMsg(`Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} cells (${r.overall_progress}% overall). Open a zone’s grid to view it.`);
       reload();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
@@ -95,6 +97,19 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
   }
 
   const roots = childrenOf.get(null) ?? [];
+
+  if (gridZone) {
+    return (
+      <ZoneGridView
+        projectId={projectId}
+        zoneId={gridZone.id}
+        zoneName={gridZone.name}
+        canManage={canManage}
+        onBack={() => setGridZone(null)}
+        onChanged={reload}
+      />
+    );
+  }
 
   return (
     <div>
@@ -143,6 +158,7 @@ export function ProjectSchedule({ projectId, canManage, onStatsChange }: Props) 
               onDeleteActivity={(activity) => del(`/projects/${projectId}/activities/${activity.id}/`,
                 `Delete activity “${activity.name}”?`)}
               onSetProgress={setProgress}
+              onOpenGrid={(id, name) => setGridZone({ id, name })}
             />
           ))}
         </StateView>
@@ -180,6 +196,7 @@ interface NodeProps {
   onEditActivity: (activity: Activity) => void;
   onDeleteActivity: (activity: Activity) => void;
   onSetProgress: (activity: Activity, value: string) => void;
+  onOpenGrid: (id: string, name: string) => void;
 }
 
 function ScopeNode(props: NodeProps) {
@@ -201,6 +218,13 @@ function ScopeNode(props: NodeProps) {
         <span className={styles.scopeName}>{scope.name}</span>
         <div className={styles.bar}><span className={styles.barFill} style={{ ["--pct" as string]: `${pct}%` }} /></div>
         <span className={`${styles.pct} tnum`}>{pct}%</span>
+        {scope.scope_type === "zone" && childScopes.length > 0 && (
+          <button className={styles.gridBtn} title="Open Excel grid" aria-label="Open Excel grid"
+            onClick={() => props.onOpenGrid(scope.id, scope.name)}>
+            <Icon name="dashboard" size={14} />
+            <span>Grid</span>
+          </button>
+        )}
         {canManage && (
           <div className={styles.actions}>
             <button className={styles.actionBtn} title="Add sub-level" aria-label="Add sub-level"
@@ -282,21 +306,10 @@ function buildTree(data: ProjectStructure | null) {
     }
   }
 
-  // Weighted progress over a scope's whole subtree.
-  const progressOf = (scopeId: string): number => {
-    let wsum = 0;
-    let psum = 0;
-    const walk = (id: string) => {
-      for (const a of activitiesOf.get(id) ?? []) {
-        const w = Number(a.weight) || 0;
-        wsum += w;
-        psum += w * (Number(a.progress_percent) || 0);
-      }
-      for (const c of childrenOf.get(id) ?? []) walk(c.id);
-    };
-    walk(scopeId);
-    return wsum ? Math.round((psum / wsum) * 10) / 10 : 0;
-  };
+  // Progress comes from the backend (subtree roll-up), so it works even when the
+  // activity list is omitted for large zone imports.
+  const progress = data?.scope_progress ?? {};
+  const progressOf = (scopeId: string): number => progress[scopeId] ?? 0;
 
   return { childrenOf, activitiesOf, progressOf };
 }

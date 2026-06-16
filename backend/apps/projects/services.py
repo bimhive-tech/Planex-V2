@@ -17,14 +17,39 @@ def project_overall_progress(project) -> float:
 
 
 def scope_progress_map(project) -> dict:
-    """Map of scope_id -> weighted progress, rolled up from each scope's own
-    activities (direct children). The frontend composes deeper subtree totals."""
-    rows = (
-        project.activities.values("scope_id")
-        .annotate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
-    )
-    out = {}
-    for r in rows:
-        wsum = r["wsum"] or 0
-        out[str(r["scope_id"])] = round(float(r["psum"] or 0) / float(wsum), 1) if wsum else 0.0
-    return out
+    """Map of scope_id -> weighted progress rolled up over the scope's *whole
+    subtree*. Computed on the backend so the tree shows real progress without
+    shipping every activity (zone trackers have tens of thousands of cells)."""
+    direct_w, direct_pw = {}, {}
+    for sid, w, p in project.activities.values_list("scope_id", "weight", "progress_percent"):
+        w, p = float(w), float(p)
+        direct_w[sid] = direct_w.get(sid, 0.0) + w
+        direct_pw[sid] = direct_pw.get(sid, 0.0) + w * p
+
+    children, all_ids = {}, []
+    roots = []
+    for sid, pid in project.scopes.values_list("id", "parent_id"):
+        all_ids.append(sid)
+        if pid is None:
+            roots.append(sid)
+        else:
+            children.setdefault(pid, []).append(sid)
+
+    sub_w, sub_pw = {}, {}
+
+    def agg(sid):
+        w, pw = direct_w.get(sid, 0.0), direct_pw.get(sid, 0.0)
+        for child in children.get(sid, []):
+            cw, cpw = agg(child)
+            w += cw
+            pw += cpw
+        sub_w[sid], sub_pw[sid] = w, pw
+        return w, pw
+
+    for r in roots:
+        agg(r)
+
+    return {
+        str(sid): (round(sub_pw[sid] / sub_w[sid], 1) if sub_w.get(sid) else 0.0)
+        for sid in all_ids
+    }

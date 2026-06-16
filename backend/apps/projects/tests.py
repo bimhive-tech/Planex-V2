@@ -16,28 +16,31 @@ class ImportParserTests(SimpleTestCase):
         rows = [
             (None, None, 1, 2, 3),
             (None, None, "(A1)", "(A2)", "(A3)"),
-            ("W", "summary", 0.5, 0.5, 0.5),
-            (2.0, "Task1", 1, 1, 1),       # avg 1.0 -> 100%, weight 2
-            (1.0, "Task2", 0, 0.5, 1),     # avg 0.5 -> 50%, weight 1
+            ("W", "Phase 1", 0.5, 0.5, 0.5),   # phase header (col-A "W") -> skipped
+            (2.0, "Task1", 1, 1, 1),           # cells 100/100/100, weight 2
+            (1.0, "Task2", 0, 0.5, 1),         # cells 0/50/100, weight 1
         ]
-        tasks = parse_sheet(rows)
-        self.assertEqual(tasks, [
-            {"name": "Task1", "weight": 2.0, "progress": 100.0},
-            {"name": "Task2", "weight": 1.0, "progress": 50.0},
-        ])
+        sheet = parse_sheet(rows)
+        self.assertEqual(sheet["subzones"], ["(A1)", "(A2)", "(A3)"])
+        self.assertEqual(len(sheet["tasks"]), 2)
+        self.assertEqual(sheet["tasks"][0]["weight"], 2.0)
+        self.assertEqual(sheet["tasks"][0]["phase"], "Phase 1")
+        self.assertEqual(sheet["tasks"][0]["cells"], [100.0, 100.0, 100.0])
+        self.assertEqual(sheet["tasks"][1]["cells"], [0.0, 50.0, 100.0])
 
     def test_detects_grid_without_weight_column(self):
         # Like ZONE (B): codes start in column 1, name is column 0, no weight col.
         rows = [
             (None, 1, 2),
             (None, "(B1)", "(B2)"),
-            ("summary", 0.4, 0.4),
-            ("Task1", 1, 0),               # avg 0.5 -> 50%, default weight 1
+            ("summary", 0.4, 0.4),         # first row is the summary -> skipped
+            ("Task1", 1, 0),              # cells 100/0, default weight 1
         ]
-        tasks = parse_sheet(rows)
-        self.assertEqual(len(tasks), 1)
-        self.assertEqual(tasks[0]["weight"], 1.0)
-        self.assertEqual(tasks[0]["progress"], 50.0)
+        sheet = parse_sheet(rows)
+        self.assertEqual(sheet["subzones"], ["(B1)", "(B2)"])
+        self.assertEqual(len(sheet["tasks"]), 1)
+        self.assertEqual(sheet["tasks"][0]["weight"], 1.0)
+        self.assertEqual(sheet["tasks"][0]["cells"], [100.0, 0.0])
 
 STRONG_PW = "Str0ngPassw0rd!"
 

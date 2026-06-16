@@ -47,8 +47,14 @@ def _validate_parent(project, parent):
         raise ValidationError({"parent": "Parent scope belongs to another project."})
 
 
+# Above this many activities (zone trackers), the tree omits the activity list —
+# they're viewed/edited per-zone in the Excel grid instead.
+ACTIVITY_INLINE_LIMIT = 600
+
+
 class ProjectStructureView(APIView):
-    """GET the full tree (scopes + activities) plus rolled-up progress."""
+    """GET the scope tree + rolled-up progress. Activities are inlined only for
+    small (manually-built) structures; large zone imports use the grid view."""
 
     permission_classes = [IsAuthenticated]
 
@@ -56,12 +62,56 @@ class ProjectStructureView(APIView):
         project = _project(request, project_id)
         _require_view(request)
         scopes = project.scopes.all()
-        activities = project.activities.all()
+        activity_count = project.activities.count()
+        inline = activity_count <= ACTIVITY_INLINE_LIMIT
         return Response({
             "overall_progress": project_overall_progress(project),
             "scope_progress": scope_progress_map(project),
             "scopes": ScopeSerializer(scopes, many=True).data,
-            "activities": ActivitySerializer(activities, many=True).data,
+            "activities": ActivitySerializer(project.activities.all(), many=True).data if inline else [],
+            "activity_count": activity_count,
+            "activities_inlined": inline,
+        })
+
+
+class ProjectZoneGridView(APIView):
+    """GET the Excel-style matrix for one zone: subzones (columns) x tasks (rows),
+    each cell an activity's progress."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, zone_id):
+        project = _project(request, project_id)
+        _require_view(request)
+        try:
+            zone = ProjectScope.objects.get(pk=zone_id, project=project)
+        except (ProjectScope.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Zone not found.")
+
+        subzones = list(zone.children.order_by("sort_order", "name"))
+        col_index = {sz.id: i for i, sz in enumerate(subzones)}
+
+        rows_by_index = {}
+        order = []
+        acts = (Activity.objects.filter(scope__in=subzones)
+                .order_by("row_index", "name")
+                .values("id", "scope_id", "name", "phase_name", "weight", "progress_percent", "row_index"))
+        for a in acts:
+            ri = a["row_index"]
+            row = rows_by_index.get(ri)
+            if row is None:
+                row = {"row_index": ri, "name": a["name"], "phase": a["phase_name"],
+                       "weight": str(a["weight"]), "cells": [None] * len(subzones)}
+                rows_by_index[ri] = row
+                order.append(ri)
+            ci = col_index.get(a["scope_id"])
+            if ci is not None:
+                row["cells"][ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
+
+        return Response({
+            "zone": {"id": str(zone.id), "name": zone.name},
+            "subzones": [{"id": str(sz.id), "name": sz.name} for sz in subzones],
+            "rows": [rows_by_index[i] for i in order],
         })
 
 

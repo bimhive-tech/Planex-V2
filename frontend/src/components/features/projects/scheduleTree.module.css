@@ -105,6 +105,23 @@
   flex-shrink: 0;
 }
 
+.gridBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: var(--radius-sm);
+}
+.gridBtn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
 .actions {
   display: flex;
   gap: 2px;

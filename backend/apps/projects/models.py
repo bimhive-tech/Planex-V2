@@ -109,8 +109,17 @@ class Activity(TimestampedModel):
     progress_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     sort_order = models.PositiveIntegerField(default=0)
 
+    # Excel-grid support: a zone tracker stores one Activity per (task, subzone)
+    # cell. `row_index` identifies the task row (same value across its subzones)
+    # and `phase_name` groups task rows into sections.
+    phase_name = models.CharField(max_length=180, blank=True)
+    row_index = models.PositiveIntegerField(default=0)
+
     class Meta:
-        indexes = [models.Index(fields=["project", "scope"])]
+        indexes = [
+            models.Index(fields=["project", "scope"]),
+            models.Index(fields=["scope", "row_index"]),
+        ]
         ordering = ["sort_order", "name"]
 
     def __str__(self):

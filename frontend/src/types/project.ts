@@ -85,4 +85,24 @@ export interface ProjectStructure {
   scope_progress: Record<string, number>;
   scopes: Scope[];
   activities: Activity[];
+  activity_count: number;
+  activities_inlined: boolean;
+}
+
+// Excel grid (one zone): subzones across columns, tasks down the rows.
+export interface GridCell {
+  id: string;
+  progress: string;
+}
+export interface GridRow {
+  row_index: number;
+  name: string;
+  phase: string;
+  weight: string;
+  cells: (GridCell | null)[];
+}
+export interface ZoneGrid {
+  zone: { id: string; name: string };
+  subzones: { id: string; name: string }[];
+  rows: GridRow[];
 }
