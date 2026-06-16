@@ -37,7 +37,7 @@ export function ReportAssets({
     () => api.get<ReportImage[]>(`/reports/${reportId}/images/`),
     [reportId],
   );
-  const images = data ?? [];
+  const images = Array.isArray(data) ? data : [];
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();

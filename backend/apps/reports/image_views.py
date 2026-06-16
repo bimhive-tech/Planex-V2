@@ -36,6 +36,7 @@ class ReportImageAccessMixin:
 
 class ReportImageListCreateView(ReportImageAccessMixin, generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser]
+    pagination_class = None  # small list — return a plain array, not a page object
 
     def get_queryset(self):
         self.check_read()

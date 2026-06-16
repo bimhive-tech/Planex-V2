@@ -37,6 +37,7 @@ class ProjectImageListCreateView(ProjectImageAccessMixin, generics.ListCreateAPI
     """List existing images or upload a new private image for a project."""
 
     parser_classes = [MultiPartParser, FormParser]
+    pagination_class = None  # small list — return a plain array, not a page object
 
     def get_queryset(self):
         self.check_read_permission()

@@ -36,7 +36,7 @@ export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) 
     () => api.get<ProjectImage[]>(`/projects/${projectId}/images/`),
     [projectId],
   );
-  const images = data ?? [];
+  const images = Array.isArray(data) ? data : [];
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();
