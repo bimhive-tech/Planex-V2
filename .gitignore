@@ -22,3 +22,6 @@ npm-debug.log*
 # Editors
 .idea/
 .vscode/
+
+# Local media (uploads) — never commit; prod uses R2
+backend/media/
