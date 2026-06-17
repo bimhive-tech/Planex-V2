@@ -84,6 +84,14 @@ def _heading(styles, text):
                        spaceBefore=1, spaceAfter=8, hAlign="CENTER")]
 
 
+def _sub_heading(styles, text):
+    """A smaller centered heading that is NOT listed in the TOC (style name
+    differs from 'SectionHeading', which afterFlowable notifies)."""
+    s = ParagraphStyle("SubHeading", parent=styles["section"], fontSize=styles["section"].fontSize - 2)
+    return [Paragraph(shape(text), s),
+            HRFlowable(width="28%", thickness=1, color=s.textColor, spaceBefore=1, spaceAfter=6, hAlign="CENTER")]
+
+
 def _divider(styles, text):
     """A blank 'section divider' page with the heading centered (reference look)."""
     ds = ParagraphStyle("Divider", parent=styles["section"])  # non-TOC style name
@@ -320,7 +328,8 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w):
     mid.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 
     flow += [top, Spacer(1, 6), mid]
-    flow += [NextPageTemplate("body"), PageBreak()]
+    # Return to portrait; the next section's page break applies the body template.
+    flow += [NextPageTemplate("body")]
     return flow
 
 
@@ -372,12 +381,20 @@ def build_report_pdf(report, ctx) -> bytes:
         if rtl:
             lvl.wordWrap = "RTL"  # mirrors leader + page number to the left
         toc.levelStyles = [lvl]
-        story += [toc, PageBreak()]
+        story += [toc]
 
     p = ctx["project"]
 
+    def major(label):
+        """Start a major (TOC-listed) section on a fresh page."""
+        out = [PageBreak()]
+        if cfg.get("dividers"):
+            out += _divider(styles, label)
+        out += _heading(styles, label)
+        return out
+
     if sections.get("summary"):
-        story += _heading(styles, labels["summary"])
+        story += major(labels["summary"])
         b = ctx["breakdown"]
         story.append(_aligned(styles["body"],
             f"{p['name']} — {ctx['overall']:.1f}% — {b['total']} {labels['activities']}.",
@@ -389,107 +406,100 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(Spacer(1, 10))
 
     if sections.get("project_info"):
-        story += _heading(styles, labels["project_info"])
+        story += major(labels["project_info"])
+        dur = ctx.get("duration") or {}
         rows = [
             (labels["info_name"], p["name"]),
+            (labels.get("info_code", "Code"), p.get("code")),
             (labels["info_client"], p["client"]),
             (labels["info_consultant"], p["consultant"]),
             (labels["info_contractor"], p["contractor"]),
             (labels["info_type"], p["type"]),
             (labels["info_location"], p["location"]),
             (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p["budget"] else ""),
+            (labels.get("info_duration", "Duration"), str(dur["total"]) if dur.get("total") else ""),
             (labels["info_start"], _fmt_date(p["planned_start"])),
             (labels["info_finish"], _fmt_date(p["planned_finish"])),
+            (labels.get("info_revised", "Forecast finish"), _fmt_date(p["revised_finish"]) if p.get("revised_finish") else ""),
+            (labels.get("info_delay", "Delay"), str(dur["delay"]) if dur.get("delay") else ""),
             (labels["info_size"], f"{p['size_sqm']:,.0f}" if p["size_sqm"] else ""),
         ]
         rows = [(k, v) for k, v in rows if v and v != "—"]
         story.append(_info_table(cfg, styles, rows, rtl))
-        story.append(Spacer(1, 10))
 
     if sections.get("description") and p["description"]:
-        story += _heading(styles, labels["description"])
+        story += major(labels["description"])
         lines = [ln.strip() for ln in p["description"].splitlines() if ln.strip()]
         story += _bullets(styles, lines, rtl) if len(lines) > 1 else [_aligned(styles["body"], p["description"])]
-        story.append(Spacer(1, 10))
-
-    if sections.get("progress_overview"):
-        if cfg.get("dividers"):
-            story += _divider(styles, labels["progress_overview"])
-        story += _heading(styles, labels["progress_overview"])
-        story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}",
-                              force=TA_CENTER))
-        donut = overall_donut(cfg, ctx, fw, labels)
-        if donut:
-            story += [donut, Spacer(1, 6)]
 
     if sections.get("dashboard"):
         story += _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
 
-    if sections.get("progress_chart"):
-        chart = planned_actual_chart(cfg, ctx, fw, labels)
-        if chart:
-            story.append(KeepTogether(_heading(styles, labels["progress_chart"]) + [chart, Spacer(1, 10)]))
-
-    if sections.get("duration") and ctx.get("duration"):
-        dur = ctx["duration"]
-        pie = duration_pie(cfg, ctx, fw, labels)
-        table = _data_table(cfg, styles,
-            [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
-            [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
-        story.append(KeepTogether(_heading(styles, labels["duration_section"]) + [pie or Spacer(1, 1), table, Spacer(1, 10)]))
-
-    if sections.get("scurve"):
-        curve = scurve_chart(cfg, ctx, fw, labels)
-        if curve:
-            story.append(KeepTogether(_heading(styles, labels["scurve"]) + [curve, Spacer(1, 10)]))
-
-    if sections.get("progress_compare") and any(z.get("planned") is not None for z in ctx["zones"]):
-        rows = [[z["name"],
-                 f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
-                 f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
-                 f"{z['progress']:.1f}%"] for z in ctx["zones"]]
-        story.append(KeepTogether(_heading(styles, labels["progress_compare"]) + [
-            _data_table(cfg, styles,
-                [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
-                rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm]),
-            Spacer(1, 10)]))
+    # Project Progress Report — one TOC entry; the charts are sub-headings.
+    progress_on = any(sections.get(k) for k in
+                      ("progress_overview", "progress_chart", "duration", "scurve", "progress_compare"))
+    if progress_on:
+        story += major(labels.get("progress_report", "Project Progress Report"))
+        if sections.get("progress_overview"):
+            story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}", force=TA_CENTER))
+            donut = overall_donut(cfg, ctx, fw, labels)
+            if donut:
+                story += [donut, Spacer(1, 8)]
+        if sections.get("progress_chart"):
+            chart = planned_actual_chart(cfg, ctx, fw, labels)
+            if chart:
+                story.append(KeepTogether(_sub_heading(styles, labels["progress_chart"]) + [chart, Spacer(1, 10)]))
+        if sections.get("duration") and ctx.get("duration"):
+            dur = ctx["duration"]
+            pie = duration_pie(cfg, ctx, fw, labels)
+            table = _data_table(cfg, styles,
+                [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
+                [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
+            story.append(KeepTogether(_sub_heading(styles, labels["duration_section"]) + [pie or Spacer(1, 1), table, Spacer(1, 10)]))
+        if sections.get("scurve"):
+            curve = scurve_chart(cfg, ctx, fw, labels)
+            if curve:
+                story.append(KeepTogether(_sub_heading(styles, labels["scurve"]) + [curve, Spacer(1, 10)]))
+        if sections.get("progress_compare") and any(z.get("planned") is not None for z in ctx["zones"]):
+            rows = [[z["name"],
+                     f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
+                     f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
+                     f"{z['progress']:.1f}%"] for z in ctx["zones"]]
+            story.append(KeepTogether(_sub_heading(styles, labels["progress_compare"]) + [
+                _data_table(cfg, styles,
+                    [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
+                    rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm]), Spacer(1, 10)]))
 
     if sections.get("zone_progress") and ctx["zones"]:
-        story += _heading(styles, labels["zone_progress"])
+        story += major(labels["zone_progress"])
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in ctx["zones"]]
         story.append(_data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
                                  col_widths=[None, 40 * mm]))
-        story.append(Spacer(1, 10))
 
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)
 
     if sections.get("delays") and ctx.get("delays"):
+        story += major(labels["delays"])
         rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in ctx["delays"]]
-        story.append(KeepTogether(_heading(styles, labels["delays"]) + [
-            _data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
-                        rows, col_widths=[None, 28 * mm, 28 * mm]),
-            Spacer(1, 10)]))
+        story.append(_data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
+                                 rows, col_widths=[None, 28 * mm, 28 * mm]))
 
     if sections.get("milestones") and ctx["milestones"]:
-        story += _heading(styles, labels["milestones"])
+        story += major(labels["milestones"])
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in ctx["milestones"]]
         story.append(_data_table(cfg, styles, [labels["col_milestone"], labels["col_date"], labels["col_status"]],
                                  rows, col_widths=[None, 32 * mm, 34 * mm]))
-        story.append(Spacer(1, 10))
 
     if sections.get("timeline") and ctx["snapshots"]:
+        story += major(labels["timeline"])
         rows = [[_fmt_date(s["date"]), f"{float(s['overall_progress']):.1f}%", s["source"] or "—"] for s in ctx["snapshots"]]
-        story.append(KeepTogether(
-            _heading(styles, labels["timeline"]) + [
-                _data_table(cfg, styles, [labels["col_date"], labels["col_progress"], labels["col_source"]],
-                            rows, col_widths=[34 * mm, 32 * mm, None]),
-                Spacer(1, 10),
-            ]
-        ))
+        story.append(_data_table(cfg, styles, [labels["col_date"], labels["col_progress"], labels["col_source"]],
+                                 rows, col_widths=[34 * mm, 32 * mm, None]))
 
     if sections.get("notes") and p["notes"]:
-        story.append(KeepTogether(_heading(styles, labels["notes"]) + [_aligned(styles["body"], p["notes"])]))
+        story += major(labels["notes"])
+        story.append(_aligned(styles["body"], p["notes"]))
 
     if sections.get("photos") and ctx.get("photos"):
         story += _photo_section(cfg, styles, ctx["photos"], fw, fh, labels["photos"])
