@@ -82,8 +82,21 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
     title: "Description",
     key: "description",
     enablePath: "sections.description",
-    hint: "The narrative is typed per report (Report Builder); rename the heading here.",
-    fields: [{ path: "labels.description", label: "Section heading", type: "text" }],
+    hint: "Type the text per report; format it here — like Word.",
+    fields: [
+      { path: "labels.description", label: "Section heading", type: "text" },
+      { path: "description.align", label: "Alignment", type: "select", options: [
+        { value: "auto", label: "Auto (RTL/LTR)" },
+        { value: "right", label: "Right" },
+        { value: "left", label: "Left" },
+        { value: "center", label: "Center" },
+      ] },
+      { path: "description.size", label: "Text size", type: "number" },
+      { path: "description.color", label: "Text color", type: "color" },
+      { path: "description.bold", label: "Bold", type: "toggle" },
+      { path: "description.underline", label: "Underline", type: "toggle" },
+      { path: "description.bullets", label: "Bullet points", type: "toggle" },
+    ],
   },
   {
     title: "Progress Report",

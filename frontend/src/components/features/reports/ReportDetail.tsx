@@ -264,7 +264,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     <label className={styles.label} htmlFor="description">Description (one line per bullet)</label>
                     <textarea id="description" className={styles.textarea} value={form.description}
                       onChange={set("description")} placeholder="وصف المشروع — اكتب كل نقطة في سطر…" />
-                    <span className={styles.hint}>Shown in the «Project Description» section. Falls back to the project description when empty.</span>
+                    <span className={styles.hint}>Shown in the «Project Description» section; falls back to the project description when empty. Formatting (align, size, color, bold, underline, bullets) is in the Template Builder → Description tab.</span>
                   </section>
                 )}
 

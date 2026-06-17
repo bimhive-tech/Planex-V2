@@ -44,6 +44,15 @@ DEFAULT_CONFIG = {
         "show_overall": True,
     },
     "toc": {"enabled": True, "title": "Table of Contents"},
+    # Word-like formatting for the description text block.
+    "description": {
+        "align": "auto",        # auto | right | left | center
+        "size": 11,
+        "color": "#1e2430",
+        "bold": False,
+        "underline": False,
+        "bullets": True,
+    },
     "header": {
         "enabled": True,
         "show_project": True,

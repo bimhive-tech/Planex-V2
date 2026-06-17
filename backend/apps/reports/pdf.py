@@ -44,11 +44,20 @@ class _ReportDoc(BaseDocTemplate):
     def __init__(self, *args, cfg=None, ctx=None, **kwargs):
         self.cfg = cfg
         self.ctx = ctx
+        self._toc_seq = 0
         super().__init__(*args, **kwargs)
+
+    def beforeDocument(self):
+        # Reset per build pass so bookmark keys are stable across multiBuild.
+        self._toc_seq = 0
 
     def afterFlowable(self, flowable):
         if getattr(flowable, "style", None) and flowable.style.name == "SectionHeading":
-            self.notify("TOCEntry", (0, flowable.getPlainText(), self.page))
+            # Bookmark the heading and pass the key so the TOC entry is a live link.
+            key = f"sec{self._toc_seq}"
+            self._toc_seq += 1
+            self.canv.bookmarkPage(key)
+            self.notify("TOCEntry", (0, flowable.getPlainText(), self.page, key))
 
 
 def _styles(cfg):
@@ -82,6 +91,29 @@ def _heading(styles, text):
     return [Paragraph(shape(text), styles["section"]),
             HRFlowable(width="40%", thickness=1.1, color=styles["section"].textColor,
                        spaceBefore=1, spaceAfter=8, hAlign="CENTER")]
+
+
+def _description_flow(cfg, styles, text, rtl):
+    """Render the description with the template's Word-like formatting:
+    alignment, size, color, bold, underline, and optional bullets."""
+    ds = cfg.get("description", {})
+    align = {"right": TA_RIGHT, "left": TA_LEFT, "center": TA_CENTER}.get(ds.get("align"))
+    font = BOLD if ds.get("bold") else FONT_NAME
+    lead = float(cfg["fonts"].get("line_spacing", 1.5))
+    size = float(ds.get("size", cfg["fonts"]["base_size"]))
+    bullets = ds.get("bullets", True)
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    out = []
+    for ln in lines:
+        a = align if align is not None else (TA_RIGHT if has_arabic(ln) else TA_LEFT)
+        body = f"<u>{shape(ln)}</u>" if ds.get("underline") else shape(ln)
+        if bullets:
+            body = f"{body} •" if a == TA_RIGHT else f"• {body}"
+        st = ParagraphStyle("desc", fontName=font, fontSize=size, leading=size * lead,
+                            textColor=hexcolor(ds.get("color", cfg["colors"]["text"])),
+                            alignment=a, spaceAfter=4)
+        out.append(Paragraph(body, st))
+    return out
 
 
 def _sub_heading(styles, text):
@@ -429,8 +461,7 @@ def build_report_pdf(report, ctx) -> bytes:
 
     if sections.get("description") and p["description"]:
         story += major(labels["description"])
-        lines = [ln.strip() for ln in p["description"].splitlines() if ln.strip()]
-        story += _bullets(styles, lines, rtl) if len(lines) > 1 else [_aligned(styles["body"], p["description"])]
+        story += _description_flow(cfg, styles, p["description"], rtl)
 
     if sections.get("dashboard"):
         story += _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
