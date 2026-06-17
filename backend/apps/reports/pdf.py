@@ -28,7 +28,13 @@ from reportlab.platypus.tableofcontents import TableOfContents
 
 from .constants import merged_config
 from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape
-from .pdf_charts import zone_progress_chart
+from .pdf_charts import (
+    duration_pie,
+    overall_donut,
+    planned_actual_chart,
+    scurve_chart,
+    zone_progress_chart,
+)
 from .pdf_layout import draw_cover, draw_page_furniture, frame_rect
 
 
@@ -76,6 +82,17 @@ def _heading(styles, text):
     return [Paragraph(shape(text), styles["section"]),
             HRFlowable(width="40%", thickness=1.1, color=styles["section"].textColor,
                        spaceBefore=1, spaceAfter=8, hAlign="CENTER")]
+
+
+def _divider(styles, text):
+    """A blank 'section divider' page with the heading centered (reference look)."""
+    ds = ParagraphStyle("Divider", parent=styles["section"])  # non-TOC style name
+    return [
+        PageBreak(), Spacer(1, 95 * mm),
+        Paragraph(shape(text), ds),
+        HRFlowable(width="35%", thickness=1.1, color=ds.textColor, spaceBefore=2, hAlign="CENTER"),
+        PageBreak(),
+    ]
 
 
 def _bullets(styles, items, rtl):
@@ -287,16 +304,43 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(Spacer(1, 10))
 
     if sections.get("progress_overview"):
+        if cfg.get("dividers"):
+            story += _divider(styles, labels["progress_overview"])
         story += _heading(styles, labels["progress_overview"])
         story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}",
                               force=TA_CENTER))
-        story.append(Spacer(1, 8))
+        donut = overall_donut(cfg, ctx, fw, labels)
+        if donut:
+            story += [donut, Spacer(1, 6)]
 
     if sections.get("progress_chart"):
-        chart = zone_progress_chart(cfg, ctx, fw)
+        chart = planned_actual_chart(cfg, ctx, fw, labels)
         if chart:
-            story += _heading(styles, labels["progress_chart"])
-            story += [chart, Spacer(1, 10)]
+            story.append(KeepTogether(_heading(styles, labels["progress_chart"]) + [chart, Spacer(1, 10)]))
+
+    if sections.get("duration") and ctx.get("duration"):
+        dur = ctx["duration"]
+        pie = duration_pie(cfg, ctx, fw, labels)
+        table = _data_table(cfg, styles,
+            [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
+            [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
+        story.append(KeepTogether(_heading(styles, labels["duration_section"]) + [pie or Spacer(1, 1), table, Spacer(1, 10)]))
+
+    if sections.get("scurve"):
+        curve = scurve_chart(cfg, ctx, fw, labels)
+        if curve:
+            story.append(KeepTogether(_heading(styles, labels["scurve"]) + [curve, Spacer(1, 10)]))
+
+    if sections.get("progress_compare") and any(z.get("planned") is not None for z in ctx["zones"]):
+        rows = [[z["name"],
+                 f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
+                 f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
+                 f"{z['progress']:.1f}%"] for z in ctx["zones"]]
+        story.append(KeepTogether(_heading(styles, labels["progress_compare"]) + [
+            _data_table(cfg, styles,
+                [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
+                rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm]),
+            Spacer(1, 10)]))
 
     if sections.get("zone_progress") and ctx["zones"]:
         story += _heading(styles, labels["zone_progress"])

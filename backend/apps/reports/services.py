@@ -1,9 +1,41 @@
 """Report data assembly — gathers the real project numbers the PDF renders.
-We only include data we actually have; missing fields are simply omitted."""
+We only include data we actually have; missing fields are simply omitted.
+
+Planned %, previous %, duration and delay are *derived* from data we already
+hold (project dates + dated snapshots) — no extra manual entry needed."""
+import datetime
+
 from apps.projects.models import ProjectImage, ProjectScope
 from apps.projects.services import project_overall_progress, scope_progress_map
 
 from .models import ReportImage
+
+
+def _planned_progress(project, as_of):
+    """Time-based planned % (0–100): how far along the contract calendar we are.
+    Matches the reference, where overdue scopes show planned = 100%."""
+    s, f = project.planned_start, project.planned_finish
+    if not (s and f and as_of and f > s):
+        return None
+    frac = (as_of - s).days / (f - s).days
+    return round(max(0.0, min(1.0, frac)) * 100, 1)
+
+
+def _duration(project, as_of):
+    """Contract duration / elapsed / remaining / delay in calendar days."""
+    s, f = project.planned_start, project.planned_finish
+    if not (s and f and f > s):
+        return None
+    total = (f - s).days
+    elapsed = max(0, min(total, (as_of - s).days)) if as_of else 0
+    remaining = max(0, total - elapsed)
+    if project.revised_finish and project.revised_finish > f:
+        delay = (project.revised_finish - f).days
+    elif as_of and as_of > f:
+        delay = (as_of - f).days
+    else:
+        delay = 0
+    return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
 
 
 def _breakdown(project):
@@ -44,13 +76,39 @@ def build_report_context(report):
     project = report.project
     overall = project_overall_progress(project)
     breakdown = _breakdown(project)
+    as_of = report.report_date or report.period_finish or datetime.date.today()
+
+    planned = _planned_progress(project, as_of)
+    duration = _duration(project, as_of)
 
     milestones = list(
         project.milestones.order_by("sort_order", "date").values("title", "date", "status")
     )
     snapshots = list(
-        project.snapshots.order_by("date").values("date", "overall_progress", "source")
+        project.snapshots.order_by("date").values("date", "overall_progress", "source", "zones")
     )
+
+    # Previous actual = the most recent snapshot strictly before the report date.
+    prev_snap = next(
+        (s for s in reversed(snapshots) if s["date"] and s["date"] < as_of), None
+    )
+    prev_zone = {z.get("name"): z.get("progress") for z in (prev_snap["zones"] or [])} if prev_snap else {}
+    prev_overall = float(prev_snap["overall_progress"]) if prev_snap else None
+
+    zones = _zone_rows(project)
+    for z in zones:
+        z["previous"] = prev_zone.get(z["name"])
+        z["planned"] = planned  # time-based baseline is project-wide
+
+    # S-curve series: actual (from snapshots) vs planned at each snapshot date.
+    scurve = [
+        {
+            "date": s["date"],
+            "actual": float(s["overall_progress"]),
+            "planned": _planned_progress(project, s["date"]),
+        }
+        for s in snapshots if s["date"]
+    ]
     # Logos stay on the project (constant branding); the cover/photos/attachments
     # are per-report content that overrides any project-level fallback.
     proj_images = list(
@@ -99,8 +157,12 @@ def build_report_context(report):
             "notes": project.notes,
         },
         "overall": overall,
+        "planned": planned,
+        "previous_overall": prev_overall,
+        "duration": duration,
         "breakdown": breakdown,
-        "zones": _zone_rows(project),
+        "zones": zones,
+        "scurve": scurve,
         "milestones": milestones,
         "snapshots": snapshots,
         "logos": {

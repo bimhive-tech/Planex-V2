@@ -59,6 +59,9 @@ DEFAULT_CONFIG = {
         "description": True,
         "progress_overview": True,
         "progress_chart": True,
+        "duration": True,
+        "scurve": True,
+        "progress_compare": True,
         "zone_progress": True,
         "milestones": True,
         "timeline": True,
@@ -67,6 +70,9 @@ DEFAULT_CONFIG = {
         "attachments": True,
     },
     "table": {"header_bold": True, "zebra": True, "border": True},
+    # Insert a blank "section divider" page (centered heading) before each major
+    # section, like the reference report.
+    "dividers": False,
     # Every visible heading/column/field label — editable so a template can be
     # fully Arabic, fully English, or anything between ("control everything").
     "labels": {
@@ -94,6 +100,17 @@ DEFAULT_CONFIG = {
         "activities": "activities",
         "planned": "Planned",
         "actual": "Actual",
+        "duration_section": "Duration & Delay",
+        "duration_days": "Project duration",
+        "delay_days": "Delay (days)",
+        "duration_elapsed": "Elapsed",
+        "duration_remaining": "Remaining",
+        "scurve": "Time Performance",
+        "progress_compare": "Progress vs Plan",
+        "col_previous": "Previous %",
+        "col_planned": "Planned %",
+        "col_actual": "Actual %",
+        "divider": "Section",
         # Project-info row labels.
         "info_name": "Project name",
         "info_client": "Owner / Client",
