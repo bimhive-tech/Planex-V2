@@ -4,6 +4,7 @@
 // Progress Report, Progress Images, Attachments), live project data on the
 // read-only tabs, and a real-time PDF preview (debounced auto-save → re-render).
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -19,6 +20,9 @@ import type { ProjectListRow } from "@/types/project";
 import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
 import styles from "./reports.module.css";
+
+// pdf.js viewer uses canvas/DOM — load it client-side only (no SSR).
+const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => m.PdfViewer), { ssr: false });
 
 const STATUS_OPTIONS = [
   { value: "draft", label: "Draft" },
@@ -291,13 +295,8 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                 {saveError && <p className="formError">{saveError}</p>}
               </div>
 
-              {previewUrl ? (
-                <iframe className={styles.previewFrame} src={previewUrl} title="Report PDF preview" />
-              ) : (
-                <div className={styles.previewEmpty}>
-                  {previewLoading ? "Generating preview…" : "Preview unavailable — use Open / download PDF."}
-                </div>
-              )}
+              <PdfViewer url={previewUrl} loading={previewLoading}
+                onDownload={() => window.open(pdfUrl, "_blank", "noopener")} />
             </div>
           </>
         )}

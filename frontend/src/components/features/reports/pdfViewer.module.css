@@ -1,0 +1,82 @@
+/* Custom PDF viewer: toolbar + scrollable page stack on a soft background. */
+.viewer {
+  display: flex;
+  flex-direction: column;
+  height: 78vh;
+  min-height: 460px;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.dlBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dlBtn:hover {
+  color: var(--bg-surface);
+  background: var(--primary);
+}
+
+/* Page stack */
+.scroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+  overflow: auto;
+  background: var(--bg-canvas);
+}
+
+.pageWrap {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-pop);
+}
+
+.page {
+  display: block;
+}
+
+.page canvas {
+  display: block;
+  border-radius: var(--radius-sm);
+}
+
+.msg {
+  margin: auto;
+  padding: var(--space-6);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.9rem;
+}
