@@ -31,7 +31,7 @@ class ReportListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "report_number", "report_date", "status",
             "project", "project_name", "template", "template_name",
-            "period_start", "period_finish", "description", "created_at",
+            "period_start", "period_finish", "description", "scope_ids", "created_at",
         ]
 
 
@@ -40,7 +40,7 @@ class ReportWriteSerializer(serializers.ModelSerializer):
         model = Report
         fields = [
             "id", "project", "template", "title", "report_number", "report_date",
-            "period_start", "period_finish", "description", "status",
+            "period_start", "period_finish", "description", "scope_ids", "status",
         ]
         read_only_fields = ["id"]
 

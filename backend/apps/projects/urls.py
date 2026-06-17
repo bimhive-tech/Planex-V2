@@ -14,6 +14,7 @@ from .structure_views import (
     ScopeListCreateView,
 )
 from .milestone_views import MilestoneDetailView, MilestoneListView
+from .delay_views import DelayDetailView, DelayListView
 from .image_views import ProjectImageDetailView, ProjectImageFileView, ProjectImageListCreateView
 from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
 from .team_views import (
@@ -34,6 +35,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/zones/<uuid:zone_id>/grid/", ProjectZoneGridView.as_view(), name="project-zone-grid"),
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),
+    path("projects/<uuid:project_id>/delays/", DelayListView.as_view(), name="project-delays"),
+    path("projects/<uuid:project_id>/delays/<uuid:delay_id>/", DelayDetailView.as_view(), name="project-delay"),
     path("projects/<uuid:project_id>/images/", ProjectImageListCreateView.as_view(), name="project-images"),
     path("projects/<uuid:project_id>/images/<uuid:pk>/", ProjectImageDetailView.as_view(), name="project-image"),
     path("projects/<uuid:project_id>/images/<uuid:pk>/file/", ProjectImageFileView.as_view(), name="project-image-file"),

@@ -49,6 +49,8 @@ class Report(TimestampedModel):
     period_finish = models.DateField(null=True, blank=True)
     # Per-report narrative; falls back to the project's description when blank.
     description = models.TextField(blank=True)
+    # Zone scope IDs to include (empty = the whole project).
+    scope_ids = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_reports")
 

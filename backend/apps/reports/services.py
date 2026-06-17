@@ -68,7 +68,26 @@ def _zone_rows(project):
         .order_by("sort_order", "name")
         .values_list("id", "name")
     )
-    return [{"name": name, "progress": progress.get(str(sid), 0.0)} for sid, name in zones]
+    return [{"id": str(sid), "name": name, "progress": progress.get(str(sid), 0.0)} for sid, name in zones]
+
+
+def _zone_details(project, zone_ids):
+    """Per-zone breakdown: the zone's direct children (phases) with rolled-up
+    progress — the report's 'units' tables, not every BOQ leaf."""
+    progress = scope_progress_map(project)
+    children, names, orders = {}, {}, {}
+    for sid, pid, name, so in project.scopes.values_list("id", "parent_id", "name", "sort_order"):
+        children.setdefault(str(pid), []).append(str(sid))
+        names[str(sid)] = name
+        orders[str(sid)] = so
+
+    details = []
+    for zid in zone_ids:
+        kids = sorted(children.get(zid, []), key=lambda c: (orders.get(c, 0), names.get(c, "")))
+        rows = [(names[c], progress.get(c, 0.0)) for c in kids]
+        if rows:
+            details.append({"zone_id": zid, "rows": rows})
+    return details
 
 
 def build_report_context(report):
@@ -99,6 +118,19 @@ def build_report_context(report):
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
+
+    # Scope filter: limit the report to chosen zones (empty = whole project).
+    scope_ids = [str(s) for s in (report.scope_ids or [])]
+    if scope_ids:
+        zones = [z for z in zones if z["id"] in scope_ids]
+    name_by_id = {z["id"]: z["name"] for z in zones}
+    zone_details = _zone_details(project, [z["id"] for z in zones])
+    for d in zone_details:
+        d["zone_name"] = name_by_id.get(d["zone_id"], "")
+
+    delays = list(
+        project.delays.order_by("sort_order", "-date").values("title", "description", "impact_days", "status", "date")
+    )
 
     # S-curve series: actual (from snapshots) vs planned at each snapshot date.
     scurve = [
@@ -162,6 +194,8 @@ def build_report_context(report):
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
+        "zone_details": zone_details,
+        "delays": delays,
         "scurve": scurve,
         "milestones": milestones,
         "snapshots": snapshots,

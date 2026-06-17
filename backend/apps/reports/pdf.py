@@ -349,6 +349,24 @@ def build_report_pdf(report, ctx) -> bytes:
                                  col_widths=[None, 40 * mm]))
         story.append(Spacer(1, 10))
 
+    if sections.get("detailed_progress") and ctx.get("zone_details"):
+        if cfg.get("dividers"):
+            story += _divider(styles, labels["detailed_progress"])
+        story += _heading(styles, labels["detailed_progress"])
+        for d in ctx["zone_details"]:
+            rows = [[name, f"{prog:.1f}%"] for name, prog in d["rows"]]
+            story.append(_aligned(styles["sub"], d["zone_name"], force=TA_RIGHT if rtl else TA_LEFT))
+            story.append(_data_table(cfg, styles, [labels["col_task"], labels["col_progress"]], rows,
+                                     col_widths=[None, 30 * mm]))
+            story.append(Spacer(1, 8))
+
+    if sections.get("delays") and ctx.get("delays"):
+        rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in ctx["delays"]]
+        story.append(KeepTogether(_heading(styles, labels["delays"]) + [
+            _data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
+                        rows, col_widths=[None, 28 * mm, 28 * mm]),
+            Spacer(1, 10)]))
+
     if sections.get("milestones") and ctx["milestones"]:
         story += _heading(styles, labels["milestones"])
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in ctx["milestones"]]

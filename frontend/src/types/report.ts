@@ -28,6 +28,7 @@ export interface ReportRow {
   period_start: string | null;
   period_finish: string | null;
   description: string;
+  scope_ids: string[];
   created_at: string;
 }
 

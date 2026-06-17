@@ -182,6 +182,31 @@ class Milestone(TimestampedModel):
         return self.title
 
 
+class ProjectDelay(TimestampedModel):
+    """A delay / obstacle on a project (the report's «المعوقات» section)."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        RESOLVED = "resolved", "Resolved"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_delays")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="delays")
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    impact_days = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    date = models.DateField(null=True, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "sort_order"])]
+        ordering = ["sort_order", "-date"]
+
+    def __str__(self):
+        return self.title
+
+
 class ProjectMember(TimestampedModel):
     """A company user assigned to a project, with a project-level role."""
 

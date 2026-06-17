@@ -93,6 +93,9 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "sections.scurve", label: "Show S-curve", type: "toggle" },
       { path: "sections.progress_compare", label: "Show plan-vs-actual table", type: "toggle" },
       { path: "sections.zone_progress", label: "Show zone table", type: "toggle" },
+      { path: "sections.detailed_progress", label: "Show detailed activity tables", type: "toggle" },
+      { path: "labels.detailed_progress", label: "Detailed heading", type: "text" },
+      { path: "labels.col_task", label: "Column: Task", type: "text" },
       { path: "sections.milestones", label: "Show milestones", type: "toggle" },
       { path: "sections.timeline", label: "Show timeline", type: "toggle" },
       { path: "labels.summary", label: "Summary heading", type: "text" },
@@ -128,6 +131,17 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
     enablePath: "sections.photos",
     hint: "Site photos, 4 per page. Upload the photos per report (Report Builder).",
     fields: [{ path: "labels.photos", label: "Section heading", type: "text" }],
+  },
+  {
+    title: "Delays",
+    key: "delays",
+    enablePath: "sections.delays",
+    hint: "Obstacles & delays — logged on the project's Delays tab.",
+    fields: [
+      { path: "labels.delays", label: "Section heading", type: "text" },
+      { path: "labels.col_delay", label: "Column: Obstacle", type: "text" },
+      { path: "labels.col_impact", label: "Column: Impact (days)", type: "text" },
+    ],
   },
   {
     title: "Attachments",

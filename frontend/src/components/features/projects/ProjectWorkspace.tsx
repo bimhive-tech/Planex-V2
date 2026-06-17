@@ -16,6 +16,8 @@ import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
 import { ProjectTeam } from "./ProjectTeam";
 import { ProjectApprovals } from "./ProjectApprovals";
+import { ProjectDelays } from "./ProjectDelays";
+import { ProjectReportButton } from "./ProjectReportButton";
 import type { ProgressBreakdown, ProjectDetail, ProjectPerms } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
 
@@ -24,7 +26,7 @@ export interface ProjectStats {
   breakdown: ProgressBreakdown;
 }
 
-type Tab = "Overview" | "Schedule" | "Team" | "Approvals";
+type Tab = "Overview" | "Schedule" | "Team" | "Delays" | "Approvals";
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
@@ -38,7 +40,7 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
 export function ProjectWorkspace({ project, canManage, perms }: { project: ProjectDetail; canManage: boolean; perms: ProjectPerms }) {
   const router = useRouter();
   const showApprovals = perms.review || perms.approve || perms.submit;
-  const tabs: Tab[] = ["Overview", "Schedule", "Team", ...(showApprovals ? (["Approvals"] as Tab[]) : [])];
+  const tabs: Tab[] = ["Overview", "Schedule", "Team", "Delays", ...(showApprovals ? (["Approvals"] as Tab[]) : [])];
   const [tab, setTab] = useState<Tab>("Overview");
   const [editOpen, setEditOpen] = useState(false);
   const [stats, setStats] = useState<ProjectStats>({
@@ -53,12 +55,15 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <Icon name="chevronDown" size={16} />
           <span>Back to Projects</span>
         </Link>
-        {canManage && (
-          <Button variant="secondary" size="sm" leadingIcon={<Icon name="edit" size={15} />}
-            onClick={() => setEditOpen(true)}>
-            Edit Project
-          </Button>
-        )}
+        <div className={styles.topActions}>
+          <ProjectReportButton projectId={project.id} />
+          {canManage && (
+            <Button variant="secondary" size="sm" leadingIcon={<Icon name="edit" size={15} />}
+              onClick={() => setEditOpen(true)}>
+              Edit Project
+            </Button>
+          )}
+        </div>
       </div>
 
       <header className={styles.head}>
@@ -94,6 +99,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} onStatsChange={setStats} />
         )}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
+        {tab === "Delays" && <ProjectDelays projectId={project.id} canManage={canManage} />}
         {tab === "Approvals" && (
           <ProjectApprovals projectId={project.id} perms={perms} onChanged={() => router.refresh()} />
         )}

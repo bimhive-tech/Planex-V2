@@ -30,6 +30,7 @@ const STATUS_TONE: Record<ReportStatus, "neutral" | "info" | "success"> = {
 };
 const TABS = [
   { key: "setup", label: "Setup" },
+  { key: "scope", label: "Scope" },
   { key: "cover", label: "Cover" },
   { key: "info", label: "Project Info" },
   { key: "description", label: "Description" },
@@ -48,6 +49,8 @@ const fmtDate = (d: string | null) =>
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const [form, setForm] = useState<Form | null>(null);
+  const [scopeIds, setScopeIds] = useState<string[]>([]);
+  const [zones, setZones] = useState<{ id: string; name: string }[]>([]);
   const [projects, setProjects] = useState<ProjectListRow[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("setup");
@@ -68,6 +71,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     ]);
     setProjects(ps.results);
     setTemplates(ts.results);
+    setScopeIds(r.scope_ids ?? []);
     setForm({
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
@@ -99,6 +103,15 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [pdfUrl, refreshKey]);
 
+  // The chosen project's zones, for the Scope tab.
+  useEffect(() => {
+    if (!form?.project) return;
+    let alive = true;
+    api.get<{ id: string; name: string }[]>(`/projects/${form.project}/project-zones/`)
+      .then((z) => alive && setZones(z)).catch(() => alive && setZones([]));
+    return () => { alive = false; };
+  }, [form?.project]);
+
   const save = useCallback(async () => {
     if (!form) return;
     setSaving(true);
@@ -106,6 +119,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     try {
       await api.patch(`/reports/${reportId}/`, {
         ...form,
+        scope_ids: scopeIds,
         template: form.template || null,
         report_date: form.report_date || null,
         period_start: form.period_start || null,
@@ -118,7 +132,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     } finally {
       setSaving(false);
     }
-  }, [form, reportId]);
+  }, [form, reportId, scopeIds]);
 
   // Debounced auto-save for a real-time feel.
   useEffect(() => {
@@ -127,7 +141,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     const t = setTimeout(() => { void save(); }, 1000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form]);
+  }, [form, scopeIds]);
 
   const projectOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
   const templateOptions = useMemo(
@@ -198,6 +212,25 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />
                     </div>
+                  </section>
+                )}
+
+                {tab === "scope" && (
+                  <section className={styles.tabPanel}>
+                    <h2 className={styles.panelTitle}>Zones to include</h2>
+                    <p className={styles.hint}>Tick the zones this report covers. Leave all unticked to include the whole project.</p>
+                    {zones.map((z) => {
+                      const checked = scopeIds.includes(z.id);
+                      return (
+                        <label key={z.id} className={styles.scopeRow}>
+                          <input type="checkbox" checked={checked} disabled={!canManage}
+                            onChange={(e) => setScopeIds((ids) =>
+                              e.target.checked ? [...ids, z.id] : ids.filter((i) => i !== z.id))} />
+                          {z.name}
+                        </label>
+                      );
+                    })}
+                    {zones.length === 0 && <p className={styles.hint}>No zones in this project.</p>}
                   </section>
                 )}
 
