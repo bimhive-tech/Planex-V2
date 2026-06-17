@@ -4,7 +4,7 @@
 // Progress Report, Progress Images, Attachments), live project data on the
 // read-only tabs, and a real-time PDF preview (debounced auto-save → re-render).
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -61,7 +61,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const firstChange = useRef(true);
 
   const { loading, error, reload } = useFetch(async () => {
     const [r, ps, ts] = await Promise.all([
@@ -126,22 +125,13 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
         period_finish: form.period_finish || null,
       });
       setSaved(true);
-      setRefreshKey((k) => k + 1); // re-pull data + re-render preview
+      setRefreshKey((k) => k + 1); // save → re-pull data + re-render the preview
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : "Couldn't save report.");
     } finally {
       setSaving(false);
     }
   }, [form, reportId, scopeIds]);
-
-  // Debounced auto-save for a real-time feel.
-  useEffect(() => {
-    if (!form) return;
-    if (firstChange.current) { firstChange.current = false; return; }
-    const t = setTimeout(() => { void save(); }, 1000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, scopeIds]);
 
   const projectOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
   const templateOptions = useMemo(
