@@ -80,8 +80,14 @@ def draw_page_furniture(canvas, doc):
         # Logo cells: uploaded image first, text fallback until assets exist.
         canvas.setFillColor(hexcolor(cfg["colors"]["primary"]))
         canvas.setFont(BOLD, 12)
-        left_logo = storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image"))
-        right_logo = storage_image_reader((ctx.get("logos", {}).get("right") or {}).get("image"))
+        # The header draws on EVERY page — read each logo from storage only once
+        # per render (R2 is remote; re-reading per page blew the worker timeout).
+        if not hasattr(doc, "_logo_cache"):
+            doc._logo_cache = (
+                storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image")),
+                storage_image_reader((ctx.get("logos", {}).get("right") or {}).get("image")),
+            )
+        left_logo, right_logo = doc._logo_cache
         if left_logo:
             _draw_contained_image(canvas, left_logo, inner_x + 4 * mm, hy + 3 * mm, left_w - 8 * mm, HEADER_H - 6 * mm)
         elif header.get("org_left"):
@@ -134,12 +140,16 @@ def _centered_wrapped(canvas, text, x, width, y, height, font, size):
 
 
 def _draw_contained_image(canvas, reader, x, y, width, height):
-    """Draw an image inside a cell without cropping or distorting it."""
-    iw, ih = reader.getSize()
-    scale = min(width / iw, height / ih)
-    dw, dh = iw * scale, ih * scale
-    canvas.drawImage(reader, x + (width - dw) / 2, y + (height - dh) / 2,
-                     width=dw, height=dh, preserveAspectRatio=True, mask="auto")
+    """Draw an image inside a cell without cropping or distorting it. A single
+    unreadable image is skipped rather than failing the whole report."""
+    try:
+        iw, ih = reader.getSize()
+        scale = min(width / iw, height / ih)
+        dw, dh = iw * scale, ih * scale
+        canvas.drawImage(reader, x + (width - dw) / 2, y + (height - dh) / 2,
+                         width=dw, height=dh, preserveAspectRatio=True, mask="auto")
+    except Exception:
+        pass
 
 
 def _right_lines(canvas, text, rx, y, font, size, color, leading, max_lines=3):

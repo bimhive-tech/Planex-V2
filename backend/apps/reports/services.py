@@ -39,21 +39,22 @@ def _duration(project, as_of):
 
 
 def _breakdown(project):
-    """Count activities by progress bucket for the summary bars."""
-    total = completed = in_progress = not_started = 0
-    for (p,) in project.activities.values_list("progress_percent"):
-        total += 1
-        p = float(p)
-        if p >= 100:
-            completed += 1
-        elif p <= 0:
-            not_started += 1
-        else:
-            in_progress += 1
+    """Count activities by progress bucket — in the DB, not Python (these tables
+    hold tens of thousands of rows)."""
+    from django.db.models import Count, Q
+
+    agg = project.activities.aggregate(
+        total=Count("id"),
+        completed=Count("id", filter=Q(progress_percent__gte=100)),
+        not_started=Count("id", filter=Q(progress_percent__lte=0)),
+    )
+    total = agg["total"] or 0
+    completed = agg["completed"] or 0
+    not_started = agg["not_started"] or 0
     return {
         "total": total,
         "completed": completed,
-        "in_progress": in_progress,
+        "in_progress": max(0, total - completed - not_started),
         "not_started": not_started,
     }
 
@@ -148,7 +149,9 @@ def build_report_context(report):
     scope_ids = [str(s) for s in (report.scope_ids or [])]
     if scope_ids:
         zones = [z for z in zones if z["id"] in scope_ids]
-    zone_grids = _zone_grids(project, [z["id"] for z in zones])
+    # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
+    # only when the detailed-progress section is enabled.
+    zone_grids = []
 
     delays = list(
         project.delays.order_by("sort_order", "-date").values("title", "description", "impact_days", "status", "date")

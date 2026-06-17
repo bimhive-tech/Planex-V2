@@ -27,7 +27,8 @@ from reportlab.platypus import (
 from reportlab.platypus.tableofcontents import TableOfContents
 
 from .constants import merged_config
-from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape
+from .services import _zone_grids
+from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, shape
 from .pdf_charts import (
     duration_pie,
     overall_donut,
@@ -200,8 +201,7 @@ def _storage_image_flowable(key, max_width, max_height):
     if not key:
         return None
     try:
-        with default_storage.open(key, "rb") as f:
-            data = f.read()
+        data = cached_image_bytes(key)  # cached: flatten + downscale + JPEG
         reader = ImageReader(BytesIO(data))
         iw, ih = reader.getSize()
         scale = min(max_width / iw, max_height / ih)
@@ -373,6 +373,10 @@ def build_report_pdf(report, ctx) -> bytes:
     rtl = ctx["arabic"]
     styles = _styles(cfg)
     labels, sections = cfg["labels"], cfg["sections"]
+
+    # Build the (heavy) detailed grid only when that section is enabled.
+    if sections.get("detailed_progress") and not ctx.get("zone_grids"):
+        ctx["zone_grids"] = _zone_grids(report.project, [z["id"] for z in ctx["zones"]])
 
     page = landscape(A4) if cfg["page"].get("orientation") == "landscape" else A4
     fx, fy, fw, fh = frame_rect(page)
