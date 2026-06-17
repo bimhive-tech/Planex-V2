@@ -71,23 +71,48 @@ def _zone_rows(project):
     return [{"id": str(sid), "name": name, "progress": progress.get(str(sid), 0.0)} for sid, name in zones]
 
 
-def _zone_details(project, zone_ids):
-    """Per-zone breakdown: the zone's direct children (phases) with rolled-up
-    progress — the report's 'units' tables, not every BOQ leaf."""
-    progress = scope_progress_map(project)
-    children, names, orders = {}, {}, {}
-    for sid, pid, name, so in project.scopes.values_list("id", "parent_id", "name", "sort_order"):
-        children.setdefault(str(pid), []).append(str(sid))
-        names[str(sid)] = name
-        orders[str(sid)] = so
+def _zone_grids(project, zone_ids):
+    """The schedule-style grid per zone: subzones as columns, tasks (grouped by
+    phase) as rows, each cell an activity's progress. Same shape as the zone grid
+    view in the project detail."""
+    from apps.projects.models import Activity, ProjectScope
 
-    details = []
+    grids = []
+    zones = {str(z.id): z for z in ProjectScope.objects.filter(project=project, id__in=zone_ids)}
     for zid in zone_ids:
-        kids = sorted(children.get(zid, []), key=lambda c: (orders.get(c, 0), names.get(c, "")))
-        rows = [(names[c], progress.get(c, 0.0)) for c in kids]
-        if rows:
-            details.append({"zone_id": zid, "rows": rows})
-    return details
+        zone = zones.get(zid)
+        if zone is None:
+            continue
+        subzone_ids = list(ProjectScope.objects.filter(parent_id=zone.id).values_list("id", flat=True))
+        phase_ids = list(ProjectScope.objects.filter(
+            parent_id__in=subzone_ids, scope_type=ProjectScope.ScopeType.PHASE
+        ).values_list("id", flat=True))
+        acts = list(Activity.objects.filter(scope_id__in=phase_ids).values(
+            "name", "phase_name", "progress_percent", "row_index", "subzone_index", "subzone_code"))
+
+        index_name = {}
+        for a in acts:
+            index_name.setdefault(a["subzone_index"], a["subzone_code"])
+        col_order = sorted(index_name)
+        col_pos = {idx: i for i, idx in enumerate(col_order)}
+        columns = [index_name[idx] or "" for idx in col_order]
+
+        rows_by_index, order = {}, []
+        for a in sorted(acts, key=lambda x: (x["row_index"], x["name"])):
+            ri = a["row_index"]
+            row = rows_by_index.get(ri)
+            if row is None:
+                row = {"name": a["name"], "phase": a["phase_name"] or "", "cells": [None] * len(col_order)}
+                rows_by_index[ri] = row
+                order.append(ri)
+            ci = col_pos.get(a["subzone_index"])
+            if ci is not None:
+                row["cells"][ci] = round(float(a["progress_percent"]), 1)
+
+        rows = [rows_by_index[i] for i in order]
+        if columns and rows:
+            grids.append({"zone_name": zone.name, "columns": columns, "rows": rows})
+    return grids
 
 
 def build_report_context(report):
@@ -123,10 +148,7 @@ def build_report_context(report):
     scope_ids = [str(s) for s in (report.scope_ids or [])]
     if scope_ids:
         zones = [z for z in zones if z["id"] in scope_ids]
-    name_by_id = {z["id"]: z["name"] for z in zones}
-    zone_details = _zone_details(project, [z["id"] for z in zones])
-    for d in zone_details:
-        d["zone_name"] = name_by_id.get(d["zone_id"], "")
+    zone_grids = _zone_grids(project, [z["id"] for z in zones])
 
     delays = list(
         project.delays.order_by("sort_order", "-date").values("title", "description", "impact_days", "status", "date")
@@ -194,7 +216,7 @@ def build_report_context(report):
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
-        "zone_details": zone_details,
+        "zone_grids": zone_grids,
         "delays": delays,
         "scurve": scurve,
         "milestones": milestones,

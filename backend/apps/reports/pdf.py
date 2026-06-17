@@ -224,6 +224,55 @@ def _attachment_section(cfg, styles, attachments, width, height, heading_text):
     return flow
 
 
+def _grid_section(cfg, styles, grids, width, labels, rtl):
+    """Schedule-style grid per zone: zone name header, subzone columns, phase/task
+    rows, progress cells. Wide grids split their columns across pages."""
+    c = cfg["colors"]
+    max_cols = 8  # subzone columns per page before splitting
+    th = ParagraphStyle("gh", parent=styles["body"], fontName=BOLD, fontSize=7,
+                        textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
+    cell = ParagraphStyle("gc", parent=styles["body"], fontSize=7, alignment=TA_CENTER)
+    task = ParagraphStyle("gt", parent=styles["body"], fontSize=7, alignment=TA_RIGHT if rtl else TA_LEFT)
+    phase = ParagraphStyle("gp", parent=styles["value"], fontSize=7.5, alignment=TA_RIGHT if rtl else TA_LEFT)
+
+    flow = []
+    for g in grids:
+        cols, rows = g["columns"], g["rows"]
+        for start in range(0, len(cols), max_cols):
+            chunk = cols[start:start + max_cols]
+            n = len(chunk)
+            task_w = 46 * mm
+            sub_w = (width - task_w) / max(1, n)
+            data = [[Paragraph(shape(g["zone_name"]), th)] + [""] * n,
+                    [Paragraph(shape(labels["col_task"]), th)] + [Paragraph(shape(s), th) for s in chunk]]
+            extra = [("SPAN", (0, 0), (-1, 0))]
+            r = 2
+            current = None
+            for row in rows:
+                if row["phase"] != current:
+                    current = row["phase"]
+                    data.append([Paragraph(shape(current), phase)] + [""] * n)
+                    extra += [("SPAN", (0, r), (-1, r)),
+                              ("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_row_alt"]))]
+                    r += 1
+                vals = row["cells"][start:start + max_cols]
+                data.append([Paragraph(shape(row["name"]), task)] +
+                            [Paragraph(f"{v:.0f}%" if v is not None else "", cell) for v in vals])
+                r += 1
+            t = Table(data, colWidths=[task_w] + [sub_w] * n, repeatRows=2)
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 1), hexcolor(c["table_header_bg"])),
+                ("GRID", (0, 0), (-1, -1), 0.4, hexcolor(c["table_border"])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ] + extra))
+            flow.append(PageBreak())
+            flow += _heading(styles, labels["detailed_progress"])
+            flow.append(t)
+    return flow
+
+
 def build_report_pdf(report, ctx) -> bytes:
     """Render `ctx` (from services.build_report_context) into PDF bytes."""
     ensure_fonts()
@@ -349,16 +398,8 @@ def build_report_pdf(report, ctx) -> bytes:
                                  col_widths=[None, 40 * mm]))
         story.append(Spacer(1, 10))
 
-    if sections.get("detailed_progress") and ctx.get("zone_details"):
-        if cfg.get("dividers"):
-            story += _divider(styles, labels["detailed_progress"])
-        story += _heading(styles, labels["detailed_progress"])
-        for d in ctx["zone_details"]:
-            rows = [[name, f"{prog:.1f}%"] for name, prog in d["rows"]]
-            story.append(_aligned(styles["sub"], d["zone_name"], force=TA_RIGHT if rtl else TA_LEFT))
-            story.append(_data_table(cfg, styles, [labels["col_task"], labels["col_progress"]], rows,
-                                     col_widths=[None, 30 * mm]))
-            story.append(Spacer(1, 8))
+    if sections.get("detailed_progress") and ctx.get("zone_grids"):
+        story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)
 
     if sections.get("delays") and ctx.get("delays"):
         rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in ctx["delays"]]
