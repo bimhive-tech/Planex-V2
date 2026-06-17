@@ -88,6 +88,8 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
     hint: "Summary, overall %, planned/actual chart, zones, milestones, and timeline.",
     fields: [
       { path: "sections.summary", label: "Show summary", type: "toggle" },
+      { path: "sections.dashboard", label: "Show executive dashboard (landscape)", type: "toggle" },
+      { path: "labels.dashboard", label: "Dashboard heading", type: "text" },
       { path: "sections.progress_chart", label: "Show planned/actual chart", type: "toggle" },
       { path: "sections.duration", label: "Show duration + delay", type: "toggle" },
       { path: "sections.scurve", label: "Show S-curve", type: "toggle" },

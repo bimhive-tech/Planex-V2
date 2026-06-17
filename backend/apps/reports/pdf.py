@@ -35,7 +35,7 @@ from .pdf_charts import (
     scurve_chart,
     zone_progress_chart,
 )
-from .pdf_layout import draw_cover, draw_page_furniture, frame_rect
+from .pdf_layout import BORDER_INSET, draw_cover, draw_page_furniture, frame_rect
 
 
 class _ReportDoc(BaseDocTemplate):
@@ -187,7 +187,7 @@ def _photo_page_table(cfg, styles, photos, width, height):
             caption = Paragraph(shape(photo.get("caption") or ""), _caption_style(styles))
             row.append([img or Paragraph("", styles["body"]), caption])
         if len(row) == 1:
-            row.append([""])
+            row.append([Spacer(1, 1)])  # pad odd last row (a flowable, not a str)
         rows.append(row)
     table = Table(rows, colWidths=[cell_w, cell_w], rowHeights=[cell_h] * len(rows), hAlign="CENTER")
     table.setStyle(TableStyle([
@@ -273,6 +273,57 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
     return flow
 
 
+def draw_dash(canvas, doc):
+    """Landscape page chrome for the executive dashboard: border + title + page #."""
+    cfg, ctx = doc.cfg, doc.ctx
+    w, h = landscape(A4)
+    canvas.setPageSize((w, h))
+    canvas.saveState()
+    canvas.setStrokeColor(hexcolor(cfg["colors"]["page_border"]))
+    canvas.setLineWidth(1)
+    canvas.rect(BORDER_INSET, BORDER_INSET, w - 2 * BORDER_INSET, h - 2 * BORDER_INSET)
+    canvas.setFont(BOLD, 11)
+    canvas.setFillColor(hexcolor(cfg["colors"]["heading"]))
+    canvas.drawCentredString(w / 2, h - BORDER_INSET - 7 * mm, shape(ctx["project"]["name"]))
+    canvas.setFont(FONT_NAME, 8)
+    canvas.setFillColor(hexcolor(cfg["colors"]["muted"]))
+    canvas.drawCentredString(w / 2, BORDER_INSET + 3 * mm, str(doc.page))
+    canvas.restoreState()
+
+
+def _dashboard_section(cfg, styles, ctx, labels, rtl, w):
+    """Reference-style landscape executive dashboard: progress + duration gauges,
+    a project-info panel, planned/actual bars, the S-curve, and a photo strip."""
+    flow = [NextPageTemplate("dash"), PageBreak()]
+    flow += _heading(styles, labels.get("dashboard", "Executive Dashboard"))
+
+    p = ctx["project"]
+    info_rows = [
+        (labels["info_client"], p["client"]), (labels["info_consultant"], p["consultant"]),
+        (labels["info_contractor"], p["contractor"]),
+        (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p["budget"] else ""),
+        (labels["info_finish"], _fmt_date(p["planned_finish"])),
+    ]
+    if ctx.get("duration"):
+        info_rows.append((labels["delay_days"], str(ctx["duration"]["delay"])))
+    info_rows = [(k, v) for k, v in info_rows if v]
+    info = _info_table(cfg, styles, info_rows, rtl)
+
+    donut = overall_donut(cfg, ctx, 0.26 * w, labels) or Spacer(1, 1)
+    dur = duration_pie(cfg, ctx, 0.34 * w, labels) or Spacer(1, 1)
+    top = Table([[donut, dur, info]], colWidths=[0.28 * w, 0.34 * w, 0.38 * w])
+    top.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+
+    bars = planned_actual_chart(cfg, ctx, 0.5 * w, labels) or Spacer(1, 1)
+    curve = scurve_chart(cfg, ctx, 0.48 * w, labels) or Spacer(1, 1)
+    mid = Table([[bars, curve]], colWidths=[0.5 * w, 0.5 * w])
+    mid.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+
+    flow += [top, Spacer(1, 6), mid]
+    flow += [NextPageTemplate("body"), PageBreak()]
+    return flow
+
+
 def build_report_pdf(report, ctx) -> bytes:
     """Render `ctx` (from services.build_report_context) into PDF bytes."""
     ensure_fonts()
@@ -289,9 +340,18 @@ def build_report_pdf(report, ctx) -> bytes:
     doc = _ReportDoc(buf, pagesize=page, cfg=cfg, ctx=ctx, title=report.title,
                      leftMargin=fx, rightMargin=fx, topMargin=page[1] - (fy + fh), bottomMargin=fy)
     frame = Frame(fx, fy, fw, fh, id="body", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    # Landscape frame for the dashboard — taller than frame_rect (no header band).
+    land = landscape(A4)
+    lw, lh = land
+    lfx = BORDER_INSET + 4 * mm
+    lfy = BORDER_INSET + 9 * mm
+    lfw = lw - 2 * lfx
+    lfh = (lh - BORDER_INSET - 14 * mm) - lfy
+    lframe = Frame(lfx, lfy, lfw, lfh, id="dash", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     doc.addPageTemplates([
         PageTemplate(id="cover", frames=[frame], onPage=draw_cover),
         PageTemplate(id="body", frames=[frame], onPage=draw_page_furniture),
+        PageTemplate(id="dash", frames=[lframe], onPage=draw_dash),
     ])
 
     story = [NextPageTemplate("body")]
@@ -361,6 +421,9 @@ def build_report_pdf(report, ctx) -> bytes:
         donut = overall_donut(cfg, ctx, fw, labels)
         if donut:
             story += [donut, Spacer(1, 6)]
+
+    if sections.get("dashboard"):
+        story += _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
 
     if sections.get("progress_chart"):
         chart = planned_actual_chart(cfg, ctx, fw, labels)
