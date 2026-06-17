@@ -142,8 +142,31 @@ def _draw_contained_image(canvas, reader, x, y, width, height):
                      width=dw, height=dh, preserveAspectRatio=True, mask="auto")
 
 
+def _right_lines(canvas, text, rx, y, font, size, color, leading, max_lines=3):
+    """Draw right-aligned, word-wrapped Arabic text (for the prepared-by org)."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    canvas.setFont(font, size)
+    canvas.setFillColor(color)
+    words = (text or "").split(" ")
+    lines, cur = [], ""
+    for word in words:
+        trial = f"{cur} {word}".strip()
+        if stringWidth(trial, font, size) > 55 * mm and cur:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    for i, line in enumerate(lines[:max_lines]):
+        canvas.drawRightString(rx, y - i * leading, shape(line))
+
+
 def draw_cover(canvas, doc):
-    """Cover page: maroon accent, report-number block, prepared-by, project title."""
+    """Cover page matching the reference: logo (top-left), map/cover image
+    (upper-centre), report no. + prepared-by (right), maroon edge line, and the
+    project title (bottom-centre). No overall % — the reference has none."""
     cfg, ctx = doc.cfg, doc.ctx
     w, h = doc.pagesize
     arabic = bool(ctx.get("arabic"))
@@ -153,58 +176,54 @@ def draw_cover(canvas, doc):
     canvas.setFillColor(hexcolor(cfg["colors"]["cover_bg"]))
     canvas.rect(0, 0, w, h, fill=1, stroke=0)
 
-    # Maroon vertical accent bar on the right, with a small tick.
-    bx = w - BORDER_INSET - 14 * mm
+    # Maroon vertical accent line near the right edge, with a small left tick.
+    bx = w - BORDER_INSET - 6 * mm
     canvas.setFillColor(accent)
-    canvas.rect(bx, h * 0.30, 1.6 * mm, h * 0.32, fill=1, stroke=0)
-    canvas.rect(bx - 10 * mm, h * 0.46, 10 * mm, 1.6 * mm, fill=1, stroke=0)
+    canvas.rect(bx, h * 0.28, 1.4 * mm, h * 0.44, fill=1, stroke=0)
+    canvas.rect(bx - 12 * mm, h * 0.50, 12 * mm, 1.4 * mm, fill=1, stroke=0)
 
-    # Top-left org / logo stand-in.
+    # Logo (top-left): uploaded left logo, else org text.
     org = cfg["header"].get("org_left") or cover.get("org")
-    cover_logo = storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image"))
-    if cover_logo:
-        _draw_contained_image(canvas, cover_logo, BORDER_INSET + 6 * mm, h - BORDER_INSET - 24 * mm,
-                              36 * mm, 18 * mm)
+    logo = storage_image_reader((ctx.get("logos", {}).get("left") or {}).get("image"))
+    if logo:
+        _draw_contained_image(canvas, logo, BORDER_INSET + 6 * mm, h - BORDER_INSET - 28 * mm, 48 * mm, 22 * mm)
     elif org:
         canvas.setFillColor(hexcolor(cfg["colors"]["primary"]))
         canvas.setFont(BOLD, 18)
-        canvas.drawString(BORDER_INSET + 6 * mm, h - BORDER_INSET - 16 * mm, shape(org))
+        canvas.drawString(BORDER_INSET + 6 * mm, h - BORDER_INSET - 18 * mm, shape(org))
 
+    # Map / cover image, upper-centre, with a thin border (reference satellite).
     cover_image = storage_image_reader((ctx.get("logos", {}).get("cover") or {}).get("image"))
     if cover_image:
-        _draw_contained_image(canvas, cover_image, BORDER_INSET + 6 * mm, h * 0.22,
-                              w * 0.42, h * 0.28)
+        mx, my, mw, mh = BORDER_INSET + 6 * mm, h * 0.42, w * 0.50, h * 0.21
+        _draw_contained_image(canvas, cover_image, mx, my, mw, mh)
+        canvas.setStrokeColor(hexcolor(cfg["colors"]["table_border"]))
+        canvas.setLineWidth(0.8)
+        canvas.rect(mx, my, mw, mh)
 
-    # Report number + month, right-aligned near the accent bar.
-    rx = bx - 6 * mm
+    # Report number + month, right-aligned at the map's level.
+    rx = bx - 7 * mm
     canvas.setFillColor(hexcolor(cfg["colors"]["text"]))
     canvas.setFont(BOLD, cfg["fonts"]["cover_title_size"])
     title = cover.get("title") or ctx["report"]["title"]
     no = ctx["report"]["number"]
-    canvas.drawRightString(rx, h * 0.60, shape(f"{title} ({no})" if no else title))
+    canvas.drawRightString(rx, h * 0.585, shape(f"{title} ({no})" if no else title))
     canvas.setFont(BOLD, cfg["fonts"]["h2_size"])
     period = _period_str(ctx, arabic)
     if period:
-        canvas.drawRightString(rx, h * 0.555, shape(period))
+        canvas.drawRightString(rx, h * 0.545, shape(period))
 
-    # Prepared-by block.
+    # Prepared-by block (label + organisation, wrapped).
     if cover.get("prepared_by"):
         canvas.setFillColor(hexcolor(cfg["colors"]["muted"]))
         canvas.setFont(FONT_NAME, cfg["fonts"]["base_size"] + 1)
-        canvas.drawRightString(rx, h * 0.47, shape(cover["prepared_by"]))
+        canvas.drawRightString(rx, h * 0.475, shape(cover["prepared_by"]))
         if cover.get("org"):
-            canvas.setFont(BOLD, cfg["fonts"]["base_size"] + 1)
-            canvas.setFillColor(hexcolor(cfg["colors"]["primary"]))
-            canvas.drawRightString(rx, h * 0.43, shape(cover["org"]))
+            _right_lines(canvas, cover["org"], rx, h * 0.44, BOLD, cfg["fonts"]["base_size"] + 1,
+                         hexcolor(cfg["colors"]["cover_accent"]), 5 * mm)
 
-    # Project title at the bottom, maroon, centered, wrapped.
+    # Project title, bottom-centre, maroon, wrapped.
     canvas.setFillColor(accent)
     _centered_wrapped(canvas, shape(ctx["project"]["name"]), BORDER_INSET, w - 2 * BORDER_INSET,
-                      h * 0.12, 24 * mm, BOLD, cfg["fonts"]["cover_title_size"] + 2)
-
-    # Overall % marker.
-    if cover.get("show_overall"):
-        canvas.setFillColor(accent)
-        canvas.setFont(BOLD, 40)
-        canvas.drawCentredString(w / 2, h * 0.04 + 8 * mm, f"{ctx['overall']:.0f}%")
+                      h * 0.20, 22 * mm, BOLD, cfg["fonts"]["cover_title_size"] + 2)
     canvas.restoreState()
