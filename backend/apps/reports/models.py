@@ -48,7 +48,10 @@ class Report(TimestampedModel):
     period_start = models.DateField(null=True, blank=True)
     period_finish = models.DateField(null=True, blank=True)
     # Per-report narrative; falls back to the project's description when blank.
+    # `description` is the plain-text form (search/fallback); `description_html`
+    # holds the rich-text version (sanitized) the builder edits and the PDF renders.
     description = models.TextField(blank=True)
+    description_html = models.TextField(blank=True)
     # Zone scope IDs to include (empty = the whole project).
     scope_ids = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)

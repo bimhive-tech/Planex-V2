@@ -29,6 +29,7 @@ from reportlab.platypus import (
 from reportlab.platypus.tableofcontents import TableOfContents
 
 from .constants import merged_config
+from .richtext import html_to_flowables
 from .services import _zone_grids
 from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, shape
 from .pdf_charts import (
@@ -546,9 +547,14 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         rows = [(k, v) for k, v in rows if v and v != "—"]
         story.append(_info_table(cfg, styles, rows, rtl))
 
-    if sections.get("description") and p["description"]:
+    if sections.get("description") and (p.get("description_html") or p["description"]):
         story += major(labels["description"], anchor="tab_description")
-        story += _description_flow(cfg, styles, p["description"], rtl)
+        if p.get("description_html"):
+            # Rich text from the builder (per-run bold/italic/underline/color/size,
+            # lists, alignment) — overrides the template's uniform formatting.
+            story += html_to_flowables(p["description_html"], cfg, styles)
+        else:
+            story += _description_flow(cfg, styles, p["description"], rtl)
 
     progress_anchored = False
     if sections.get("dashboard"):

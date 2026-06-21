@@ -13,6 +13,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
+import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { API_BASE, ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
@@ -53,11 +54,20 @@ const TAB_ANCHOR: Record<string, string> = {
 
 type Form = {
   project: string; template: string; title: string; report_number: string;
-  report_date: string; period_start: string; period_finish: string; status: string; description: string;
+  report_date: string; period_start: string; period_finish: string; status: string;
+  description: string; description_html: string;
 };
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+// Plain-text mirror of the rich description (fallback + search). Runs client-side.
+function htmlToPlainText(html: string): string {
+  if (!html) return "";
+  const el = document.createElement("div");
+  el.innerHTML = html;
+  return (el.textContent || "").replace(/\s+\n/g, "\n").trim();
+}
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const [form, setForm] = useState<Form | null>(null);
@@ -88,7 +98,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
       period_start: r.period_start ?? "", period_finish: r.period_finish ?? "",
-      status: r.status, description: r.description ?? "",
+      status: r.status, description: r.description ?? "", description_html: r.description_html ?? "",
     });
     return r;
   }, [reportId]);
@@ -127,6 +137,8 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     try {
       await api.patch(`/reports/${reportId}/`, {
         ...form,
+        // Keep a plain-text mirror of the rich description for fallback/search.
+        description: htmlToPlainText(form.description_html) || form.description,
         scope_ids: scopeIds,
         template: form.template || null,
         report_date: form.report_date || null,
@@ -149,7 +161,10 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   );
 
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setForm((f) => (f ? { ...f, [k]: e.target.value } : f));
+    setField(k, e.target.value);
+  };
+  const setField = (k: keyof Form, value: string) => {
+    setForm((f) => (f ? { ...f, [k]: value } : f));
     setSaved(false);
   };
   const bump = () => setRefreshKey((k) => k + 1);
@@ -253,10 +268,13 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
 
                 {tab === "description" && canManage && (
                   <section className={styles.tabPanel}>
-                    <label className={styles.label} htmlFor="description">Description (one line per bullet)</label>
-                    <textarea id="description" className={styles.textarea} value={form.description}
-                      onChange={set("description")} placeholder="وصف المشروع — اكتب كل نقطة في سطر…" />
-                    <span className={styles.hint}>Shown in the «Project Description» section; falls back to the project description when empty. Formatting (align, size, color, bold, underline, bullets) is in the Template Builder → Description tab.</span>
+                    <label className={styles.label}>Description</label>
+                    <RichTextEditor
+                      value={form.description_html}
+                      onChange={(html) => setField("description_html", html)}
+                      placeholder="وصف المشروع — نسّق النص كما تريد…"
+                    />
+                    <span className={styles.hint}>Format the text like Word — size, bold, italic, underline, color, bullet &amp; numbered lists, and alignment all carry through to the PDF. Falls back to the project description when empty.</span>
                   </section>
                 )}
 

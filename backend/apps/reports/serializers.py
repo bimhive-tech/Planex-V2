@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from .constants import default_config
 from .models import Report, ReportImage, ReportTemplate
+from .richtext import sanitize_html
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
@@ -31,7 +32,8 @@ class ReportListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "report_number", "report_date", "status",
             "project", "project_name", "template", "template_name",
-            "period_start", "period_finish", "description", "scope_ids", "created_at",
+            "period_start", "period_finish", "description", "description_html",
+            "scope_ids", "created_at",
         ]
 
 
@@ -40,9 +42,14 @@ class ReportWriteSerializer(serializers.ModelSerializer):
         model = Report
         fields = [
             "id", "project", "template", "title", "report_number", "report_date",
-            "period_start", "period_finish", "description", "scope_ids", "status",
+            "period_start", "period_finish", "description", "description_html",
+            "scope_ids", "status",
         ]
         read_only_fields = ["id"]
+
+    def validate_description_html(self, value):
+        """Whitelist the rich-text HTML before it's stored or re-rendered."""
+        return sanitize_html(value)
 
     def validate(self, attrs):
         """Project and template must belong to the caller's company."""

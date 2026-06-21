@@ -287,6 +287,7 @@ def build_report_context(report):
             "location": project.location,
             # Report narrative wins; fall back to the project's description.
             "description": report.description or project.description,
+            "description_html": report.description_html,
             "client": project.client_name,
             "consultant": project.consultant_name,
             "contractor": project.contractor_name,

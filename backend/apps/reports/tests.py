@@ -48,6 +48,36 @@ class ConfigTests(SimpleTestCase):
         self.assertNotEqual(default_config()["colors"]["primary"], "#000000")
 
 
+class RichTextTests(SimpleTestCase):
+    def test_sanitize_drops_scripts_and_unknown_tags(self):
+        from .richtext import sanitize_html
+
+        out = sanitize_html('<p>Hi</p><script>alert(1)</script><marquee>x</marquee>')
+        self.assertNotIn("script", out)
+        self.assertNotIn("alert(1)", out)   # script *contents* dropped too
+        self.assertNotIn("marquee", out)    # unknown tag unwrapped
+        self.assertIn("x", out)             # ...but its text kept
+        self.assertIn("Hi", out)
+
+    def test_sanitize_keeps_formatting_and_strips_handlers(self):
+        from .richtext import sanitize_html
+
+        out = sanitize_html('<p style="text-align:right" onclick="x()">'
+                            '<b>bold</b> <font color="#c00000" size="5">red</font></p>')
+        self.assertIn("<b>bold</b>", out)
+        self.assertIn('color="#c00000"', out)
+        self.assertNotIn("onclick", out)
+        self.assertIn("text-align:right", out)
+
+    def test_html_renders_to_flowables(self):
+        from .richtext import html_to_flowables
+
+        cfg = default_config()
+        flow = html_to_flowables(
+            '<ul><li>أولا</li><li><b>ثانيا</b></li></ul><div>Plain</div>', cfg, {})
+        self.assertEqual(len(flow), 3)  # two list items + one paragraph
+
+
 class PdfTests(SimpleTestCase):
     def test_arabic_detection_and_shaping(self):
         self.assertTrue(has_arabic("مشروع"))

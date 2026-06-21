@@ -37,7 +37,11 @@ export type IconName =
   | "undo"
   | "redo"
   | "copy"
-  | "eye";
+  | "eye"
+  | "listOrdered"
+  | "alignLeft"
+  | "alignCenter"
+  | "alignRight";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -204,6 +208,16 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M4 10h16M9 5v14M15 5v14" />
     </>
   ),
+  listOrdered: (
+    <>
+      <path d="M10 6h11M10 12h11M10 18h11" />
+      <path d="M4 6h1v4M4 10h2" />
+      <path d="M4 16.5a1 1 0 1 1 1.7.7L4 19h2" />
+    </>
+  ),
+  alignLeft: <path d="M4 6h16M4 12h10M4 18h13" />,
+  alignCenter: <path d="M4 6h16M7 12h10M5 18h14" />,
+  alignRight: <path d="M4 6h16M10 12h10M7 18h13" />,
   list: (
     <>
       <path d="M9 6h11M9 12h11M9 18h11" />
