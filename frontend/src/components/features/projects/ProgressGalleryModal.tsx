@@ -64,7 +64,7 @@ export function ProgressGalleryModal({ projectId, scope, canDelete, onClose }: P
   }
 
   return (
-    <Modal open title={`Photos · ${scope.name}`} onClose={onClose}>
+    <Modal open size="lg" title={`Photos · ${scope.name}`} onClose={onClose}>
       <div className={styles.filters}>
         <label className={styles.dateField}>
           <span>From</span>
@@ -74,15 +74,9 @@ export function ProgressGalleryModal({ projectId, scope, canDelete, onClose }: P
           <span>To</span>
           <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
         </label>
-        {subzones.length > 1 && (
-          <Filter label="Subzone" value={subzone} onChange={setSubzone} options={subzones} />
-        )}
-        {phases.length > 1 && (
-          <Filter label="Phase" value={phase} onChange={setPhase} options={phases} />
-        )}
-        {activities.length > 1 && (
-          <Filter label="Activity" value={activity} onChange={setActivity} options={activities} />
-        )}
+        <Filter label="Subzone" value={subzone} onChange={setSubzone} options={subzones} />
+        <Filter label="Phase" value={phase} onChange={setPhase} options={phases} />
+        <Filter label="Activity" value={activity} onChange={setActivity} options={activities} />
       </div>
 
       {actionError && <p className="formError">{actionError}</p>}

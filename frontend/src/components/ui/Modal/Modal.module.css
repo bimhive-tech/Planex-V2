@@ -72,4 +72,7 @@
     max-width: 480px;
     border-radius: var(--radius-md);
   }
+  .panel.lg {
+    max-width: 960px;
+  }
 }

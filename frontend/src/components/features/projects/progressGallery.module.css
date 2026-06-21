@@ -23,6 +23,14 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
+
+.selectField {
+  flex: 1;
+  min-width: 140px;
+}
+.selectField select {
+  width: 100%;
+}
 .dateField input:focus,
 .selectField select:focus {
   outline: none;
@@ -44,7 +52,7 @@
 
 @media (min-width: 1024px) {
   .grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 

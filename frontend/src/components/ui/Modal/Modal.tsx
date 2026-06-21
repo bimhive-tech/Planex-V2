@@ -12,9 +12,11 @@ interface Props {
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** Panel width on tablet+: "md" (default ~480px) or "lg" (~960px). */
+  size?: "md" | "lg";
 }
 
-export function Modal({ open, title, onClose, children, footer }: Props) {
+export function Modal({ open, title, onClose, children, footer, size = "md" }: Props) {
   useEffect(() => {
     if (!open) return;
     // Lock background scroll while open. Note: clicking the backdrop does NOT
@@ -30,7 +32,7 @@ export function Modal({ open, title, onClose, children, footer }: Props) {
   return (
     <div className={styles.backdrop} role="presentation">
       <div
-        className={styles.panel}
+        className={`${styles.panel} ${size === "lg" ? styles.lg : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
