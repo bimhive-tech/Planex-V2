@@ -39,26 +39,10 @@ def _duration(project, as_of):
 
 
 def _breakdown(project, progress=None):
-    """Count activities by progress bucket. Fast DB aggregate by default; when an
-    as-of `progress` map is supplied we bucket in Python (the map already lives
-    in memory) so historical reports count the right state."""
+    """Count activities by progress bucket via a DB aggregate, then — for an as-of
+    `progress` map — correct only the handful of overridden activities. Never
+    iterate the whole table (these hold tens of thousands of rows)."""
     from django.db.models import Count, Q
-
-    if progress is not None:
-        total = completed = not_started = 0
-        for aid, p in project.activities.values_list("id", "progress_percent"):
-            val = progress.get(str(aid), float(p))
-            total += 1
-            if val >= 100:
-                completed += 1
-            elif val <= 0:
-                not_started += 1
-        return {
-            "total": total,
-            "completed": completed,
-            "in_progress": max(0, total - completed - not_started),
-            "not_started": not_started,
-        }
 
     agg = project.activities.aggregate(
         total=Count("id"),
@@ -68,6 +52,26 @@ def _breakdown(project, progress=None):
     total = agg["total"] or 0
     completed = agg["completed"] or 0
     not_started = agg["not_started"] or 0
+
+    if progress:
+        def bucket(v):
+            return "c" if v >= 100 else ("n" if v <= 0 else "i")
+
+        for aid, cur in project.activities.filter(
+            id__in=list(progress.keys())
+        ).values_list("id", "progress_percent"):
+            cb, nb = bucket(float(cur)), bucket(progress[str(aid)])
+            if cb == nb:
+                continue
+            if cb == "c":
+                completed -= 1
+            elif cb == "n":
+                not_started -= 1
+            if nb == "c":
+                completed += 1
+            elif nb == "n":
+                not_started += 1
+
     return {
         "total": total,
         "completed": completed,

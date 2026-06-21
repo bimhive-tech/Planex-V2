@@ -14,8 +14,10 @@ if [ "${SEED_PLATFORM:-true}" = "true" ]; then
 fi
 
 echo "→ Starting Django (gunicorn) on :8000…"
-# --timeout 120: PDF generation with remote (R2) images can exceed the 30s default.
-gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers "${WEB_CONCURRENCY:-2}" --timeout 120 &
+# --timeout 300: large reports (detailed grid over tens of thousands of activities)
+# render well past the 30s default. The front-door PDF route handler fetches with
+# the same headroom, bypassing Next's rewrite proxy which resets long responses.
+gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers "${WEB_CONCURRENCY:-2}" --timeout 300 &
 
 cd /app/frontend
 export PORT="${PORT:-3000}"

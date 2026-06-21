@@ -34,21 +34,20 @@ def activity_progress_as_of(project, as_of) -> dict:
 def project_overall_progress(project, progress=None) -> float:
     """Weighted overall progress (0–100): sum(progress*weight)/sum(weight)
     across the project's activities. 0 when there are none. When `progress`
-    (an activity_id->% map, e.g. as-of-date) is given, weight against it,
-    falling back to each activity's current % for ids absent from the map."""
-    if progress is None:
-        agg = project.activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
-        wsum = agg["wsum"] or 0
-        if not wsum:
-            return 0.0
-        return round(float(agg["psum"] or 0) / float(wsum), 1)
-
-    wsum = psum = 0.0
-    for aid, w, p in project.activities.values_list("id", "weight", "progress_percent"):
-        val = progress.get(str(aid), float(p))
-        wsum += float(w)
-        psum += float(w) * val
-    return round(psum / wsum, 1) if wsum else 0.0
+    (an activity_id->% map, e.g. as-of-date) is given, the DB aggregate is
+    computed once and then *corrected* only for the few overridden activities —
+    never iterate the whole table (projects hold tens of thousands of rows)."""
+    agg = project.activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
+    wsum = float(agg["wsum"] or 0)
+    if not wsum:
+        return 0.0
+    psum = float(agg["psum"] or 0)
+    if progress:
+        for aid, w, cur in project.activities.filter(
+            id__in=list(progress.keys())
+        ).values_list("id", "weight", "progress_percent"):
+            psum += float(w) * (progress[str(aid)] - float(cur))
+    return round(psum / wsum, 1)
 
 
 def scope_progress_map(project, progress=None) -> dict:

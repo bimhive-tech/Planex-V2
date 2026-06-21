@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { api, ApiError, type Paginated } from "@/lib/api";
-import { API_BASE, ROUTES } from "@/lib/constants";
+import { ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
 import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
@@ -116,7 +116,9 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     return r;
   }, [reportId]);
 
-  const pdfUrl = `${API_BASE}/reports/${reportId}/pdf/`;
+  // Served by the route handler (app/reports/[id]/pdf-file), not the /api rewrite
+  // proxy, so long renders of big reports aren't reset mid-flight.
+  const pdfUrl = `/reports/${reportId}/pdf-file`;
 
   // Live project data (progress tables / info) — refetched after each save.
   useEffect(() => {
