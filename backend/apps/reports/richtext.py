@@ -14,7 +14,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
-from .pdf_base import FONT_NAME, has_arabic, hexcolor, shape
+from .pdf_base import FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape
 
 # Tags we keep when sanitizing; everything else is unwrapped (text kept, tag dropped).
 _INLINE = {"b", "strong", "i", "em", "u", "span", "font"}
@@ -202,12 +202,16 @@ def _wrap(s, f):
 
 def _line_markup(line_runs, rtl, prefix=""):
     """Reportlab markup for one visual line. For RTL we reverse the run order and
-    shape each run independently (see module docstring)."""
+    shape each run independently (see module docstring). reportlab lays the markup
+    out left→right, so a list marker goes at the *end* for RTL (its right edge)
+    and at the *start* for LTR (its left edge)."""
     seq = list(reversed(line_runs)) if rtl else list(line_runs)
-    parts = [_wrap(_esc(shape(text)), f) for text, f in seq if text]
-    if prefix:
-        parts.insert(0, _esc(prefix))  # index 0 = right edge (RTL) / left edge (LTR)
-    return "".join(parts)
+    core = "".join(_wrap(_esc(shape(text)), f) for text, f in seq if text)
+    if not prefix:
+        return core
+    marker = _esc(prefix)
+    gap = "&nbsp;&nbsp;"
+    return f"{core}{gap}{marker}" if rtl else f"{marker}{gap}{core}"
 
 
 def _line_para(line_runs, cfg, base_size, default_color, default_align, prefix=""):
@@ -231,6 +235,7 @@ def _render_block(node, cfg, base_size, default_color, flow):
 
     if node.tag in _LIST:
         ordered = node.tag == "ol"
+        list_align = _block_align(node)  # alignment set on the <ul>/<ol> itself
         idx = 0
         for li in node.children:
             if li.tag != "li":
@@ -240,7 +245,9 @@ def _render_block(node, cfg, base_size, default_color, flow):
             _collect_runs(li, {}, runs)
             lines = _split_lines(runs) or [[("", {})]]
             align = _block_align(li)
-            prefix = f"{idx}. " if ordered else "•  "
+            if align is None:
+                align = list_align
+            prefix = f"{idx}." if ordered else "•"
             for i, ln in enumerate(lines):
                 flow.append(_line_para(ln, cfg, base_size, default_color, align,
                                        prefix=prefix if i == 0 else ""))
@@ -258,6 +265,7 @@ def _render_block(node, cfg, base_size, default_color, flow):
 
 def html_to_flowables(html, cfg, styles):
     """Render sanitized description HTML into reportlab flowables."""
+    ensure_fonts()  # Paragraphs use the Amiri family; register it if not already
     ds = cfg.get("description", {})
     base_size = float(ds.get("size", cfg["fonts"]["base_size"]))
     default_color = ds.get("color", cfg["colors"]["text"])

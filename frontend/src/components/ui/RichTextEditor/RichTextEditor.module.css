@@ -92,8 +92,19 @@
   content: attr(data-placeholder);
   color: var(--text-muted);
 }
+/* Restore list markers the global reset strips (list-style: none). For RTL
+   content `dir="auto"` puts the marker on the right automatically. */
 .surface ul,
 .surface ol {
   margin: 0;
   padding-inline-start: 24px;
+}
+.surface ul {
+  list-style: disc;
+}
+.surface ol {
+  list-style: decimal;
+}
+.surface li {
+  margin: 2px 0;
 }
