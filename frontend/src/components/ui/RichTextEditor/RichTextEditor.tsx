@@ -49,6 +49,44 @@ export function RichTextEditor({ value, onChange, placeholder }: Props) {
     emit();
   }
 
+  // Alignment is applied directly as a style on the affected block(s) rather than
+  // via execCommand("justify…"): the browser otherwise puts text-align on the
+  // contentEditable root (where it's lost from innerHTML), so it would never
+  // reach the saved HTML or the PDF. Bare/inline content is wrapped in a <div>.
+  function align(value: "right" | "center" | "left") {
+    const editor = ref.current;
+    if (!editor) return;
+    editor.focus();
+    const sel = window.getSelection();
+    const topBlock = (node: Node | null) => {
+      let n = node;
+      while (n && n.parentNode !== editor) n = n.parentNode;
+      return n;
+    };
+    const alignAll = () => {
+      // Wrap every top-level node into one block and align it — used for a single
+      // unwrapped line (typing before any Enter) so a formatted line isn't split.
+      const div = document.createElement("div");
+      div.style.textAlign = value;
+      while (editor.firstChild) div.appendChild(editor.firstChild);
+      editor.appendChild(div);
+    };
+
+    const kids = Array.from(editor.childNodes);
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    const start = range ? kids.indexOf(topBlock(range.startContainer) as ChildNode) : -1;
+    const end = range ? kids.indexOf(topBlock(range.endContainer) as ChildNode) : -1;
+    const targets = start >= 0 ? kids.slice(start, Math.max(start, end) + 1) : [];
+
+    if (targets.length && targets.every((n) => n.nodeType === 1)) {
+      // Already block-wrapped (multi-line content) → align each selected block.
+      for (const n of targets) (n as HTMLElement).style.textAlign = value;
+    } else {
+      alignAll();
+    }
+    emit();
+  }
+
   return (
     <div className={styles.editor}>
       <div className={styles.toolbar} role="toolbar" aria-label="Text formatting">
@@ -59,9 +97,9 @@ export function RichTextEditor({ value, onChange, placeholder }: Props) {
         <ToolButton icon="list" title="Bullet list" onClick={() => exec("insertUnorderedList")} />
         <ToolButton icon="listOrdered" title="Numbered list" onClick={() => exec("insertOrderedList")} />
         <span className={styles.sep} />
-        <ToolButton icon="alignRight" title="Align right" onClick={() => exec("justifyRight")} />
-        <ToolButton icon="alignCenter" title="Align center" onClick={() => exec("justifyCenter")} />
-        <ToolButton icon="alignLeft" title="Align left" onClick={() => exec("justifyLeft")} />
+        <ToolButton icon="alignRight" title="Align right" onClick={() => align("right")} />
+        <ToolButton icon="alignCenter" title="Align center" onClick={() => align("center")} />
+        <ToolButton icon="alignLeft" title="Align left" onClick={() => align("left")} />
         <span className={styles.sep} />
         <select className={styles.size} title="Text size" defaultValue="3"
           onChange={(e) => exec("fontSize", e.target.value)}>
