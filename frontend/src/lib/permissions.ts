@@ -11,6 +11,7 @@ export const Permission = {
   SUBMIT_PROGRESS: "submit_progress",
   REVIEW_PROGRESS: "review_progress",
   APPROVE_PROGRESS: "approve_progress",
+  DELETE_PROGRESS_IMAGES: "delete_progress_images",
   EXPORT_REPORTS: "export_reports",
 } as const;
 

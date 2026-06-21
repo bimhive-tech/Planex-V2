@@ -25,6 +25,7 @@ class Permission(models.TextChoices):
     SUBMIT_PROGRESS = "submit_progress", "Submit progress"
     REVIEW_PROGRESS = "review_progress", "Review progress"
     APPROVE_PROGRESS = "approve_progress", "Approve progress"
+    DELETE_PROGRESS_IMAGES = "delete_progress_images", "Delete progress images"
     EXPORT_REPORTS = "export_reports", "Export reports"
 
 
@@ -64,6 +65,7 @@ PERMISSION_GROUPS = [
         Permission.SUBMIT_PROGRESS.value,
         Permission.REVIEW_PROGRESS.value,
         Permission.APPROVE_PROGRESS.value,
+        Permission.DELETE_PROGRESS_IMAGES.value,
         Permission.EXPORT_REPORTS.value,
     ]),
     ("Platform", PLATFORM_PERMISSIONS),

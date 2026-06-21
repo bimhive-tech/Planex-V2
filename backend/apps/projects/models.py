@@ -320,3 +320,52 @@ class Activity(TimestampedModel):
 
     def __str__(self):
         return self.name
+
+
+def progress_image_key(instance, filename):
+    """Stable private storage key for a progress-update photo."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"projects/{instance.entry.project_id}/progress/{uuid.uuid4()}.{ext}"
+
+
+class ProgressEntry(TimestampedModel):
+    """A dated progress reading for one activity — the history behind the activity's
+    current %. Lets us report 'as of' any date and revise a past date."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="progress_entries")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="progress_entries")
+    activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name="progress_entries")
+    date = models.DateField()  # the date the progress is recorded FOR (<= today)
+    progress_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    note = models.TextField(blank=True)
+    recorded_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="progress_entries")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["activity", "date"]),
+            models.Index(fields=["project", "date"]),
+        ]
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return f"{self.activity.name} = {self.progress_percent}% @ {self.date}"
+
+
+class ProgressImage(TimestampedModel):
+    """A photo attached to a progress entry (inherits the entry's activity + date).
+    Optional caption; removable by users with the manage-progress-media permission."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="progress_images")
+    entry = models.ForeignKey(ProgressEntry, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to=progress_image_key)
+    caption = models.CharField(max_length=200, blank=True)
+    uploaded_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="uploaded_progress_images")
+
+    class Meta:
+        indexes = [models.Index(fields=["entry", "created_at"])]
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return self.caption or "progress photo"

@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { api, ApiError } from "@/lib/api";
 import type { Activity } from "@/types/project";
 import { SubmitProgressModal } from "./SubmitProgressModal";
+import { UpdateProgressModal } from "./UpdateProgressModal";
 import styles from "./scheduleTree.module.css";
 
 interface Props {
@@ -25,6 +26,7 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
   const [acts, setActs] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitFor, setSubmitFor] = useState<Activity | null>(null);
+  const [updateFor, setUpdateFor] = useState<Activity | null>(null);
 
   async function load() {
     try {
@@ -38,18 +40,6 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, scopeId]);
-
-  async function setProgress(a: Activity, value: string) {
-    const v = Math.max(0, Math.min(100, Number(value)));
-    if (Number.isNaN(v) || String(v) === a.progress_percent) return;
-    try {
-      await api.patch(`/projects/${projectId}/activities/${a.id}/`, { progress_percent: v });
-      load();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save progress.");
-    }
-  }
 
   async function remove(a: Activity) {
     if (!window.confirm(`Delete task “${a.name}”?`)) return;
@@ -74,20 +64,14 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
             {a.code && <span className={styles.activityMeta}> · {a.code}</span>}
             <span className={styles.activityMeta}> · w{a.weight}</span>
           </span>
-          {canManage ? (
-            <input
-              key={a.progress_percent}
-              className={styles.progressInput}
-              type="number" min="0" max="100" step="1"
-              defaultValue={a.progress_percent}
-              onBlur={(e) => setProgress(a, e.target.value)}
-              aria-label={`Progress for ${a.name}`}
-            />
-          ) : (
-            <span className={`${styles.pct} tnum`}>{Math.round(Number(a.progress_percent))}%</span>
-          )}
+          <span className={`${styles.pct} tnum`}>{Math.round(Number(a.progress_percent))}%</span>
           {(canSubmit || canManage) && (
             <div className={styles.actions}>
+              {canManage && (
+                <button className={styles.submitBtn} title="Record dated progress" onClick={() => setUpdateFor(a)}>
+                  Update
+                </button>
+              )}
               {canSubmit && (
                 <button className={styles.submitBtn} title="Submit progress for review" onClick={() => setSubmitFor(a)}>
                   Submit
@@ -111,6 +95,13 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
         <SubmitProgressModal
           projectId={projectId} activity={submitFor}
           onClose={() => setSubmitFor(null)} onSubmitted={onChanged}
+        />
+      )}
+      {updateFor && (
+        <UpdateProgressModal
+          projectId={projectId} activity={updateFor}
+          onClose={() => setUpdateFor(null)}
+          onSaved={() => { load(); onChanged(); }}
         />
       )}
     </>
