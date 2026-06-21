@@ -2,6 +2,8 @@
 
 Access: VIEW_PROJECTS to read, EXPORT_REPORTS to create/edit/generate.
 """
+import json
+
 from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -82,8 +84,12 @@ class ReportViewSet(viewsets.ModelViewSet):
         """Generate and stream the report PDF on demand."""
         report = self.get_object()
         ctx = build_report_context(report)
-        data = build_report_pdf(report, ctx)
+        pages = {}
+        data = build_report_pdf(report, ctx, out_pages=pages)
         resp = HttpResponse(data, content_type="application/pdf")
         safe = (report.report_number or report.title or "report").replace("/", "-")
         resp["Content-Disposition"] = f'inline; filename="report-{safe}.pdf"'
+        # Section -> page map so the builder tabs can scroll the preview.
+        resp["X-Section-Pages"] = json.dumps(pages)
+        resp["Access-Control-Expose-Headers"] = "X-Section-Pages"
         return resp

@@ -43,6 +43,13 @@ const TABS = [
   { key: "attachments", label: "Attachments" },
 ] as const;
 
+// Maps a builder tab to the PDF section anchor it scrolls the preview to.
+const TAB_ANCHOR: Record<string, string> = {
+  setup: "tab_cover", scope: "tab_cover", cover: "tab_cover",
+  info: "tab_info", description: "tab_description",
+  progress: "tab_progress", photos: "tab_photos", attachments: "tab_attachments",
+};
+
 type Form = {
   project: string; template: string; title: string; report_number: string;
   report_date: string; period_start: string; period_finish: string; status: string; description: string;
@@ -62,6 +69,8 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const [data, setData] = useState<ReportData | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [sectionPages, setSectionPages] = useState<Record<string, number>>({});
+  const [scrollNonce, setScrollNonce] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -99,7 +108,12 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     let objectUrl = "";
     setPreviewLoading(true);
     fetch(pdfUrl, { credentials: "include" })
-      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("preview failed"))))
+      .then((r) => {
+        if (!r.ok) return Promise.reject(new Error("preview failed"));
+        const hdr = r.headers.get("X-Section-Pages");  // section -> page map
+        if (hdr) { try { setSectionPages(JSON.parse(hdr)); } catch { /* ignore */ } }
+        return r.blob();
+      })
       .then((blob) => { if (!revoked) { objectUrl = URL.createObjectURL(blob); setPreviewUrl(objectUrl); } })
       .catch(() => setPreviewUrl(""))
       .finally(() => !revoked && setPreviewLoading(false));
@@ -183,7 +197,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   {TABS.map((t) => (
                     <button key={t.key} type="button"
                       className={`${styles.tab} ${t.key === tab ? styles.tabActive : ""}`}
-                      onClick={() => setTab(t.key)}>
+                      onClick={() => { setTab(t.key); setScrollNonce((n) => n + 1); }}>
                       {t.label}
                     </button>
                   ))}
@@ -296,6 +310,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
               </div>
 
               <PdfViewer url={previewUrl} loading={previewLoading}
+                scrollToPage={sectionPages[TAB_ANCHOR[tab]]} scrollNonce={scrollNonce}
                 onDownload={() => window.open(pdfUrl, "_blank", "noopener")} />
             </div>
           </>

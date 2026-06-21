@@ -18,12 +18,15 @@ interface Props {
   url: string;
   loading: boolean;
   onDownload: () => void;
+  scrollToPage?: number;  // 1-based page to scroll to (from the active tab)
+  scrollNonce?: number;   // bump to re-trigger the scroll on the same target
 }
 
-export function PdfViewer({ url, loading, onDownload }: Props) {
+export function PdfViewer({ url, loading, onDownload, scrollToPage, scrollNonce }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Render pages at the container's width (responsive), capped for readability.
   useEffect(() => {
@@ -35,6 +38,15 @@ export function PdfViewer({ url, loading, onDownload }: Props) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Scroll the requested page into view when the active tab changes.
+  useEffect(() => {
+    if (!scrollToPage || !numPages) return;
+    const t = setTimeout(() => {
+      pageRefs.current[scrollToPage - 1]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [scrollToPage, scrollNonce, numPages]);
 
   const pageWidth = width > 0 ? Math.min(width - 32, 840) : undefined;
 
@@ -58,7 +70,7 @@ export function PdfViewer({ url, loading, onDownload }: Props) {
             error={<div className={styles.msg}>Couldn&apos;t render the preview — use Download.</div>}
           >
             {Array.from({ length: numPages }, (_, i) => (
-              <div className={styles.pageWrap} key={i}>
+              <div className={styles.pageWrap} key={i} ref={(el) => { pageRefs.current[i] = el; }}>
                 <Page
                   pageNumber={i + 1}
                   width={pageWidth}

@@ -12,6 +12,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     BaseDocTemplate,
+    Flowable,
     Frame,
     HRFlowable,
     Image,
@@ -46,19 +47,39 @@ class _ReportDoc(BaseDocTemplate):
         self.cfg = cfg
         self.ctx = ctx
         self._toc_seq = 0
+        self.anchor_pages = {}  # tab anchor name -> page number (final pass wins)
         super().__init__(*args, **kwargs)
 
     def beforeDocument(self):
-        # Reset per build pass so bookmark keys are stable across multiBuild.
+        # Reset per build pass so bookmark keys + anchor pages are stable.
         self._toc_seq = 0
+        self.anchor_pages = {}
 
     def afterFlowable(self, flowable):
-        if getattr(flowable, "style", None) and flowable.style.name == "SectionHeading":
+        if isinstance(flowable, _Anchor):
+            self.anchor_pages[flowable.name] = self.page
+        elif getattr(flowable, "style", None) and flowable.style.name == "SectionHeading":
             # Bookmark the heading and pass the key so the TOC entry is a live link.
             key = f"sec{self._toc_seq}"
             self._toc_seq += 1
             self.canv.bookmarkPage(key)
             self.notify("TOCEntry", (0, flowable.getPlainText(), self.page, key))
+
+
+class _Anchor(Flowable):
+    """Zero-size flowable that names a PDF destination on the page it lands on,
+    so the builder's tabs can scroll the preview to a section."""
+
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+        self.width = self.height = 0
+
+    def wrap(self, *args):
+        return (0, 0)
+
+    def draw(self):
+        self.canv.bookmarkPage(self.name)
 
 
 def _styles(cfg):
@@ -239,23 +260,27 @@ def _photo_page_table(cfg, styles, photos, width, height):
     return table
 
 
-def _photo_section(cfg, styles, photos, width, height, heading_text):
+def _photo_section(cfg, styles, photos, width, height, heading_text, anchor=None):
     """Progress-photo pages — 4 photos (2×2) per page, like the reference."""
     flow = []
     for page_i in range(0, len(photos), 4):
         chunk = photos[page_i:page_i + 4]
         flow.append(PageBreak())  # each set of 4 gets its own page
+        if page_i == 0 and anchor:
+            flow.append(_Anchor(anchor))
         flow += _heading(styles, heading_text)  # fresh flowables per page
         flow.append(_photo_page_table(cfg, styles, chunk, width, height - 24 * mm))
     return flow
 
 
-def _attachment_section(cfg, styles, attachments, width, height, heading_text):
+def _attachment_section(cfg, styles, attachments, width, height, heading_text, anchor=None):
     """Attachments — one image per page, scaled to fill it."""
     flow = []
     for i, att in enumerate(attachments):
         flow.append(PageBreak())
         if i == 0:
+            if anchor:
+                flow.append(_Anchor(anchor))
             flow += _heading(styles, heading_text)
         img = _storage_image_flowable(att.get("image"), width, height - 30 * mm)
         flow.append(img or Paragraph("", styles["body"]))
@@ -365,7 +390,7 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w):
     return flow
 
 
-def build_report_pdf(report, ctx) -> bytes:
+def build_report_pdf(report, ctx, out_pages=None) -> bytes:
     """Render `ctx` (from services.build_report_context) into PDF bytes."""
     ensure_fonts()
     cfg = merged_config(report.template.config if report.template else None)
@@ -421,11 +446,14 @@ def build_report_pdf(report, ctx) -> bytes:
 
     p = ctx["project"]
 
-    def major(label):
-        """Start a major (TOC-listed) section on a fresh page."""
+    def major(label, anchor=None):
+        """Start a major (TOC-listed) section on a fresh page; `anchor` names a
+        destination the builder tabs can scroll to."""
         out = [PageBreak()]
         if cfg.get("dividers"):
             out += _divider(styles, label)
+        if anchor:
+            out.append(_Anchor(anchor))
         out += _heading(styles, label)
         return out
 
@@ -442,7 +470,7 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(Spacer(1, 10))
 
     if sections.get("project_info"):
-        story += major(labels["project_info"])
+        story += major(labels["project_info"], anchor="tab_info")
         dur = ctx.get("duration") or {}
         rows = [
             (labels["info_name"], p["name"]),
@@ -464,17 +492,22 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(_info_table(cfg, styles, rows, rtl))
 
     if sections.get("description") and p["description"]:
-        story += major(labels["description"])
+        story += major(labels["description"], anchor="tab_description")
         story += _description_flow(cfg, styles, p["description"], rtl)
 
+    progress_anchored = False
     if sections.get("dashboard"):
-        story += _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
+        dash = _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
+        dash[2:2] = [_Anchor("tab_progress")]  # after NextPageTemplate + PageBreak
+        story += dash
+        progress_anchored = True
 
     # Project Progress Report — one TOC entry; the charts are sub-headings.
     progress_on = any(sections.get(k) for k in
                       ("progress_overview", "progress_chart", "duration", "scurve", "progress_compare"))
     if progress_on:
-        story += major(labels.get("progress_report", "Project Progress Report"))
+        story += major(labels.get("progress_report", "Project Progress Report"),
+                       anchor=None if progress_anchored else "tab_progress")
         if sections.get("progress_overview"):
             story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}", force=TA_CENTER))
             donut = overall_donut(cfg, ctx, fw, labels)
@@ -537,11 +570,15 @@ def build_report_pdf(report, ctx) -> bytes:
         story.append(_aligned(styles["body"], p["notes"]))
 
     if sections.get("photos") and ctx.get("photos"):
-        story += _photo_section(cfg, styles, ctx["photos"], fw, fh, labels["photos"])
+        story += _photo_section(cfg, styles, ctx["photos"], fw, fh, labels["photos"], anchor="tab_photos")
 
     if sections.get("attachments") and ctx.get("attachments"):
         story += _attachment_section(cfg, styles, ctx["attachments"], fw, fh,
-                                     labels.get("attachments", "Attachments"))
+                                     labels.get("attachments", "Attachments"), anchor="tab_attachments")
 
     doc.multiBuild(story)
+    if out_pages is not None:
+        out_pages.update(doc.anchor_pages)
+        if cfg["cover"].get("enabled"):
+            out_pages.setdefault("tab_cover", 1)
     return buf.getvalue()

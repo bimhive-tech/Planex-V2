@@ -182,6 +182,7 @@ def draw_cover(canvas, doc):
     arabic = bool(ctx.get("arabic"))
     cover = cfg["cover"]
     accent = hexcolor(cfg["colors"]["cover_accent"])
+    canvas.bookmarkPage("tab_cover")  # builder "Cover" tab scrolls here
     canvas.saveState()
     canvas.setFillColor(hexcolor(cfg["colors"]["cover_bg"]))
     canvas.rect(0, 0, w, h, fill=1, stroke=0)
