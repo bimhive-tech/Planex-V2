@@ -207,6 +207,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Report date" name="report_date" type="date" value={form.report_date} onChange={set("report_date")} />
                       <Select label="Status" name="status" options={STATUS_OPTIONS} value={form.status} onChange={set("status")} />
                     </div>
+                    <p className="formHint">Progress is shown as of the report date — each task uses its latest dated entry on or before this day.</p>
                     <div className={styles.fieldRow}>
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />

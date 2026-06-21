@@ -74,6 +74,7 @@ export interface ProjectPerms {
   submit: boolean;
   review: boolean;
   approve: boolean;
+  deletePhotos: boolean;
 }
 
 export type ProjectImageType = "site_photo" | "cover" | "logo_left" | "logo_right";
@@ -87,6 +88,31 @@ export interface ProjectImage {
   url: string;
   created_at: string;
   updated_at: string;
+}
+
+// A dated progress reading for an activity (the history behind its current %).
+export interface ProgressEntry {
+  id: string;
+  date: string;
+  progress_percent: string;
+  note: string;
+  recorded_by_name: string;
+  can_edit: boolean;
+  created_at: string;
+}
+
+// A progress photo as returned by the history/gallery endpoint.
+export interface ProgressImage {
+  id: string;
+  url: string;
+  caption: string;
+  date: string;
+  activity_id: string;
+  activity_name: string;
+  phase_name: string;
+  subzone_code: string;
+  uploaded_by_name: string;
+  created_at: string;
 }
 
 export interface ProjectMember {

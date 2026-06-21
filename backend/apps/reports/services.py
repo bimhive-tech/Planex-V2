@@ -6,7 +6,7 @@ hold (project dates + dated snapshots) — no extra manual entry needed."""
 import datetime
 
 from apps.projects.models import ProjectImage, ProjectScope
-from apps.projects.services import project_overall_progress, scope_progress_map
+from apps.projects.services import activity_progress_as_of, project_overall_progress
 
 from .models import ReportImage
 
@@ -38,10 +38,27 @@ def _duration(project, as_of):
     return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
 
 
-def _breakdown(project):
-    """Count activities by progress bucket — in the DB, not Python (these tables
-    hold tens of thousands of rows)."""
+def _breakdown(project, progress=None):
+    """Count activities by progress bucket. Fast DB aggregate by default; when an
+    as-of `progress` map is supplied we bucket in Python (the map already lives
+    in memory) so historical reports count the right state."""
     from django.db.models import Count, Q
+
+    if progress is not None:
+        total = completed = not_started = 0
+        for aid, p in project.activities.values_list("id", "progress_percent"):
+            val = progress.get(str(aid), float(p))
+            total += 1
+            if val >= 100:
+                completed += 1
+            elif val <= 0:
+                not_started += 1
+        return {
+            "total": total,
+            "completed": completed,
+            "in_progress": max(0, total - completed - not_started),
+            "not_started": not_started,
+        }
 
     agg = project.activities.aggregate(
         total=Count("id"),
@@ -102,9 +119,10 @@ def _scope_context(project, scope_ids):
     return predicate, scope_to_zone
 
 
-def _zone_rows(project, scope_ids=None):
+def _zone_rows(project, scope_ids=None, progress=None):
     """Top-level zones with progress rolled up over the *selected* tasks (a zone
-    is shown only when it has included tasks). No selection = the whole project."""
+    is shown only when it has included tasks). No selection = the whole project.
+    `progress` (activity_id->% map) overrides current values for as-of reports."""
     predicate, scope_to_zone = _scope_context(project, scope_ids)
     zones = list(
         ProjectScope.objects.filter(
@@ -121,7 +139,8 @@ def _zone_rows(project, scope_ids=None):
         zone = scope_to_zone.get(str(sid))
         if zone not in zone_name:
             continue
-        w, prog = float(weight), float(prog)
+        w = float(weight)
+        prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
         sw[zone] = sw.get(zone, 0.0) + w
         spw[zone] = spw.get(zone, 0.0) + w * prog
 
@@ -131,10 +150,11 @@ def _zone_rows(project, scope_ids=None):
     return rows
 
 
-def _zone_grids(project, zone_ids, scope_ids=None):
+def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
     """The schedule-style grid per zone: subzones as columns, tasks (grouped by
     phase) as rows, each cell an activity's progress. Honours the scope selection
-    (only included subzones/phases/tasks appear)."""
+    (only included subzones/phases/tasks appear). `progress` (activity_id->% map)
+    overrides current cell values for as-of reports."""
     from apps.projects.models import Activity, ProjectScope
 
     predicate, _ = _scope_context(project, scope_ids)
@@ -169,7 +189,8 @@ def _zone_grids(project, zone_ids, scope_ids=None):
                 order.append(ri)
             ci = col_pos.get(a["subzone_index"])
             if ci is not None:
-                row["cells"][ci] = round(float(a["progress_percent"]), 1)
+                val = progress.get(str(a["id"]), float(a["progress_percent"])) if progress is not None else float(a["progress_percent"])
+                row["cells"][ci] = round(val, 1)
 
         rows = [rows_by_index[i] for i in order]
         if columns and rows:
@@ -180,9 +201,14 @@ def _zone_grids(project, zone_ids, scope_ids=None):
 def build_report_context(report):
     """Assemble the full data dict the PDF generator consumes."""
     project = report.project
-    overall = project_overall_progress(project)
-    breakdown = _breakdown(project)
     as_of = report.report_date or report.period_finish or datetime.date.today()
+
+    # As-of-date progress: read each activity's % from its latest dated entry on
+    # or before the report date. Empty (no entries anywhere) → fast current path.
+    progress = activity_progress_as_of(project, as_of) or None
+
+    overall = project_overall_progress(project, progress)
+    breakdown = _breakdown(project, progress)
 
     planned = _planned_progress(project, as_of)
     duration = _duration(project, as_of)
@@ -203,7 +229,7 @@ def build_report_context(report):
 
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
     # the selected tasks (empty selection = whole project).
-    zones = _zone_rows(project, report.scope_ids)
+    zones = _zone_rows(project, report.scope_ids, progress)
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
@@ -279,6 +305,9 @@ def build_report_context(report):
         "breakdown": breakdown,
         "zones": zones,
         "zone_grids": zone_grids,
+        # Internal: as-of progress map so the PDF's lazy grid matches the report
+        # date (None when the project has no dated entries).
+        "_progress": progress,
         "delays": delays,
         "scurve": scurve,
         "milestones": milestones,

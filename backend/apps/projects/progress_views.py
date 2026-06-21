@@ -5,6 +5,7 @@ attach optional photos with captions, browse photo history by scope/date, and
 delete photos (gated by DELETE_PROGRESS_IMAGES). Updates the activity's current
 % to its latest-dated entry."""
 import mimetypes
+from datetime import timedelta
 
 from django.conf import settings
 from django.db.models import Q
@@ -23,6 +24,10 @@ from apps.accounts.constants import Permission
 from .models import Activity, ProgressEntry, ProgressImage, Project, ProjectScope
 
 ALLOWED = {"image/jpeg", "image/png", "image/webp"}
+
+# Grace window: the author can fix a reading for this many days after recording
+# it. Managers (MANAGE_PROJECTS) can always correct entries.
+EDIT_WINDOW_DAYS = 2
 
 
 def _project(request, project_id):
@@ -44,6 +49,15 @@ def _require_record(request):
         raise PermissionDenied("You don't have permission to record progress.")
 
 
+def _can_edit_entry(user, entry):
+    """Author may edit within the grace window; managers anytime."""
+    if Permission.MANAGE_PROJECTS in user.effective_permissions():
+        return True
+    if entry.recorded_by_id != user.id:
+        return False
+    return timezone.now() <= entry.created_at + timedelta(days=EDIT_WINDOW_DAYS)
+
+
 def _sync_activity(activity):
     """Keep the activity's current % equal to its latest-dated progress entry."""
     latest = activity.progress_entries.order_by("-date", "-created_at").first()
@@ -55,12 +69,16 @@ def _sync_activity(activity):
 class ProgressImageSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
     date = serializers.DateField(source="entry.date", read_only=True)
+    activity_id = serializers.CharField(source="entry.activity_id", read_only=True)
     activity_name = serializers.CharField(source="entry.activity.name", read_only=True)
+    phase_name = serializers.CharField(source="entry.activity.phase_name", read_only=True, default="")
+    subzone_code = serializers.CharField(source="entry.activity.subzone_code", read_only=True, default="")
     uploaded_by_name = serializers.CharField(source="uploaded_by.full_name", read_only=True, default="")
 
     class Meta:
         model = ProgressImage
-        fields = ["id", "url", "caption", "date", "activity_name", "uploaded_by_name", "created_at"]
+        fields = ["id", "url", "caption", "date", "activity_id", "activity_name",
+                  "phase_name", "subzone_code", "uploaded_by_name", "created_at"]
 
     def get_url(self, obj):
         return f"/api/projects/{obj.entry.project_id}/progress-images/{obj.id}/file/" if obj.image else ""
@@ -68,11 +86,17 @@ class ProgressImageSerializer(serializers.ModelSerializer):
 
 class ProgressEntrySerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source="recorded_by.full_name", read_only=True, default="")
+    can_edit = serializers.SerializerMethodField()
     images = ProgressImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProgressEntry
-        fields = ["id", "date", "progress_percent", "note", "recorded_by_name", "images", "created_at"]
+        fields = ["id", "date", "progress_percent", "note", "recorded_by_name",
+                  "can_edit", "images", "created_at"]
+
+    def get_can_edit(self, obj):
+        request = self.context.get("request")
+        return bool(request) and _can_edit_entry(request.user, obj)
 
 
 class ActivityProgressView(APIView):
@@ -90,7 +114,8 @@ class ActivityProgressView(APIView):
         project = _project(request, project_id)
         _require_view(request)
         activity = self._activity(project, activity_id)
-        return Response(ProgressEntrySerializer(activity.progress_entries.all(), many=True).data)
+        qs = activity.progress_entries.select_related("recorded_by").prefetch_related("images")
+        return Response(ProgressEntrySerializer(qs, many=True, context={"request": request}).data)
 
     def post(self, request, project_id, activity_id):
         project = _project(request, project_id)
@@ -111,7 +136,58 @@ class ActivityProgressView(APIView):
             recorded_by=request.user,
         )
         _sync_activity(activity)
-        return Response(ProgressEntrySerializer(entry).data, status=status.HTTP_201_CREATED)
+        return Response(ProgressEntrySerializer(entry, context={"request": request}).data,
+                        status=status.HTTP_201_CREATED)
+
+
+class ProgressEntryDetailView(APIView):
+    """Edit (PATCH) or remove (DELETE) a progress reading within its grace
+    window (author for EDIT_WINDOW_DAYS; managers anytime)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def _entry(self, project, entry_id):
+        return get_object_or_404(
+            ProgressEntry.objects.select_related("activity", "recorded_by"),
+            pk=entry_id, project=project,
+        )
+
+    def patch(self, request, project_id, entry_id):
+        project = _project(request, project_id)
+        _require_record(request)
+        entry = self._entry(project, entry_id)
+        if not _can_edit_entry(request.user, entry):
+            raise PermissionDenied("This entry can no longer be edited.")
+
+        if "progress_percent" in request.data:
+            try:
+                pct = float(request.data["progress_percent"])
+            except (TypeError, ValueError):
+                raise ValidationError({"progress_percent": "A number 0–100 is required."})
+            if not 0 <= pct <= 100:
+                raise ValidationError({"progress_percent": "Must be between 0 and 100."})
+            entry.progress_percent = pct
+        if "date" in request.data:
+            date = request.data["date"]
+            if not date or date > str(timezone.localdate()):
+                raise ValidationError({"date": "Pick a valid date that isn't in the future."})
+            entry.date = date
+        if "note" in request.data:
+            entry.note = request.data["note"]
+        entry.save()
+        _sync_activity(entry.activity)
+        return Response(ProgressEntrySerializer(entry, context={"request": request}).data)
+
+    def delete(self, request, project_id, entry_id):
+        project = _project(request, project_id)
+        _require_record(request)
+        entry = self._entry(project, entry_id)
+        if not _can_edit_entry(request.user, entry):
+            raise PermissionDenied("This entry can no longer be edited.")
+        activity = entry.activity
+        entry.delete()
+        _sync_activity(activity)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ProgressEntryImagesView(APIView):

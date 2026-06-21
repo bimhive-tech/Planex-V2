@@ -96,7 +96,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
       <div className={styles.content}>
         {tab === "Overview" && <ProjectOverview project={project} stats={stats} canManage={canManage} />}
         {tab === "Schedule" && (
-          <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} onStatsChange={setStats} />
+          <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
         )}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
         {tab === "Delays" && <ProjectDelays projectId={project.id} canManage={canManage} />}

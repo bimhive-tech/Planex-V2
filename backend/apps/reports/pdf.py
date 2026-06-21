@@ -402,7 +402,7 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
     # Build the (heavy) detailed grid only when that section is enabled.
     if sections.get("detailed_progress") and not ctx.get("zone_grids") and getattr(report, "project", None):
         ctx["zone_grids"] = _zone_grids(report.project, [z["id"] for z in ctx["zones"]],
-                                        getattr(report, "scope_ids", None))
+                                        getattr(report, "scope_ids", None), ctx.get("_progress"))
 
     page = landscape(A4) if cfg["page"].get("orientation") == "landscape" else A4
     fx, fy, fw, fh = frame_rect(page)

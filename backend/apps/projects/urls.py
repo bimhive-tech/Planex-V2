@@ -18,6 +18,7 @@ from .milestone_views import MilestoneDetailView, MilestoneListView
 from .delay_views import DelayDetailView, DelayListView
 from .progress_views import (
     ActivityProgressView,
+    ProgressEntryDetailView,
     ProgressEntryImagesView,
     ProgressImageDetailView,
     ProgressImageFileView,
@@ -45,6 +46,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),
     path("projects/<uuid:project_id>/activities/<uuid:activity_id>/progress/", ActivityProgressView.as_view(), name="activity-progress"),
+    path("projects/<uuid:project_id>/progress-entries/<uuid:entry_id>/", ProgressEntryDetailView.as_view(), name="progress-entry"),
     path("projects/<uuid:project_id>/progress-entries/<uuid:entry_id>/images/", ProgressEntryImagesView.as_view(), name="progress-entry-images"),
     path("projects/<uuid:project_id>/progress-images/", ProgressImagesListView.as_view(), name="progress-images"),
     path("projects/<uuid:project_id>/progress-images/<uuid:image_id>/", ProgressImageDetailView.as_view(), name="progress-image"),

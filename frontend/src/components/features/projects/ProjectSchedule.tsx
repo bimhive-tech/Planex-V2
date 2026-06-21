@@ -15,6 +15,7 @@ import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
 import { ScopeActivities } from "./ScopeActivities";
 import { ZoneGridView } from "./ZoneGridView";
+import { ProgressGalleryModal } from "./ProgressGalleryModal";
 import styles from "./scheduleTree.module.css";
 
 const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", building: "area", area: "area" };
@@ -23,10 +24,11 @@ interface Props {
   projectId: string;
   canManage: boolean;
   canSubmit: boolean;
+  canDeletePhotos: boolean;
   onStatsChange: (stats: { overall: number; breakdown: { total: number; completed: number; in_progress: number; not_started: number } }) => void;
 }
 
-export function ProjectSchedule({ projectId, canManage, canSubmit, onStatsChange }: Props) {
+export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhotos, onStatsChange }: Props) {
   const { data, loading, error, reload } = useFetch(
     () => api.get<ProjectStructure>(`/projects/${projectId}/structure/`),
     [projectId],
@@ -42,6 +44,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, onStatsChange
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [gridZone, setGridZone] = useState<{ id: string; name: string } | null>(null);
+  const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -143,6 +146,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, onStatsChange
               onEditActivity={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
               onChanged={reload}
               onOpenGrid={(id, name) => setGridZone({ id, name })}
+              onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
             />
           ))}
         </StateView>
@@ -159,6 +163,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, onStatsChange
         <ActivityFormModal
           open onClose={() => setActivityModal(null)} onSaved={reload}
           projectId={projectId} scopeId={activityModal.scopeId} activity={activityModal.activity}
+        />
+      )}
+      {photosScope && (
+        <ProgressGalleryModal
+          projectId={projectId} scope={photosScope} canDelete={canDeletePhotos}
+          onClose={() => setPhotosScope(null)}
         />
       )}
     </div>
@@ -182,6 +192,7 @@ interface NodeProps {
   onEditActivity: (activity: Activity) => void;
   onChanged: () => void;
   onOpenGrid: (id: string, name: string) => void;
+  onOpenPhotos: (id: string, name: string) => void;
 }
 
 function ScopeNode(props: NodeProps) {
@@ -211,6 +222,11 @@ function ScopeNode(props: NodeProps) {
             <span>Grid</span>
           </button>
         )}
+        <button className={styles.gridBtn} title="Progress photos" aria-label="Progress photos"
+          onClick={() => props.onOpenPhotos(scope.id, scope.name)}>
+          <Icon name="image" size={14} />
+          <span>Photos</span>
+        </button>
         {canManage && (
           <div className={styles.actions}>
             <button className={styles.actionBtn} title="Add sub-level" aria-label="Add sub-level"
