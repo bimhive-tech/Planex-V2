@@ -5,6 +5,7 @@ Arabic text is reshaped + bidi-reordered so it renders right-to-left."""
 from io import BytesIO
 
 from django.core.files.storage import default_storage
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
@@ -82,6 +83,53 @@ class _Anchor(Flowable):
         self.canv.bookmarkPage(self.name)
 
 
+class _RtlTOC(TableOfContents):
+    """Table of contents laid out for Arabic: each entry's text sits flush right
+    and its page number on the far left, with a dotted leader between. reportlab's
+    stock TOC always pins the page number to the right edge, so we render the rows
+    ourselves. Entry text is already bidi-shaped, so the `<onDraw>` marker goes at
+    the start of the (right-aligned) line — that's its visual left edge, where the
+    number + leader are drawn."""
+
+    def wrap(self, availWidth, availHeight):
+        entries = self._lastEntries or [(0, "—", 0, None)]
+
+        def draw_end(canvas, kind, label):
+            page, level, _ = label.split(",", 2)
+            style = self.getLevelStyle(int(level))
+            text_left = canvas._curr_tx_info["cur_x"]  # left edge of the right-aligned text
+            y = canvas._curr_tx_info["cur_y"]
+            pagestr = str(int(page))
+            pagew = stringWidth(pagestr, style.fontName, style.fontSize)
+            dot = " . "
+            dotw = stringWidth(dot, style.fontName, style.fontSize)
+            n = max(0, int((text_left - pagew) / dotw)) if dotw else 0
+            tx = canvas.beginText(0, y)
+            tx.setFont(style.fontName, style.fontSize)
+            tx.setFillColor(style.textColor)
+            tx.textLine(pagestr + " " + n * dot)
+            canvas.drawText(tx)
+        self.canv.drawTOCEntryEnd = draw_end
+
+        data = []
+        for (level, text, page_num, key) in entries:
+            style = self.getLevelStyle(level)
+            if key:
+                text = '<a href="#%s">%s</a>' % (key, text)
+                key_val = repr(key).replace(",", "\\x2c").replace('"', "\\x2c")
+            else:
+                key_val = None
+            # onDraw FIRST so its callback fires at the text line's visual left edge.
+            para = Paragraph('<onDraw name="drawTOCEntryEnd" label="%d,%d,%s"/>%s'
+                             % (page_num, level, key_val, text), style)
+            if style.spaceBefore:
+                data.append([Spacer(1, style.spaceBefore)])
+            data.append([para])
+        self._table = Table(data, colWidths=(availWidth,), style=self.tableStyle)
+        self.width, self.height = self._table.wrapOn(self.canv, availWidth, availHeight)
+        return (self.width, self.height)
+
+
 def _styles(cfg):
     f, c = cfg["fonts"], cfg["colors"]
     lead = float(f.get("line_spacing", 1.5))
@@ -108,10 +156,13 @@ def _aligned(style, text, *, force=None):
     return Paragraph(shape(text), s)
 
 
-def _heading(styles, text):
-    """Centered blue heading with an underline rule — the section title look."""
-    return [Paragraph(shape(text), styles["section"]),
-            HRFlowable(width="40%", thickness=1.1, color=styles["section"].textColor,
+def _heading(styles, text, *, listed=True):
+    """Centered blue heading with an underline rule — the section title look.
+    When listed=False the style is renamed so afterFlowable does NOT add a TOC
+    entry (used for continuation pages of a multi-page section)."""
+    s = styles["section"] if listed else ParagraphStyle("SectionHeadingPlain", parent=styles["section"])
+    return [Paragraph(shape(text), s),
+            HRFlowable(width="40%", thickness=1.1, color=s.textColor,
                        spaceBefore=1, spaceAfter=8, hAlign="CENTER")]
 
 
@@ -301,6 +352,7 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
     phase = ParagraphStyle("gp", parent=styles["value"], fontSize=7.5, alignment=TA_RIGHT if rtl else TA_LEFT)
 
     flow = []
+    first = True  # only the first grid page is a TOC-listed heading
     for g in grids:
         cols, rows = g["columns"], g["rows"]
         for start in range(0, len(cols), max_cols):
@@ -333,7 +385,8 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
                 ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
             ] + extra))
             flow.append(PageBreak())
-            flow += _heading(styles, labels["detailed_progress"])
+            flow += _heading(styles, labels["detailed_progress"], listed=first)
+            first = False
             flow.append(t)
     return flow
 
@@ -435,13 +488,14 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         story.append(Paragraph(shape(cfg["toc"].get("title") or "Contents"), tt))
         story.append(HRFlowable(width="40%", thickness=1.1, color=tt.textColor,
                                 spaceBefore=1, spaceAfter=10, hAlign="CENTER"))
-        toc = TableOfContents()
+        toc = _RtlTOC() if rtl else TableOfContents()
         toc.dotsMinLevel = 0  # dotted leaders + page numbers on level-0 entries
         lvl = ParagraphStyle("toc", fontName=FONT_NAME, fontSize=cfg["fonts"]["base_size"] + 1,
                              leading=(cfg["fonts"]["base_size"] + 1) * 1.9,
                              textColor=hexcolor(cfg["colors"]["text"]))
         if rtl:
-            lvl.wordWrap = "RTL"  # mirrors leader + page number to the left
+            # Text flush right; _RtlTOC draws the page number + leader on the left.
+            lvl.alignment = TA_RIGHT
         toc.levelStyles = [lvl]
         story += [toc]
 
