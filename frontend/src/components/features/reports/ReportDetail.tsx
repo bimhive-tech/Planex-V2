@@ -69,6 +69,17 @@ function htmlToPlainText(html: string): string {
   return (el.textContent || "").replace(/\s+\n/g, "\n").trim();
 }
 
+// Seed the rich editor from a legacy plain-text description (one block per line)
+// so reports created before rich text aren't shown as an empty editor.
+function plainToHtml(text: string): string {
+  if (!text) return "";
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? `<div>${esc(line)}</div>` : "<div><br></div>"))
+    .join("");
+}
+
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const [form, setForm] = useState<Form | null>(null);
   const [scopeIds, setScopeIds] = useState<string[]>([]);
@@ -98,7 +109,9 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
       period_start: r.period_start ?? "", period_finish: r.period_finish ?? "",
-      status: r.status, description: r.description ?? "", description_html: r.description_html ?? "",
+      status: r.status, description: r.description ?? "",
+      // Fall back to the legacy plain description so the editor isn't blank.
+      description_html: r.description_html || plainToHtml(r.description ?? ""),
     });
     return r;
   }, [reportId]);
