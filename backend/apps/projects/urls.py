@@ -8,6 +8,7 @@ from .structure_views import (
     ProjectImportView,
     ProjectSnapshotsView,
     ProjectStructureView,
+    ScopeTreeView,
     ProjectZoneGridView,
     ScopeActivitiesView,
     ScopeDetailView,
@@ -32,6 +33,7 @@ router.register("projects", ProjectViewSet, basename="projects")
 urlpatterns = [
     # Work-hierarchy routes (nested under a project).
     path("projects/<uuid:project_id>/structure/", ProjectStructureView.as_view(), name="project-structure"),
+    path("projects/<uuid:project_id>/scope-tree/", ScopeTreeView.as_view(), name="project-scope-tree"),
     path("projects/<uuid:project_id>/zones/<uuid:zone_id>/grid/", ProjectZoneGridView.as_view(), name="project-zone-grid"),
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),

@@ -59,25 +59,85 @@ def _breakdown(project):
     }
 
 
-def _zone_rows(project):
-    """Top-level zones with rolled-up progress, sorted by tree order."""
-    progress = scope_progress_map(project)
-    zones = (
+def _scope_context(project, scope_ids):
+    """Resolve the report's scope selection into (predicate, scope_to_zone).
+
+    `predicate(scope_id, activity_id)` is True when an activity is in the export:
+    its scope (or an ancestor scope) was ticked, or the task itself was ticked.
+    An empty selection includes everything. `scope_to_zone` maps any scope to its
+    top-level zone, so we can roll progress up per zone over the included tasks."""
+    rows = list(project.scopes.values_list("id", "parent_id"))
+    parent = {str(sid): (str(pid) if pid else None) for sid, pid in rows}
+
+    scope_to_zone, children = {}, {}
+    for sid, pid in rows:
+        if pid:
+            children.setdefault(str(pid), []).append(str(sid))
+    for sid in parent:
+        cur, chain = sid, []
+        while parent.get(cur):
+            chain.append(cur)
+            cur = parent[cur]
+        for s in chain:
+            scope_to_zone[s] = cur
+        scope_to_zone[cur] = cur
+
+    sel = {str(s) for s in (scope_ids or [])}
+    if not sel:
+        return (lambda sc, ac: True), scope_to_zone
+
+    selected_scopes = sel & set(parent)
+    selected_tasks = sel - selected_scopes
+    covered, stack = set(), list(selected_scopes)
+    while stack:
+        node = stack.pop()
+        if node in covered:
+            continue
+        covered.add(node)
+        stack.extend(children.get(node, []))
+
+    def predicate(scope_id, activity_id):
+        return str(scope_id) in covered or str(activity_id) in selected_tasks
+
+    return predicate, scope_to_zone
+
+
+def _zone_rows(project, scope_ids=None):
+    """Top-level zones with progress rolled up over the *selected* tasks (a zone
+    is shown only when it has included tasks). No selection = the whole project."""
+    predicate, scope_to_zone = _scope_context(project, scope_ids)
+    zones = list(
         ProjectScope.objects.filter(
             project=project, parent__isnull=True, scope_type=ProjectScope.ScopeType.ZONE
-        )
-        .order_by("sort_order", "name")
-        .values_list("id", "name")
+        ).order_by("sort_order", "name").values_list("id", "name")
     )
-    return [{"id": str(sid), "name": name, "progress": progress.get(str(sid), 0.0)} for sid, name in zones]
+    order = {str(z): i for i, (z, _) in enumerate(zones)}
+    zone_name = {str(z): name for z, name in zones}
+
+    sw, spw = {}, {}
+    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        if not predicate(sid, aid):
+            continue
+        zone = scope_to_zone.get(str(sid))
+        if zone not in zone_name:
+            continue
+        w, prog = float(weight), float(prog)
+        sw[zone] = sw.get(zone, 0.0) + w
+        spw[zone] = spw.get(zone, 0.0) + w * prog
+
+    rows = [{"id": z, "name": zone_name[z], "progress": round(spw[z] / sw[z], 1) if sw[z] else 0.0}
+            for z in sw]
+    rows.sort(key=lambda r: order.get(r["id"], 999))
+    return rows
 
 
-def _zone_grids(project, zone_ids):
+def _zone_grids(project, zone_ids, scope_ids=None):
     """The schedule-style grid per zone: subzones as columns, tasks (grouped by
-    phase) as rows, each cell an activity's progress. Same shape as the zone grid
-    view in the project detail."""
+    phase) as rows, each cell an activity's progress. Honours the scope selection
+    (only included subzones/phases/tasks appear)."""
     from apps.projects.models import Activity, ProjectScope
 
+    predicate, _ = _scope_context(project, scope_ids)
     grids = []
     zones = {str(z.id): z for z in ProjectScope.objects.filter(project=project, id__in=zone_ids)}
     for zid in zone_ids:
@@ -88,8 +148,9 @@ def _zone_grids(project, zone_ids):
         phase_ids = list(ProjectScope.objects.filter(
             parent_id__in=subzone_ids, scope_type=ProjectScope.ScopeType.PHASE
         ).values_list("id", flat=True))
-        acts = list(Activity.objects.filter(scope_id__in=phase_ids).values(
-            "name", "phase_name", "progress_percent", "row_index", "subzone_index", "subzone_code"))
+        acts = [a for a in Activity.objects.filter(scope_id__in=phase_ids).values(
+            "id", "scope_id", "name", "phase_name", "progress_percent", "row_index", "subzone_index", "subzone_code")
+            if predicate(a["scope_id"], a["id"])]
 
         index_name = {}
         for a in acts:
@@ -140,15 +201,13 @@ def build_report_context(report):
     prev_zone = {z.get("name"): z.get("progress") for z in (prev_snap["zones"] or [])} if prev_snap else {}
     prev_overall = float(prev_snap["overall_progress"]) if prev_snap else None
 
-    zones = _zone_rows(project)
+    # Scope-aware: only zones with selected tasks appear; progress rolls up over
+    # the selected tasks (empty selection = whole project).
+    zones = _zone_rows(project, report.scope_ids)
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
 
-    # Scope filter: limit the report to chosen zones (empty = whole project).
-    scope_ids = [str(s) for s in (report.scope_ids or [])]
-    if scope_ids:
-        zones = [z for z in zones if z["id"] in scope_ids]
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
     zone_grids = []

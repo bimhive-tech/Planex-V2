@@ -19,6 +19,7 @@ import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
 import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
+import { ScopeTree } from "./ScopeTree";
 import styles from "./reports.module.css";
 
 // pdf.js viewer uses canvas/DOM — load it client-side only (no SSR).
@@ -61,7 +62,6 @@ const fmtDate = (d: string | null) =>
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const [form, setForm] = useState<Form | null>(null);
   const [scopeIds, setScopeIds] = useState<string[]>([]);
-  const [zones, setZones] = useState<{ id: string; name: string }[]>([]);
   const [projects, setProjects] = useState<ProjectListRow[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("setup");
@@ -119,15 +119,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       .finally(() => !revoked && setPreviewLoading(false));
     return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [pdfUrl, refreshKey]);
-
-  // The chosen project's zones, for the Scope tab.
-  useEffect(() => {
-    if (!form?.project) return;
-    let alive = true;
-    api.get<{ id: string; name: string }[]>(`/projects/${form.project}/project-zones/`)
-      .then((z) => alive && setZones(z)).catch(() => alive && setZones([]));
-    return () => { alive = false; };
-  }, [form?.project]);
 
   const save = useCallback(async () => {
     if (!form) return;
@@ -225,20 +216,12 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
 
                 {tab === "scope" && (
                   <section className={styles.tabPanel}>
-                    <h2 className={styles.panelTitle}>Zones to include</h2>
-                    <p className={styles.hint}>Tick the zones this report covers. Leave all unticked to include the whole project.</p>
-                    {zones.map((z) => {
-                      const checked = scopeIds.includes(z.id);
-                      return (
-                        <label key={z.id} className={styles.scopeRow}>
-                          <input type="checkbox" checked={checked} disabled={!canManage}
-                            onChange={(e) => setScopeIds((ids) =>
-                              e.target.checked ? [...ids, z.id] : ids.filter((i) => i !== z.id))} />
-                          {z.name}
-                        </label>
-                      );
-                    })}
-                    {zones.length === 0 && <p className={styles.hint}>No zones in this project.</p>}
+                    <h2 className={styles.panelTitle}>What to include</h2>
+                    <p className={styles.hint}>Tick zones, subzones, phases, or tasks. Ticking a node includes everything under it. Leave all unticked to include the whole project.</p>
+                    {form.project && (
+                      <ScopeTree projectId={form.project} selectedIds={scopeIds} canManage={canManage}
+                        onToggle={(id) => setScopeIds((ids) => ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id])} />
+                    )}
                   </section>
                 )}
 

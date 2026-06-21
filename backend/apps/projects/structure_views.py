@@ -90,6 +90,28 @@ class ProjectStructureView(APIView):
         })
 
 
+class ScopeTreeView(APIView):
+    """Lazy scope tree for the report's scope picker: children of `parent`
+    (top-level zones when absent), each tagged with whether it can expand."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = _project(request, project_id)
+        _require_view(request)
+        parent = request.query_params.get("parent")
+        qs = project.scopes.filter(parent__isnull=True) if not parent else project.scopes.filter(parent_id=parent)
+        children = list(qs.order_by("sort_order", "name").values("id", "name", "scope_type"))
+        ids = [c["id"] for c in children]
+        has_sub = set(ProjectScope.objects.filter(parent_id__in=ids).values_list("parent_id", flat=True))
+        has_acts = set(Activity.objects.filter(scope_id__in=ids).values_list("scope_id", flat=True))
+        return Response([
+            {"id": str(c["id"]), "name": c["name"], "type": c["scope_type"],
+             "has_children": c["id"] in has_sub or c["id"] in has_acts}
+            for c in children
+        ])
+
+
 class ScopeActivitiesView(APIView):
     """GET the activities directly under one scope (lazy tree expansion)."""
 
