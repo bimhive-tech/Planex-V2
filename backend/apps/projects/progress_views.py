@@ -5,7 +5,6 @@ attach optional photos with captions, browse photo history by scope/date, and
 delete photos (gated by DELETE_PROGRESS_IMAGES). Updates the activity's current
 % to its latest-dated entry."""
 import mimetypes
-from datetime import timedelta
 
 from django.conf import settings
 from django.db.models import Q
@@ -24,10 +23,6 @@ from apps.accounts.constants import Permission
 from .models import Activity, ProgressEntry, ProgressImage, Project, ProjectScope
 
 ALLOWED = {"image/jpeg", "image/png", "image/webp"}
-
-# Grace window: the author can fix a reading for this many days after recording
-# it. Managers (MANAGE_PROJECTS) can always correct entries.
-EDIT_WINDOW_DAYS = 2
 
 
 def _project(request, project_id):
@@ -50,12 +45,10 @@ def _require_record(request):
 
 
 def _can_edit_entry(user, entry):
-    """Author may edit within the grace window; managers anytime."""
+    """The author may edit/delete their own readings; managers any reading."""
     if Permission.MANAGE_PROJECTS in user.effective_permissions():
         return True
-    if entry.recorded_by_id != user.id:
-        return False
-    return timezone.now() <= entry.created_at + timedelta(days=EDIT_WINDOW_DAYS)
+    return entry.recorded_by_id == user.id
 
 
 def _sync_activity(activity):
@@ -141,8 +134,8 @@ class ActivityProgressView(APIView):
 
 
 class ProgressEntryDetailView(APIView):
-    """Edit (PATCH) or remove (DELETE) a progress reading within its grace
-    window (author for EDIT_WINDOW_DAYS; managers anytime)."""
+    """Edit (PATCH) or remove (DELETE) a progress reading (author their own;
+    managers any)."""
 
     permission_classes = [IsAuthenticated]
 

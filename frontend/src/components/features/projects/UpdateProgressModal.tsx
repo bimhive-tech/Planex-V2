@@ -5,8 +5,8 @@
 // truth behind the activity's current %; date-based reports read these entries.
 // Photos are staged client-side so the user can remove a mistaken pick before
 // saving; on save we create (or update) the entry, then upload staged photos.
-// Recent entries are listed below and can be edited/deleted within their grace
-// window (the author for ~2 days; managers anytime).
+// Recent entries are listed below; the author can edit/delete their own and
+// managers can edit/delete any.
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
