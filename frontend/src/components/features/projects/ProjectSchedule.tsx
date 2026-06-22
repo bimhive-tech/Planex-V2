@@ -2,23 +2,25 @@
 
 // Schedule tab: the project's work hierarchy (Phase -> Zone -> Building -> Area ->
 // Activity). Build the tree, set per-activity progress; everything rolls up.
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
-import { api, ApiError, type Paginated } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import type { Activity, ProjectStructure, Scope } from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
-import { ScopeActivities } from "./ScopeActivities";
 import { ZoneGridView } from "./ZoneGridView";
 import { ProgressGalleryModal } from "./ProgressGalleryModal";
+import { ScheduleFilterBar, type ScheduleFilterType } from "./ScheduleFilterBar";
+import { ScheduleFlatList } from "./ScheduleFlatList";
+import { ScheduleTaskSearch } from "./ScheduleTaskSearch";
+import { ScopeNode } from "./ScopeTreeNode";
+import { scopeById as buildScopeById } from "./scopeBreadcrumb";
+import { buildTree } from "./scheduleTreeUtils";
 import styles from "./scheduleTree.module.css";
-
-const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", building: "area", area: "area" };
 
 interface Props {
   projectId: string;
@@ -44,6 +46,8 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [gridZone, setGridZone] = useState<{ id: string; name: string } | null>(null);
+  const [filterType, setFilterType] = useState<ScheduleFilterType>("all");
+  const [filterSearch, setFilterSearch] = useState("");
   const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -71,6 +75,18 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   }
 
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
+  const scopeByIdMap = useMemo(() => buildScopeById(data?.scopes ?? []), [data]);
+  const scopeIdsWithChildren = useMemo(
+    () => new Set([...childrenOf.keys()].filter((k): k is string => k !== null)),
+    [childrenOf],
+  );
+  const flatScopes = useMemo(() => {
+    if (filterType === "all" || filterType === "task" || !data) return [];
+    const q = filterSearch.trim().toLowerCase();
+    return data.scopes
+      .filter((s) => s.scope_type === filterType && (!q || s.name.toLowerCase().includes(q)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, filterType, filterSearch]);
 
   async function del(url: string, confirmText: string) {
     if (!window.confirm(confirmText)) return;
@@ -123,16 +139,27 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
       {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
+      <ScheduleFilterBar
+        type={filterType}
+        onTypeChange={(t) => { setFilterType(t); setFilterSearch(""); }}
+        search={filterSearch}
+        onSearchChange={setFilterSearch}
+      />
+
       <div className={styles.surface}>
         <StateView
           loading={loading}
           error={error}
-          isEmpty={roots.length === 0}
-          emptyTitle="No structure yet"
-          emptyText={canManage ? "Add a phase, then zones and activities under it." : "Nothing has been set up yet."}
+          isEmpty={filterType === "all" ? roots.length === 0 : filterType !== "task" && flatScopes.length === 0}
+          emptyTitle={filterType === "all" ? "No structure yet" : "No matches"}
+          emptyText={
+            filterType === "all"
+              ? (canManage ? "Add a phase, then zones and activities under it." : "Nothing has been set up yet.")
+              : (filterSearch.trim() ? "Try a different search." : "Nothing of this type in the project yet.")
+          }
           onRetry={reload}
         >
-          {roots.map((s) => (
+          {filterType === "all" && roots.map((s) => (
             <ScopeNode
               key={s.id} scope={s} depth={0}
               projectId={projectId}
@@ -149,6 +176,33 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
               onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
             />
           ))}
+
+          {filterType !== "all" && filterType !== "task" && (
+            <ScheduleFlatList
+              scopes={flatScopes}
+              scopeIdsWithChildren={scopeIdsWithChildren}
+              scopeById={scopeByIdMap}
+              progressOf={progressOf}
+              canManage={canManage}
+              onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
+              onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
+                `Delete “${scope.name}” and everything under it?`)}
+              onOpenGrid={(id, name) => setGridZone({ id, name })}
+              onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
+            />
+          )}
+
+          {filterType === "task" && (
+            <ScheduleTaskSearch
+              projectId={projectId}
+              search={filterSearch}
+              scopeById={scopeByIdMap}
+              canManage={canManage}
+              canSubmit={canSubmit}
+              onEdit={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
+              onChanged={reload}
+            />
+          )}
         </StateView>
       </div>
 
@@ -173,111 +227,4 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
       )}
     </div>
   );
-}
-
-// ── Tree node ───────────────────────────────────────────────────────────────
-interface NodeProps {
-  scope: Scope;
-  depth: number;
-  projectId: string;
-  childrenOf: Map<string | null, Scope[]>;
-  progressOf: (scopeId: string) => number;
-  activityCountOf: Record<string, number>;
-  canManage: boolean;
-  canSubmit: boolean;
-  onAddScope: (parentId: string, type: string) => void;
-  onEditScope: (scope: Scope) => void;
-  onDeleteScope: (scope: Scope) => void;
-  onAddActivity: (scopeId: string) => void;
-  onEditActivity: (activity: Activity) => void;
-  onChanged: () => void;
-  onOpenGrid: (id: string, name: string) => void;
-  onOpenPhotos: (id: string, name: string) => void;
-}
-
-function ScopeNode(props: NodeProps) {
-  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage } = props;
-  const childScopes = childrenOf.get(scope.id) ?? [];
-  const activityCount = activityCountOf[scope.id] ?? 0;
-  // Collapse nodes with many children/tasks by default.
-  const [open, setOpen] = useState(childScopes.length <= 25 && activityCount <= 25);
-  const hasChildren = childScopes.length > 0 || activityCount > 0;
-  const pct = progressOf(scope.id);
-  const indent = { "--depth": String(depth) } as CSSProperties;
-
-  return (
-    <div>
-      <div className={styles.scopeRow} style={indent}>
-        <button className={styles.caret} onClick={() => setOpen((o) => !o)} aria-label={open ? "Collapse" : "Expand"}>
-          {hasChildren ? <Icon name="chevronDown" size={14} className={open ? "" : styles.caretClosed} /> : <span className={styles.dot} />}
-        </button>
-        <Badge tone="info">{scope.scope_type_display}</Badge>
-        <span className={styles.scopeName}>{scope.name}</span>
-        <div className={styles.bar}><span className={styles.barFill} style={{ ["--pct" as string]: `${pct}%` }} /></div>
-        <span className={`${styles.pct} tnum`}>{pct}%</span>
-        {scope.scope_type === "zone" && childScopes.length > 0 && (
-          <button className={styles.gridBtn} title="Open Excel grid" aria-label="Open Excel grid"
-            onClick={() => props.onOpenGrid(scope.id, scope.name)}>
-            <Icon name="dashboard" size={14} />
-            <span>Grid</span>
-          </button>
-        )}
-        <button className={styles.gridBtn} title="Progress photos" aria-label="Progress photos"
-          onClick={() => props.onOpenPhotos(scope.id, scope.name)}>
-          <Icon name="image" size={14} />
-          <span>Photos</span>
-        </button>
-        {canManage && (
-          <div className={styles.actions}>
-            <button className={styles.actionBtn} title="Add sub-level" aria-label="Add sub-level"
-              onClick={() => props.onAddScope(scope.id, NEXT_TYPE[scope.scope_type])}>
-              <Icon name="plus" size={14} />
-            </button>
-            <button className={styles.actionBtn} title="Add activity" aria-label="Add activity"
-              onClick={() => props.onAddActivity(scope.id)}>
-              <Icon name="projects" size={14} />
-            </button>
-            <button className={styles.actionBtn} title="Rename" aria-label="Rename"
-              onClick={() => props.onEditScope(scope)}>
-              <Icon name="edit" size={14} />
-            </button>
-            <button className={`${styles.actionBtn} ${styles.danger}`} title="Delete" aria-label="Delete"
-              onClick={() => props.onDeleteScope(scope)}>
-              <Icon name="trash" size={14} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {open && (
-        <>
-          {childScopes.map((c) => <ScopeNode key={c.id} {...props} scope={c} depth={depth + 1} />)}
-          {/* Leaf scope with tasks → lazy-load its activities. */}
-          {childScopes.length === 0 && activityCount > 0 && (
-            <ScopeActivities
-              projectId={props.projectId} scopeId={scope.id} depth={depth + 1}
-              canManage={canManage} canSubmit={props.canSubmit}
-              onEdit={props.onEditActivity} onChanged={props.onChanged}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── Tree helpers ────────────────────────────────────────────────────────────
-function buildTree(data: ProjectStructure | null) {
-  const childrenOf = new Map<string | null, Scope[]>();
-  if (data) {
-    for (const s of data.scopes) {
-      const key = s.parent;
-      if (!childrenOf.has(key)) childrenOf.set(key, []);
-      childrenOf.get(key)!.push(s);
-    }
-  }
-  const progress = data?.scope_progress ?? {};
-  const progressOf = (scopeId: string): number => progress[scopeId] ?? 0;
-  const activityCountOf = data?.scope_activity_counts ?? {};
-  return { childrenOf, progressOf, activityCountOf };
 }
