@@ -240,29 +240,6 @@ class ProjectApiTests(TestCase):
         got = self.client.get(f"/api/projects/{p.id}/members/{m['id']}/scope-access/").json()
         self.assertEqual(got["zone_ids"], [str(z1.id)])
 
-    def test_search_activities_by_name_respects_min_length_and_scope_access(self):
-        from .models import Activity, ProjectScope, ProjectScopeAccess
-        p = Project.objects.create(company=self.company_a, name="Mall4", project_type="commercial")
-        z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
-        z2 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z2")
-        Activity.objects.create(company=self.company_a, project=p, scope=z1, name="Pour concrete", weight=1)
-        Activity.objects.create(company=self.company_a, project=p, scope=z2, name="Pour slab", weight=1)
-        Activity.objects.create(company=self.company_a, project=p, scope=z1, name="Excavation", weight=1)
-        self.login("admin@acme.com")
-        base = f"/api/projects/{p.id}"
-
-        short = self.client.get(f"{base}/activities/search/?q=p").json()
-        self.assertEqual(short["count"], 0)  # below the 2-char minimum -> no table scan
-
-        names = {a["name"] for a in self.client.get(f"{base}/activities/search/?q=pour").json()["results"]}
-        self.assertEqual(names, {"Pour concrete", "Pour slab"})
-
-        # a member restricted to Z1 only sees matches under it.
-        ProjectScopeAccess.objects.create(company=self.company_a, project=p, user=self.viewer, scope=z1)
-        self.login("viewer@acme.com")
-        names = {a["name"] for a in self.client.get(f"{base}/activities/search/?q=pour").json()["results"]}
-        self.assertEqual(names, {"Pour concrete"})
-
     # ── Approval chain ────────────────────────────────────────────────────
     def _activity(self):
         p = Project.objects.create(company=self.company_a, name="Lab", project_type="commercial")

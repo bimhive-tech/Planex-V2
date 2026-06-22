@@ -1,7 +1,9 @@
 "use client";
 
 // Schedule tab: the project's work hierarchy (Phase -> Zone -> Building -> Area ->
-// Activity). Build the tree, set per-activity progress; everything rolls up.
+// Activity). Build the tree, set per-activity progress; everything rolls up. A
+// Zone/Subzone/Phase/Task filter bar prunes both the tree and the Excel grid
+// down to one branch.
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
@@ -14,12 +16,9 @@ import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
 import { ZoneGridView } from "./ZoneGridView";
 import { ProgressGalleryModal } from "./ProgressGalleryModal";
-import { ScheduleFilterBar, type ScheduleFilterType } from "./ScheduleFilterBar";
-import { ScheduleFlatList } from "./ScheduleFlatList";
-import { ScheduleTaskSearch } from "./ScheduleTaskSearch";
+import { ScheduleFilterBar } from "./ScheduleFilterBar";
 import { ScopeNode } from "./ScopeTreeNode";
-import { scopeById as buildScopeById } from "./scopeBreadcrumb";
-import { buildTree } from "./scheduleTreeUtils";
+import { buildTree, resolveScheduleFilter } from "./scheduleTreeUtils";
 import styles from "./scheduleTree.module.css";
 
 interface Props {
@@ -46,12 +45,15 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [gridZone, setGridZone] = useState<{ id: string; name: string } | null>(null);
-  const [filterType, setFilterType] = useState<ScheduleFilterType>("all");
-  const [filterSearch, setFilterSearch] = useState("");
   const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [subzoneFilter, setSubzoneFilter] = useState("");
+  const [phaseFilter, setPhaseFilter] = useState("");
+  const [taskFilter, setTaskFilter] = useState("");
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -75,18 +77,56 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   }
 
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
-  const scopeByIdMap = useMemo(() => buildScopeById(data?.scopes ?? []), [data]);
-  const scopeIdsWithChildren = useMemo(
-    () => new Set([...childrenOf.keys()].filter((k): k is string => k !== null)),
-    [childrenOf],
+  const roots = childrenOf.get(null) ?? [];
+
+  const zoneOptions = useMemo(() => roots.filter((s) => s.scope_type === "zone"), [roots]);
+  const { visibleIds, subzoneScope, phaseScope } = useMemo(
+    () => resolveScheduleFilter(childrenOf, zoneFilter, subzoneFilter, phaseFilter),
+    [childrenOf, zoneFilter, subzoneFilter, phaseFilter],
   );
-  const flatScopes = useMemo(() => {
-    if (filterType === "all" || filterType === "task" || !data) return [];
-    const q = filterSearch.trim().toLowerCase();
-    return data.scopes
-      .filter((s) => s.scope_type === filterType && (!q || s.name.toLowerCase().includes(q)))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [data, filterType, filterSearch]);
+  const subzoneOptions = useMemo(
+    () => (zoneFilter ? (childrenOf.get(zoneFilter) ?? []).filter((s) => s.scope_type === "building" || s.scope_type === "area") : []),
+    [childrenOf, zoneFilter],
+  );
+  const phaseOptions = useMemo(
+    () => (subzoneScope ? (childrenOf.get(subzoneScope.id) ?? []).filter((s) => s.scope_type === "phase") : []),
+    [childrenOf, subzoneScope],
+  );
+  // Reuses the existing lazy per-scope activities endpoint — no global fetch needed.
+  const { data: taskOptions } = useFetch(
+    () => (phaseScope ? api.get<Activity[]>(`/projects/${projectId}/scopes/${phaseScope.id}/activities/`) : Promise.resolve([] as Activity[])),
+    [projectId, phaseScope?.id],
+  );
+
+  function handleZoneFilter(value: string) {
+    setZoneFilter(value);
+    setSubzoneFilter("");
+    setPhaseFilter("");
+    setTaskFilter("");
+    if (gridZone) {
+      const z = zoneOptions.find((s) => s.id === value);
+      setGridZone(z ? { id: z.id, name: z.name } : null);
+    }
+  }
+  function handleSubzoneFilter(value: string) {
+    setSubzoneFilter(value);
+    setPhaseFilter("");
+    setTaskFilter("");
+  }
+  function handlePhaseFilter(value: string) {
+    setPhaseFilter(value);
+    setTaskFilter("");
+  }
+
+  function openGrid(id: string, name: string) {
+    setGridZone({ id, name });
+    if (zoneFilter !== id) {
+      setZoneFilter(id);
+      setSubzoneFilter("");
+      setPhaseFilter("");
+      setTaskFilter("");
+    }
+  }
 
   async function del(url: string, confirmText: string) {
     if (!window.confirm(confirmText)) return;
@@ -99,19 +139,38 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     }
   }
 
+  const visibleRoots = roots.filter((s) => !visibleIds || visibleIds.has(s.id));
 
-  const roots = childrenOf.get(null) ?? [];
+  const filterBar = (
+    <ScheduleFilterBar
+      zoneOptions={zoneOptions}
+      subzoneOptions={subzoneOptions}
+      phaseOptions={phaseOptions}
+      taskOptions={taskOptions ?? []}
+      zone={zoneFilter} subzone={subzoneFilter} phase={phaseFilter} task={taskFilter}
+      onZoneChange={handleZoneFilter}
+      onSubzoneChange={handleSubzoneFilter}
+      onPhaseChange={handlePhaseFilter}
+      onTaskChange={setTaskFilter}
+    />
+  );
 
   if (gridZone) {
     return (
-      <ZoneGridView
-        projectId={projectId}
-        zoneId={gridZone.id}
-        zoneName={gridZone.name}
-        canManage={canManage}
-        onBack={() => setGridZone(null)}
-        onChanged={reload}
-      />
+      <div>
+        {filterBar}
+        <ZoneGridView
+          projectId={projectId}
+          zoneId={gridZone.id}
+          zoneName={gridZone.name}
+          canManage={canManage}
+          subzoneName={subzoneFilter}
+          phaseName={phaseFilter}
+          taskName={taskFilter}
+          onBack={() => setGridZone(null)}
+          onChanged={reload}
+        />
+      </div>
     );
   }
 
@@ -139,70 +198,42 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
       {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
-      <ScheduleFilterBar
-        type={filterType}
-        onTypeChange={(t) => { setFilterType(t); setFilterSearch(""); }}
-        search={filterSearch}
-        onSearchChange={setFilterSearch}
-      />
+      {filterBar}
 
       <div className={styles.surface}>
         <StateView
           loading={loading}
           error={error}
-          isEmpty={filterType === "all" ? roots.length === 0 : filterType !== "task" && flatScopes.length === 0}
-          emptyTitle={filterType === "all" ? "No structure yet" : "No matches"}
+          isEmpty={visibleRoots.length === 0}
+          emptyTitle={zoneFilter ? "No matches" : "No structure yet"}
           emptyText={
-            filterType === "all"
-              ? (canManage ? "Add a phase, then zones and activities under it." : "Nothing has been set up yet.")
-              : (filterSearch.trim() ? "Try a different search." : "Nothing of this type in the project yet.")
+            zoneFilter
+              ? "Try a different filter."
+              : (canManage ? "Add a phase, then zones and activities under it." : "Nothing has been set up yet.")
           }
           onRetry={reload}
         >
-          {filterType === "all" && roots.map((s) => (
-            <ScopeNode
-              key={s.id} scope={s} depth={0}
-              projectId={projectId}
-              childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
-              canManage={canManage} canSubmit={canSubmit}
-              onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
-              onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
-              onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
-                `Delete “${scope.name}” and everything under it?`)}
-              onAddActivity={(scopeId) => setActivityModal({ scopeId, activity: null })}
-              onEditActivity={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
-              onChanged={reload}
-              onOpenGrid={(id, name) => setGridZone({ id, name })}
-              onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
-            />
-          ))}
-
-          {filterType !== "all" && filterType !== "task" && (
-            <ScheduleFlatList
-              scopes={flatScopes}
-              scopeIdsWithChildren={scopeIdsWithChildren}
-              scopeById={scopeByIdMap}
-              progressOf={progressOf}
-              canManage={canManage}
-              onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
-              onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
-                `Delete “${scope.name}” and everything under it?`)}
-              onOpenGrid={(id, name) => setGridZone({ id, name })}
-              onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
-            />
-          )}
-
-          {filterType === "task" && (
-            <ScheduleTaskSearch
-              projectId={projectId}
-              search={filterSearch}
-              scopeById={scopeByIdMap}
-              canManage={canManage}
-              canSubmit={canSubmit}
-              onEdit={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
-              onChanged={reload}
-            />
-          )}
+          <div key={`${zoneFilter}-${subzoneFilter}-${phaseFilter}`}>
+            {visibleRoots.map((s) => (
+              <ScopeNode
+                key={s.id} scope={s} depth={0}
+                projectId={projectId}
+                childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
+                canManage={canManage} canSubmit={canSubmit}
+                visibleIds={visibleIds}
+                onlyTaskName={taskFilter}
+                onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
+                onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
+                onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
+                  `Delete “${scope.name}” and everything under it?`)}
+                onAddActivity={(scopeId) => setActivityModal({ scopeId, activity: null })}
+                onEditActivity={(activity) => setActivityModal({ scopeId: activity.scope, activity })}
+                onChanged={reload}
+                onOpenGrid={openGrid}
+                onOpenPhotos={(id, name) => setPhotosScope({ id, name })}
+              />
+            ))}
+          </div>
         </StateView>
       </div>
 

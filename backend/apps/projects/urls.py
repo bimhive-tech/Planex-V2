@@ -5,7 +5,6 @@ from rest_framework.routers import SimpleRouter
 from .structure_views import (
     ActivityDetailView,
     ActivityListCreateView,
-    ActivitySearchView,
     ProjectImportView,
     ProjectSnapshotsView,
     ProjectStructureView,
@@ -73,7 +72,6 @@ urlpatterns = [
     path("projects/<uuid:project_id>/scopes/<uuid:scope_id>/", ScopeDetailView.as_view(), name="scope-detail"),
     path("projects/<uuid:project_id>/scopes/<uuid:scope_id>/activities/", ScopeActivitiesView.as_view(), name="scope-activities"),
     path("projects/<uuid:project_id>/activities/", ActivityListCreateView.as_view(), name="activity-create"),
-    path("projects/<uuid:project_id>/activities/search/", ActivitySearchView.as_view(), name="activity-search"),
     path("projects/<uuid:project_id>/activities/<uuid:activity_id>/", ActivityDetailView.as_view(), name="activity-detail"),
     *router.urls,
 ]

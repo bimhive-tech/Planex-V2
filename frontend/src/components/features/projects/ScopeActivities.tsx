@@ -18,11 +18,12 @@ interface Props {
   depth: number;
   canManage: boolean;
   canSubmit: boolean;
+  onlyName?: string; // active Task filter — render just the matching row(s)
   onEdit: (activity: Activity) => void;
   onChanged: () => void; // refresh roll-ups (progress bars) upstream
 }
 
-export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmit, onEdit, onChanged }: Props) {
+export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmit, onlyName, onEdit, onChanged }: Props) {
   const [acts, setActs] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitFor, setSubmitFor] = useState<Activity | null>(null);
@@ -55,9 +56,11 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
   if (error) return <div className={styles.activityRow} style={indent(depth)}><span className="formError">{error}</span></div>;
   if (acts === null) return <div className={styles.activityRow} style={indent(depth)}><span className={styles.activityMeta}>Loading tasks…</span></div>;
 
+  const visible = onlyName ? acts.filter((a) => a.name === onlyName) : acts;
+
   return (
     <>
-      {acts.map((a) => (
+      {visible.map((a) => (
         <div key={a.id} className={styles.activityRow} style={indent(depth)}>
           <span className={styles.activityName}>
             {a.name}

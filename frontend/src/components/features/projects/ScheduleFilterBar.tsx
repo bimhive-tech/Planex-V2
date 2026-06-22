@@ -1,49 +1,62 @@
 "use client";
 
-// "Show:" level selector + search box for the Schedule tab. Picking a level
-// other than "All" flattens the tree into a searchable list of just that level
-// (ProjectSchedule swaps in ScheduleFlatList / ScheduleTaskSearch for it).
+// 4 cascading dropdowns above the Schedule tab's Tree/Grid views: Zone -> Subzone
+// -> Phase -> Task. Each one only has options (and is enabled) once its parent is
+// picked, since that's how the data actually nests. Picking a value prunes
+// whichever view is currently showing down to that branch.
 import { Select } from "@/components/ui/Select";
+import type { Activity, Scope } from "@/types/project";
 import styles from "./scheduleTree.module.css";
 
-export type ScheduleFilterType = "all" | "phase" | "zone" | "building" | "area" | "task";
-
-const TYPE_OPTIONS: { value: ScheduleFilterType; label: string }[] = [
-  { value: "all", label: "All (tree view)" },
-  { value: "phase", label: "Phases" },
-  { value: "zone", label: "Zones" },
-  { value: "building", label: "Buildings" },
-  { value: "area", label: "Areas" },
-  { value: "task", label: "Tasks" },
-];
-
 interface Props {
-  type: ScheduleFilterType;
-  onTypeChange: (type: ScheduleFilterType) => void;
-  search: string;
-  onSearchChange: (search: string) => void;
+  zoneOptions: Scope[];
+  subzoneOptions: Scope[];
+  phaseOptions: Scope[];
+  taskOptions: Activity[];
+  zone: string;
+  subzone: string;
+  phase: string;
+  task: string;
+  onZoneChange: (value: string) => void;
+  onSubzoneChange: (value: string) => void;
+  onPhaseChange: (value: string) => void;
+  onTaskChange: (value: string) => void;
 }
 
-export function ScheduleFilterBar({ type, onTypeChange, search, onSearchChange }: Props) {
-  const label = TYPE_OPTIONS.find((o) => o.value === type)?.label.toLowerCase();
+export function ScheduleFilterBar({
+  zoneOptions, subzoneOptions, phaseOptions, taskOptions,
+  zone, subzone, phase, task,
+  onZoneChange, onSubzoneChange, onPhaseChange, onTaskChange,
+}: Props) {
   return (
     <div className={styles.filterBar}>
       <Select
-        options={TYPE_OPTIONS}
-        value={type}
-        onChange={(e) => onTypeChange(e.target.value as ScheduleFilterType)}
-        aria-label="Filter by level"
+        aria-label="Filter by zone"
+        value={zone}
+        onChange={(e) => onZoneChange(e.target.value)}
+        options={[{ value: "", label: "All zones" }, ...zoneOptions.map((s) => ({ value: s.id, label: s.name }))]}
       />
-      {type !== "all" && (
-        <input
-          className={styles.search}
-          type="search"
-          placeholder={`Search ${label}…`}
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          aria-label={`Search ${label}`}
-        />
-      )}
+      <Select
+        aria-label="Filter by subzone"
+        value={subzone}
+        disabled={!zone}
+        onChange={(e) => onSubzoneChange(e.target.value)}
+        options={[{ value: "", label: "All subzones" }, ...subzoneOptions.map((s) => ({ value: s.name, label: s.name }))]}
+      />
+      <Select
+        aria-label="Filter by phase"
+        value={phase}
+        disabled={!subzone}
+        onChange={(e) => onPhaseChange(e.target.value)}
+        options={[{ value: "", label: "All phases" }, ...phaseOptions.map((s) => ({ value: s.name, label: s.name }))]}
+      />
+      <Select
+        aria-label="Filter by task"
+        value={task}
+        disabled={!phase}
+        onChange={(e) => onTaskChange(e.target.value)}
+        options={[{ value: "", label: "All tasks" }, ...taskOptions.map((a) => ({ value: a.name, label: a.name }))]}
+      />
     </div>
   );
 }

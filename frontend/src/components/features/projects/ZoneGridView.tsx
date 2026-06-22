@@ -18,16 +18,33 @@ interface Props {
   zoneId: string;
   zoneName: string;
   canManage: boolean;
+  // Active Subzone/Phase/Task filter (by name) carried over from the tree's
+  // filter bar — narrows the columns/rows shown for this same zone.
+  subzoneName?: string;
+  phaseName?: string;
+  taskName?: string;
   onBack: () => void;
   onChanged: () => void;
 }
 
-export function ZoneGridView({ projectId, zoneId, zoneName, canManage, onBack, onChanged }: Props) {
+export function ZoneGridView({
+  projectId, zoneId, zoneName, canManage, subzoneName, phaseName, taskName, onBack, onChanged,
+}: Props) {
   const { data, loading, error, reload } = useFetch(
     () => api.get<ZoneGrid>(`/projects/${projectId}/zones/${zoneId}/grid/`),
     [projectId, zoneId],
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Keep each kept column's original index so a row's `cells` array (positionally
+  // aligned to the unfiltered subzone list) still lines up after filtering.
+  const columns = (data?.subzones ?? [])
+    .map((sz, col) => ({ ...sz, col }))
+    .filter((sz) => !subzoneName || sz.name === subzoneName);
+  const rows = (data?.rows ?? []).filter(
+    (r) => (!phaseName || r.phase === phaseName) && (!taskName || r.name === taskName),
+  );
+  const filtered = !!(subzoneName || phaseName || taskName);
 
   async function saveCell(activityId: string, value: string, current: string) {
     const v = Math.max(0, Math.min(100, Number(value)));
@@ -49,7 +66,7 @@ export function ZoneGridView({ projectId, zoneId, zoneName, canManage, onBack, o
         </Button>
         <span className={styles.title}>{zoneName}</span>
         <span className={styles.muted}>
-          {data ? `${data.subzones.length} subzones · ${data.rows.length} tasks` : ""}
+          {data ? `${columns.length} subzones · ${rows.length} tasks` : ""}
         </span>
       </div>
 
@@ -58,8 +75,9 @@ export function ZoneGridView({ projectId, zoneId, zoneName, canManage, onBack, o
       <StateView
         loading={loading}
         error={error}
-        isEmpty={!!data && data.rows.length === 0}
-        emptyTitle="No tasks in this zone"
+        isEmpty={!!data && rows.length === 0}
+        emptyTitle={filtered ? "No matches" : "No tasks in this zone"}
+        emptyText={filtered ? "Try a different filter." : undefined}
         onRetry={reload}
       >
         {data && (
@@ -69,13 +87,13 @@ export function ZoneGridView({ projectId, zoneId, zoneName, canManage, onBack, o
                 <tr>
                   <th className={`${styles.corner} ${styles.sticky}`}>Task</th>
                   <th className={styles.wHead}>W</th>
-                  {data.subzones.map((sz) => (
+                  {columns.map((sz) => (
                     <th key={sz.id} className={styles.colHead} title={sz.name}>{sz.name}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {renderRows(data.rows, data.subzones.length, canManage, saveCell)}
+                {renderRows(rows, columns, canManage, saveCell)}
               </tbody>
             </table>
           </div>
@@ -87,7 +105,7 @@ export function ZoneGridView({ projectId, zoneId, zoneName, canManage, onBack, o
 
 function renderRows(
   rows: GridRow[],
-  colCount: number,
+  columns: { col: number }[],
   canManage: boolean,
   saveCell: (id: string, v: string, cur: string) => void,
 ) {
@@ -98,7 +116,7 @@ function renderRows(
       lastPhase = row.phase;
       out.push(
         <tr key={`phase-${row.row_index}`}>
-          <td className={`${styles.phaseRow} ${styles.sticky}`} colSpan={colCount + 2}>{row.phase}</td>
+          <td className={`${styles.phaseRow} ${styles.sticky}`} colSpan={columns.length + 2}>{row.phase}</td>
         </tr>,
       );
     }
@@ -106,9 +124,10 @@ function renderRows(
       <tr key={row.row_index} className={styles.taskRow}>
         <td className={`${styles.taskName} ${styles.sticky}`} title={row.name}>{row.name}</td>
         <td className={styles.weight}>{row.weight}</td>
-        {row.cells.map((cell, i) =>
-          cell ? (
-            <td key={i} className={styles.cell}>
+        {columns.map(({ col }) => {
+          const cell = row.cells[col];
+          return cell ? (
+            <td key={col} className={styles.cell}>
               {canManage ? (
                 <input
                   className={styles.cellInput}
@@ -121,9 +140,9 @@ function renderRows(
               )}
             </td>
           ) : (
-            <td key={i} className={`${styles.cell} ${styles.empty}`} />
-          ),
-        )}
+            <td key={col} className={`${styles.cell} ${styles.empty}`} />
+          );
+        })}
       </tr>,
     );
   }

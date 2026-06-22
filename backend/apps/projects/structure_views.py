@@ -131,35 +131,6 @@ class ScopeActivitiesView(APIView):
         return Response(ActivitySerializer(acts, many=True).data)
 
 
-class ActivitySearchView(APIView):
-    """GET activities across the whole project matching a name/code search.
-    Backs the Schedule tab's "Tasks" filter — activities aren't preloaded with
-    the structure (a zone tracker has tens of thousands), so this gets its own
-    paginated, query-gated lookup instead of scanning the full table."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, project_id):
-        from django.db.models import Q
-
-        from apps.accounts.pagination import StandardPagination
-
-        project = _project(request, project_id)
-        _require_view(request)
-        q = (request.query_params.get("q") or "").strip()
-        if len(q) < 2:
-            qs = Activity.objects.none()
-        else:
-            qs = project.activities.filter(Q(name__icontains=q) | Q(code__icontains=q)).order_by("name")
-            accessible = accessible_scope_ids(project, request.user)
-            if accessible is not None:
-                qs = qs.filter(scope_id__in=accessible)
-
-        paginator = StandardPagination()
-        page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(ActivitySerializer(page, many=True).data)
-
-
 class ProjectZoneGridView(APIView):
     """GET the Excel-style matrix for one zone: subzones (columns) x tasks (rows),
     each cell an activity's progress."""

@@ -21,6 +21,11 @@ export interface ScopeNodeProps {
   activityCountOf: Record<string, number>;
   canManage: boolean;
   canSubmit: boolean;
+  // null = no filter active. Otherwise only children whose id is in the set
+  // are rendered (the rest of the active Zone/Subzone/Phase filter's siblings).
+  visibleIds: Set<string> | null;
+  // Active Task filter (by name) — passed through to ScopeActivities.
+  onlyTaskName: string;
   onAddScope: (parentId: string, type: string) => void;
   onEditScope: (scope: Scope) => void;
   onDeleteScope: (scope: Scope) => void;
@@ -32,11 +37,13 @@ export interface ScopeNodeProps {
 }
 
 export function ScopeNode(props: ScopeNodeProps) {
-  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage } = props;
-  const childScopes = childrenOf.get(scope.id) ?? [];
+  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage, visibleIds } = props;
+  const childScopes = (childrenOf.get(scope.id) ?? []).filter((c) => !visibleIds || visibleIds.has(c.id));
   const activityCount = activityCountOf[scope.id] ?? 0;
-  // Collapse nodes with many children/tasks by default.
-  const [open, setOpen] = useState(childScopes.length <= 25 && activityCount <= 25);
+  // Collapse nodes with many children/tasks by default — unless a Zone/Subzone/
+  // Phase filter is active, in which case the tree is already pruned to the
+  // selected branch, so always reveal it.
+  const [open, setOpen] = useState(visibleIds ? true : childScopes.length <= 25 && activityCount <= 25);
   const hasChildren = childScopes.length > 0 || activityCount > 0;
   const pct = progressOf(scope.id);
   const indent = { "--depth": String(depth) } as CSSProperties;
@@ -93,6 +100,7 @@ export function ScopeNode(props: ScopeNodeProps) {
             <ScopeActivities
               projectId={props.projectId} scopeId={scope.id} depth={depth + 1}
               canManage={canManage} canSubmit={props.canSubmit}
+              onlyName={props.onlyTaskName}
               onEdit={props.onEditActivity} onChanged={props.onChanged}
             />
           )}
