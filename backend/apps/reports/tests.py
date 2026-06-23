@@ -225,6 +225,57 @@ class AreaDashboardsTests(TestCase):
         self.assertEqual(area["photos"][0]["caption"], "Pour")
 
 
+class GanttRowsTests(TestCase):
+    """`_gantt_rows` builds zone+child Gantt bars from each scope's OWN dates
+    (no project-date fallback, since every bar would otherwise be identical)."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+        self.zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A",
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 6, 1))
+        self.dated_child = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Building 1",
+            parent=self.zone, planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 3, 1),
+            revised_finish=datetime.date(2026, 4, 1))
+        self.undated_child = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Building 2", parent=self.zone)
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=self.dated_child,
+            name="Task", weight=1, progress_percent=50)
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=self.undated_child,
+            name="Task 2", weight=1, progress_percent=100)
+
+    def test_omits_scopes_without_own_dates(self):
+        from .services import _gantt_rows
+
+        rows = _gantt_rows(self.project)
+        names = [r["name"] for r in rows]
+        self.assertIn("Zone A", names)        # has its own dates
+        self.assertIn("Building 1", names)    # has its own dates
+        self.assertNotIn("Building 2", names)  # no dates -> omitted
+
+    def test_rolls_up_progress_and_keeps_revised_finish(self):
+        from .services import _gantt_rows
+
+        rows = _gantt_rows(self.project)
+        child = next(r for r in rows if r["name"] == "Building 1")
+        self.assertEqual(child["level"], 1)
+        self.assertEqual(child["progress"], 50.0)
+        self.assertEqual(child["revised_finish"], datetime.date(2026, 4, 1))
+
+        zone_row = next(r for r in rows if r["name"] == "Zone A")
+        self.assertEqual(zone_row["level"], 0)
+        # Zone's own weight (0) + child's weight(1)*50 + untracked child's weight(1)*100 -> 75 overall
+        self.assertEqual(zone_row["progress"], 75.0)
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")

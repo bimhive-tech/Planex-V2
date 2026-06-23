@@ -35,6 +35,7 @@ from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_ara
 from .pdf_charts import (
     area_units_chart,
     duration_pie,
+    gantt_chart,
     overall_donut,
     planned_actual_chart,
     scurve_chart,
@@ -700,6 +701,12 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
 
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)
+
+    if sections.get("gantt_schedule") and ctx.get("gantt"):
+        story += major(labels.get("gantt_schedule", "Project Schedule (Gantt)"))
+        chart = gantt_chart(cfg, ctx["gantt"], fw, labels)
+        if chart:
+            story.append(chart)
 
     if sections.get("delays") and ctx.get("delays"):
         story += major(labels["delays"])

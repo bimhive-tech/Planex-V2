@@ -192,6 +192,23 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
           </div>
         </>
       )}
+      {on("sections.gantt_schedule") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.gantt_schedule", "Project Schedule (Gantt)")}</h2>
+          {[
+            ["{{Zone A}}", "70%"],
+            ["{{Building 1}}", "45%"],
+            ["{{Building 2}}", "20%"],
+          ].map(([label, pct]) => (
+            <div className={styles.ganttRow} key={label}>
+              <span className={styles.ganttLabel}>{label}</span>
+              <span className={styles.ganttTrack}>
+                <span className={styles.ganttFill} style={{ ["--gantt-fill" as string]: pct }} />
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

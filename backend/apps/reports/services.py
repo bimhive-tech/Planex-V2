@@ -303,6 +303,73 @@ def _subtree_ids(project, root_id):
     return out
 
 
+def _gantt_rows(project, scope_ids=None, progress=None):
+    """Zone + direct-child bars for a simple Gantt-style schedule printout.
+    Each row's baseline span is its OWN planned_start/planned_finish (set via
+    manual entry or the schedule import) — we don't fall back to the project's
+    dates the way `_zone_duration` does, since every row would then render an
+    identical full-project bar. Rows without both dates are simply omitted.
+    No predecessor/float/critical-path computation: the fill just shows the
+    row's own rolled-up actual % complete."""
+    predicate, _ = _scope_context(project, scope_ids)
+
+    direct_w, direct_pw = {}, {}
+    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        if not predicate(sid, aid):
+            continue
+        sid = str(sid)
+        w = float(weight)
+        prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
+        direct_w[sid] = direct_w.get(sid, 0.0) + w
+        direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
+
+    scopes = {str(s.id): s for s in project.scopes.all()}
+    children = {}
+    for s in scopes.values():
+        if s.parent_id:
+            children.setdefault(str(s.parent_id), []).append(str(s.id))
+
+    weight, pweight = {}, {}
+
+    def agg(sid):
+        w, pw = direct_w.get(sid, 0.0), direct_pw.get(sid, 0.0)
+        for cid in children.get(sid, []):
+            cw, cpw = agg(cid)
+            w += cw
+            pw += cpw
+        weight[sid], pweight[sid] = w, pw
+        return w, pw
+
+    def row_for(scope, level):
+        sid = str(scope.id)
+        agg(sid)
+        if not weight.get(sid):
+            return None
+        if not (scope.planned_start and scope.planned_finish and scope.planned_finish > scope.planned_start):
+            return None
+        return {
+            "name": scope.name, "level": level, "start": scope.planned_start,
+            "finish": scope.planned_finish, "revised_finish": scope.revised_finish,
+            "progress": round(pweight[sid] / weight[sid], 1),
+        }
+
+    zones = sorted(
+        (s for s in scopes.values() if s.parent_id is None and s.scope_type == ProjectScope.ScopeType.ZONE),
+        key=lambda s: (s.sort_order, s.name),
+    )
+
+    rows = []
+    for zone in zones:
+        zr = row_for(zone, 0)
+        if zr:
+            rows.append(zr)
+        for cid in sorted(children.get(str(zone.id), []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+            cr = row_for(scopes[cid], 1)
+            if cr:
+                rows.append(cr)
+    return rows
+
+
 def _area_dashboards(project, hierarchy, as_of):
     """Per-zone dashboard data: its own duration/time-performance (falls back
     to the project's when it has none of its own) and a handful of recent
@@ -421,6 +488,7 @@ def build_report_context(report):
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
     discipline = _discipline_rows(project, report.scope_ids, progress)
     area_dashboards = _area_dashboards(project, hierarchy, as_of)
+    gantt = _gantt_rows(project, report.scope_ids, progress)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
@@ -496,6 +564,7 @@ def build_report_context(report):
         "hierarchy": hierarchy,
         "discipline": discipline,
         "area_dashboards": area_dashboards,
+        "gantt": gantt,
         "zone_grids": zone_grids,
         # Internal: as-of progress map so the PDF's lazy grid matches the report
         # date (None when the project has no dated entries).
