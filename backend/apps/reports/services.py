@@ -391,9 +391,14 @@ def _area_dashboards(project, hierarchy, as_of):
             .order_by("-entry__date", "-created_at")
             .values("image", "caption")[:4]
         )
+        # Only show a per-zone duration when the zone carries its own schedule —
+        # otherwise `_zone_duration` falls back to the project's dates and every
+        # zone page would repeat the same pie (already on the exec dashboard).
+        own_schedule = bool(zone.planned_start and zone.planned_finish)
         out.append({
             "name": z["name"], "actual": z["actual"], "planned": z["planned"],
-            "children": z["children"], "duration": _zone_duration(zone, project, as_of),
+            "children": z["children"],
+            "duration": _zone_duration(zone, project, as_of) if own_schedule else None,
             "photos": photos,
         })
     return out

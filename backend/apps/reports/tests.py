@@ -224,6 +224,25 @@ class AreaDashboardsTests(TestCase):
         self.assertEqual(len(area["photos"]), 1)
         self.assertEqual(area["photos"][0]["caption"], "Pour")
 
+    def test_zone_without_own_dates_has_no_duration(self):
+        """A dateless zone shows no duration pie (it would just repeat the
+        project's numbers on every page); it still appears with its children."""
+        from apps.projects.models import Activity, ProjectScope
+        from .services import _area_dashboards, _hierarchy_rows
+
+        dateless = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone B")
+        unit = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Bldg", parent=dateless)
+        Activity.objects.create(company=self.company, project=self.project, scope=unit,
+                                name="W", weight=1, progress_percent=30)
+
+        as_of = datetime.date(2026, 5, 1)
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        areas = {a["name"]: a for a in _area_dashboards(self.project, hierarchy, as_of)}
+        self.assertIsNone(areas["Zone B"]["duration"])      # dateless -> no pie
+        self.assertIsNotNone(areas["Zone A"]["duration"])   # has own dates -> kept
+
 
 class GanttRowsTests(TestCase):
     """`_gantt_rows` builds zone+child Gantt bars from each scope's OWN dates

@@ -93,24 +93,21 @@ def planned_actual_chart(cfg, ctx, width, labels):
     return d
 
 
-def area_units_chart(cfg, area, width, labels):
-    """Grouped planned-vs-actual bars per sub-unit within one zone (the
-    per-area dashboard's chart) — same shape as `planned_actual_chart`, just
-    sourced from one zone's children instead of the project's top-level zones.
-    Skipped above a sane bar count (a zone with hundreds of subzones would
-    just produce an unreadable chart; the breakdown table already covers it)."""
-    units = [u for u in area.get("children", []) if u.get("planned") is not None][:15]
-    if not units or len(area.get("children", [])) > 30:
-        return None
+def _unit_bars(cfg, units, width, labels):
+    """Per-unit bars within a zone: grouped planned/actual when a baseline
+    exists, else actual-only (most projects carry no per-unit dates yet, so the
+    old version drew nothing — now it still shows where each unit stands)."""
+    has_planned = any(u.get("planned") is not None for u in units)
     height = 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 30
     chart.width, chart.height = width - 48, height - 54
-    chart.data = [
-        [round(u["planned"], 1) for u in units],
-        [round(u["actual"], 1) for u in units],
-    ]
+    if has_planned:
+        chart.data = [[round(u.get("planned") or 0, 1) for u in units],
+                      [round(u["actual"], 1) for u in units]]
+    else:
+        chart.data = [[round(u["actual"], 1) for u in units]]
     chart.categoryAxis.categoryNames = [shape(u["name"]) for u in units]
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
@@ -121,17 +118,77 @@ def area_units_chart(cfg, area, width, labels):
     chart.valueAxis.labels.fontSize = 7
     chart.groupSpacing = 8
     chart.barSpacing = 1
-    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    chart.bars[0].strokeColor = None
+    if has_planned:
+        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+        chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+        chart.bars[1].strokeColor = None
+    else:
+        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
     chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
     d.add(chart)
-    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width - 150, height - 8))
+    pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else []) + \
+        [(cfg["colors"]["chart_actual"], labels["actual"])]
+    d.add(_legend(pairs, width - 150, height - 8))
     return d
+
+
+def _completion_histogram(cfg, children, width, labels):
+    """How a zone's sub-units are spread across completion bands — readable at
+    any unit count (a per-unit bar chart isn't, past ~15 units). Bar height is
+    the number of units in each band; the value label prints that count."""
+    bands = [0, 0, 0, 0, 0]  # 0% | 1-49 | 50-74 | 75-99 | 100%
+    for u in children:
+        p = float(u.get("actual") or 0)
+        if p <= 0:
+            bands[0] += 1
+        elif p < 50:
+            bands[1] += 1
+        elif p < 75:
+            bands[2] += 1
+        elif p < 100:
+            bands[3] += 1
+        else:
+            bands[4] += 1
+    height = 70 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 26, 24
+    chart.width, chart.height = width - 52, height - 42
+    chart.data = [bands]
+    chart.categoryAxis.categoryNames = ["0%", "1-49%", "50-74%", "75-99%", "100%"]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 8
+    top = max(bands) or 1
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax = 0, top
+    chart.valueAxis.valueStep = max(1, -(-top // 5))  # ceil(top/5)
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 7
+    chart.barWidth = 14
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[0].strokeColor = None
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 8
+    chart.barLabelFormat = "%d"
+    chart.barLabels.nudge = 7
+    d.add(chart)
+    return d
+
+
+def area_units_chart(cfg, area, width, labels):
+    """A zone's sub-units visualised for its dashboard page: per-unit bars when
+    there are few enough to read, otherwise a completion histogram so the page
+    stays informative for zones with dozens/hundreds of units (the old version
+    just drew nothing in that case, leaving the page near-empty)."""
+    children = area.get("children", [])
+    if not children:
+        return None
+    if len(children) <= 15:
+        return _unit_bars(cfg, children, width, labels)
+    return _completion_histogram(cfg, children, width, labels)
 
 
 def _duration_pie_for(cfg, dur, width, labels):

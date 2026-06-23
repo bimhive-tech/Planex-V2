@@ -157,7 +157,7 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
       )}
       {on("sections.hierarchy_progress") && (
         <>
-          <h2 className={styles.previewTitle}>{g("labels.hierarchy_progress", "Progress Breakdown")}</h2>
+          <h2 className={styles.previewTitle}>{g("labels.hierarchy_progress", "تفصيل نسب الإنجاز")}</h2>
           <table className={styles.previewTable}>
             <thead><tr><th>{g("labels.col_zone", "Zone")}</th><th>{g("labels.col_actual", "Actual %")}</th><th>{g("labels.col_previous", "Previous %")}</th><th>{g("labels.col_planned", "Planned %")}</th></tr></thead>
             <tbody>
@@ -169,9 +169,9 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
       )}
       {on("sections.discipline_progress") && (
         <>
-          <h2 className={styles.previewTitle}>{g("labels.discipline_progress", "Progress by Trade")}</h2>
+          <h2 className={styles.previewTitle}>{g("labels.discipline_progress", "الإنجاز حسب التخصص")}</h2>
           <table className={styles.previewTable}>
-            <thead><tr><th>{g("labels.col_unit", "Unit")}</th><th>{g("labels.col_concrete", "Concrete")}</th><th>{g("labels.col_architecture", "Architecture")}</th><th>{g("labels.col_electrical", "Electrical")}</th><th>{g("labels.col_mechanical", "Mechanical")}</th></tr></thead>
+            <thead><tr><th>{g("labels.col_unit", "الوحدة")}</th><th>{g("labels.col_concrete", "الخرسانة")}</th><th>{g("labels.col_architecture", "المعماري")}</th><th>{g("labels.col_electrical", "الكهرباء")}</th><th>{g("labels.col_mechanical", "الميكانيكا")}</th></tr></thead>
             <tbody>
               <tr><td>{"{{unit}}"}</td><td>100%</td><td>96%</td><td>88%</td><td>81%</td></tr>
             </tbody>
@@ -180,7 +180,7 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
       )}
       {on("sections.area_dashboards") && (
         <>
-          <h2 className={styles.previewTitle}>{g("labels.area_dashboards", "Area Dashboards")}</h2>
+          <h2 className={styles.previewTitle}>{g("labels.area_dashboards", "لوحات معلومات المناطق")}</h2>
           <div className={styles.chartRow}>
             <span className={`${styles.bar} ${styles.barPlanned}`} />
             <span className={`${styles.bar} ${styles.barActual}`} />
@@ -194,7 +194,7 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
       )}
       {on("sections.gantt_schedule") && (
         <>
-          <h2 className={styles.previewTitle}>{g("labels.gantt_schedule", "Project Schedule (Gantt)")}</h2>
+          <h2 className={styles.previewTitle}>{g("labels.gantt_schedule", "الجدول الزمني للمشروع")}</h2>
           {[
             ["{{Zone A}}", "70%"],
             ["{{Building 1}}", "45%"],
