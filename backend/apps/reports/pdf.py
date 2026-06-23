@@ -338,6 +338,21 @@ def _caption_style(styles):
     return ParagraphStyle("photoCaption", parent=styles["muted"], alignment=TA_CENTER, fontSize=8, leading=11)
 
 
+def _fig_caption_style(styles):
+    return ParagraphStyle("figCaption", parent=styles["muted"], alignment=TA_CENTER,
+                          fontSize=8, leading=10, spaceBefore=1, spaceAfter=4)
+
+
+def _captioned(cfg, styles, drawing, name, fig):
+    """[chart, 'شكل N: name' caption] so every chart is numbered and named.
+    Returns [] when there's no drawing; bumps the shared figure counter `fig`."""
+    if drawing is None:
+        return []
+    fig[0] += 1
+    text = f'{cfg["labels"].get("figure", "Figure")} {fig[0]}: {name}'
+    return [drawing, Paragraph(shape(text), _fig_caption_style(styles))]
+
+
 def _photo_page_table(cfg, styles, photos, width, height):
     """One 2×2 bordered photo grid (up to 4 photos) sized to fill the page."""
     c = cfg["colors"]
@@ -443,27 +458,26 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
     return flow
 
 
-def _area_dashboard_section(cfg, styles, areas, width, labels):
-    """One page per zone: a planned-vs-actual bar for its sub-units, a duration
-    pie (the zone's own dates when set, else the project's), and a few recent
-    photos from its subtree. Only the first zone's heading is TOC-listed (one
-    entry per zone would clutter it on projects with many zones) — same trick
-    as the detailed grid section."""
+def _area_dashboard_section(cfg, styles, areas, width, labels, fig):
+    """One page per zone: a per-unit bar / completion histogram, a duration pie
+    (only when the zone has its own schedule), and a few recent photos from its
+    subtree. Only the first zone's heading is TOC-listed (one entry per zone
+    would clutter it on projects with many zones) — same trick as the grids."""
     flow = []
     for i, area in enumerate(areas):
         flow.append(PageBreak())
         flow += _heading(styles, labels.get("area_dashboards", "Area Dashboards"), listed=(i == 0))
         flow += _sub_heading(styles, area["name"])
-        chart = area_units_chart(cfg, area, width, labels)
-        if chart:
-            flow += [chart, Spacer(1, 6)]
+        units_name = f'{labels.get("area_dashboards", "Area")} — {area["name"]}'
+        flow += _captioned(cfg, styles, area_units_chart(cfg, area, width, labels), units_name, fig) + [Spacer(1, 6)]
         dur = area.get("duration")
         if dur:
             pie = zone_duration_pie(cfg, dur, width, labels)
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
                 [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
-            flow += [pie or Spacer(1, 1), table, Spacer(1, 8)]
+            cap_name = f'{labels["duration_section"]} — {area["name"]}'
+            flow += _captioned(cfg, styles, pie, cap_name, fig) + [table, Spacer(1, 8)]
         if area.get("photos"):
             flow.append(_photo_page_table(cfg, styles, area["photos"], width, 70 * mm))
     return flow
@@ -487,9 +501,11 @@ def draw_dash(canvas, doc):
     canvas.restoreState()
 
 
-def _dashboard_section(cfg, styles, ctx, labels, rtl, w):
+def _dashboard_section(cfg, styles, ctx, labels, rtl, w, fig):
     """Reference-style landscape executive dashboard: progress + duration gauges,
-    a project-info panel, planned/actual bars, the S-curve, and a photo strip."""
+    a project-info panel, planned/actual bars, the S-curve, and a photo strip.
+    This is the single home for the headline visuals — the detailed sections
+    skip them when the dashboard is on, so nothing is duplicated."""
     flow = [NextPageTemplate("dash"), PageBreak()]
     flow += _heading(styles, labels.get("dashboard", "Executive Dashboard"))
 
@@ -505,13 +521,17 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w):
     info_rows = [(k, v) for k, v in info_rows if v]
     info = _info_table(cfg, styles, info_rows, rtl)
 
-    donut = overall_donut(cfg, ctx, 0.26 * w, labels) or Spacer(1, 1)
-    dur = duration_pie(cfg, ctx, 0.34 * w, labels) or Spacer(1, 1)
+    def cell(drawing, name):
+        # A table cell accepts a list of flowables (chart then caption), stacked.
+        return _captioned(cfg, styles, drawing, name, fig) or Spacer(1, 1)
+
+    donut = cell(overall_donut(cfg, ctx, 0.26 * w, labels), labels["progress_overview"])
+    dur = cell(duration_pie(cfg, ctx, 0.34 * w, labels), labels["duration_section"])
     top = Table([[donut, dur, info]], colWidths=[0.28 * w, 0.34 * w, 0.38 * w])
     top.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
 
-    bars = planned_actual_chart(cfg, ctx, 0.5 * w, labels) or Spacer(1, 1)
-    curve = scurve_chart(cfg, ctx, 0.48 * w, labels) or Spacer(1, 1)
+    bars = cell(planned_actual_chart(cfg, ctx, 0.5 * w, labels), labels["progress_chart"])
+    curve = cell(scurve_chart(cfg, ctx, 0.48 * w, labels), labels["scurve"])
     mid = Table([[bars, curve]], colWidths=[0.5 * w, 0.5 * w])
     mid.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
 
@@ -529,6 +549,7 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
     rtl = ctx["arabic"]
     styles = _styles(cfg)
     labels, sections = cfg["labels"], cfg["sections"]
+    fig = [0]  # running figure counter for "شكل N: …" captions under every chart
 
     # Build the (heavy) detailed grid only when that section is enabled.
     if sections.get("detailed_progress") and not ctx.get("zone_grids") and getattr(report, "project", None):
@@ -634,8 +655,9 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             story += _description_flow(cfg, styles, p["description"], rtl)
 
     progress_anchored = False
-    if sections.get("dashboard"):
-        dash = _dashboard_section(cfg, styles, ctx, labels, rtl, lfw)
+    dash_on = bool(sections.get("dashboard"))
+    if dash_on:
+        dash = _dashboard_section(cfg, styles, ctx, labels, rtl, lfw, fig)
         dash[2:2] = [_Anchor("tab_progress")]  # after NextPageTemplate + PageBreak
         story += dash
         progress_anchored = True
@@ -646,26 +668,30 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
     if progress_on:
         story += major(labels.get("progress_report", "Project Progress Report"),
                        anchor=None if progress_anchored else "tab_progress")
+        # When the dashboard is on it owns the headline visuals; here we keep
+        # only the text + tables so the same donut/pie/bars/s-curve aren't repeated.
         if sections.get("progress_overview"):
             story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}", force=TA_CENTER))
-            donut = overall_donut(cfg, ctx, fw, labels)
-            if donut:
-                story += [donut, Spacer(1, 8)]
-        if sections.get("progress_chart"):
+            donut = None if dash_on else overall_donut(cfg, ctx, fw, labels)
+            story += _captioned(cfg, styles, donut, labels["progress_overview"], fig) + ([Spacer(1, 8)] if donut else [])
+        if sections.get("progress_chart") and not dash_on:
             chart = planned_actual_chart(cfg, ctx, fw, labels)
             if chart:
-                story.append(KeepTogether(_sub_heading(styles, labels["progress_chart"]) + [chart, Spacer(1, 10)]))
+                story.append(KeepTogether(_sub_heading(styles, labels["progress_chart"]) +
+                                          _captioned(cfg, styles, chart, labels["progress_chart"], fig) + [Spacer(1, 10)]))
         if sections.get("duration") and ctx.get("duration"):
             dur = ctx["duration"]
-            pie = duration_pie(cfg, ctx, fw, labels)
+            pie = None if dash_on else duration_pie(cfg, ctx, fw, labels)
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
                 [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
-            story.append(KeepTogether(_sub_heading(styles, labels["duration_section"]) + [pie or Spacer(1, 1), table, Spacer(1, 10)]))
-        if sections.get("scurve"):
+            story.append(KeepTogether(_sub_heading(styles, labels["duration_section"]) +
+                                      _captioned(cfg, styles, pie, labels["duration_section"], fig) + [table, Spacer(1, 10)]))
+        if sections.get("scurve") and not dash_on:
             curve = scurve_chart(cfg, ctx, fw, labels)
             if curve:
-                story.append(KeepTogether(_sub_heading(styles, labels["scurve"]) + [curve, Spacer(1, 10)]))
+                story.append(KeepTogether(_sub_heading(styles, labels["scurve"]) +
+                                          _captioned(cfg, styles, curve, labels["scurve"], fig) + [Spacer(1, 10)]))
         if sections.get("progress_compare") and any(z.get("planned") is not None for z in ctx["zones"]):
             rows = [[z["name"],
                      f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
@@ -697,7 +723,7 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         story.append(_data_table(cfg, styles, disc_header, disc_rows))
 
     if sections.get("area_dashboards") and ctx.get("area_dashboards"):
-        story += _area_dashboard_section(cfg, styles, ctx["area_dashboards"], fw, labels)
+        story += _area_dashboard_section(cfg, styles, ctx["area_dashboards"], fw, labels, fig)
 
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)
@@ -705,8 +731,7 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
     if sections.get("gantt_schedule") and ctx.get("gantt"):
         story += major(labels.get("gantt_schedule", "Project Schedule (Gantt)"))
         chart = gantt_chart(cfg, ctx["gantt"], fw, labels)
-        if chart:
-            story.append(chart)
+        story += _captioned(cfg, styles, chart, labels.get("gantt_schedule", "Schedule"), fig)
 
     if sections.get("delays") and ctx.get("delays"):
         story += major(labels["delays"])

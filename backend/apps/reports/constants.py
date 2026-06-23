@@ -136,6 +136,7 @@ DEFAULT_CONFIG = {
         "duration_remaining": "Remaining",
         "scurve": "Time Performance",
         "progress_compare": "Progress vs Plan",
+        "figure": "شكل",
         "col_previous": "Previous %",
         "col_planned": "Planned %",
         "col_actual": "Actual %",

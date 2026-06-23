@@ -13,15 +13,20 @@ from reportlab.lib.units import mm
 from .pdf_base import BOLD, FONT_NAME, hexcolor, shape
 
 
-def _legend(colors_labels, x, y, font_size=7):
+def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
+    """Swatch+label legend. Horizontal by default; `vertical=True` stacks the
+    entries in one column (used when labels carry values and would otherwise
+    collide, e.g. the duration pie)."""
     leg = Legend()
     leg.x, leg.y = x, y
     leg.alignment = "right"
     leg.fontName = FONT_NAME
     leg.fontSize = font_size
     leg.dxTextSpace = 4
-    leg.columnMaximum = 1
-    leg.deltax = 70
+    leg.dy = 6
+    leg.deltay = 12
+    leg.columnMaximum = len(colors_labels) if vertical else 1
+    leg.deltax = 0 if vertical else deltax
     leg.colorNamePairs = [(hexcolor(c), shape(label)) for c, label in colors_labels]
     return leg
 
@@ -64,8 +69,8 @@ def planned_actual_chart(cfg, ctx, width, labels):
     height = 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
-    chart.x, chart.y = 24, 30
-    chart.width, chart.height = width - 48, height - 54
+    chart.x, chart.y = 24, 26
+    chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
     chart.data = [
         [round(z["planned"], 1) for z in zones],
         [round(z["progress"], 1) for z in zones],
@@ -89,7 +94,7 @@ def planned_actual_chart(cfg, ctx, width, labels):
     chart.barLabels.nudge = 6
     d.add(chart)
     d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width - 150, height - 8))
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
     return d
 
 
@@ -101,8 +106,8 @@ def _unit_bars(cfg, units, width, labels):
     height = 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
-    chart.x, chart.y = 24, 30
-    chart.width, chart.height = width - 48, height - 54
+    chart.x, chart.y = 24, 26
+    chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
     if has_planned:
         chart.data = [[round(u.get("planned") or 0, 1) for u in units],
                       [round(u["actual"], 1) for u in units]]
@@ -132,7 +137,7 @@ def _unit_bars(cfg, units, width, labels):
     d.add(chart)
     pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else []) + \
         [(cfg["colors"]["chart_actual"], labels["actual"])]
-    d.add(_legend(pairs, width - 150, height - 8))
+    d.add(_legend(pairs, width / 2 - 95, height - 12))
     return d
 
 
@@ -194,21 +199,23 @@ def area_units_chart(cfg, area, width, labels):
 def _duration_pie_for(cfg, dur, width, labels):
     if not dur:
         return None
-    height = 62 * mm
+    height = 60 * mm
+    pw = 40 * mm
     d = Drawing(width, height)
     pie = Pie()
-    pie.x, pie.y = width / 2 - 28, 8
-    pie.width = pie.height = 46 * mm
+    pie.x, pie.y = (width - pw) / 2, 4   # centred; values move to the legend below
+    pie.width = pie.height = pw
     pie.data = [max(0, dur["total"]), max(0, dur["delay"])]
-    pie.labels = [str(dur["total"]), str(dur["delay"])]
-    pie.slices.fontName = FONT_NAME
-    pie.slices.fontSize = 8
+    pie.labels = ["", ""]                # no numbers on the slices (they overlapped)
+    pie.simpleLabels = 1
     pie.slices[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     pie.slices[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     pie.slices.strokeColor = hexcolor("#ffffff")
     d.add(pie)
-    d.add(_legend([(cfg["colors"]["chart_planned"], labels["duration_days"]),
-                   (cfg["colors"]["chart_actual"], labels["delay_days"])], width - 150, height - 8))
+    # Stacked legend carrying the values, in the clear strip above the pie.
+    d.add(_legend([(cfg["colors"]["chart_planned"], f'{labels["duration_days"]}: {dur["total"]}'),
+                   (cfg["colors"]["chart_actual"], f'{labels["delay_days"]}: {dur["delay"]}')],
+                  10, height - 6, vertical=True))
     return d
 
 
@@ -226,10 +233,11 @@ def overall_donut(cfg, ctx, width, labels):
     """Overall completion donut with the % in the centre."""
     overall = float(ctx["overall"])
     height = 56 * mm
+    pw = 42 * mm
     d = Drawing(width, height)
     pie = Pie()
-    pie.x, pie.y = width / 2 - 24, 6
-    pie.width = pie.height = 42 * mm
+    pie.x, pie.y = (width - pw) / 2, 6   # centred so the % lands in the hole
+    pie.width = pie.height = pw
     pie.data = [max(0.1, overall), max(0.1, 100 - overall)]
     pie.innerRadiusFraction = 0.58  # donut
     pie.slices.strokeColor = hexcolor("#ffffff")
@@ -238,7 +246,8 @@ def overall_donut(cfg, ctx, width, labels):
     pie.simpleLabels = 1
     pie.labels = ["", ""]
     d.add(pie)
-    d.add(String(width / 2, height / 2 - 2, f"{overall:.1f}%", fontName=FONT_NAME, fontSize=13,
+    cx, cy = pie.x + pw / 2, pie.y + pw / 2
+    d.add(String(cx, cy - 5, f"{overall:.1f}%", fontName=FONT_NAME, fontSize=13,
                  fillColor=hexcolor(cfg["colors"]["heading"]), textAnchor="middle"))
     return d
 
@@ -251,8 +260,8 @@ def scurve_chart(cfg, ctx, width, labels):
     height = 72 * mm
     d = Drawing(width, height)
     chart = HorizontalLineChart()
-    chart.x, chart.y = 26, 28
-    chart.width, chart.height = width - 52, height - 50
+    chart.x, chart.y = 26, 26
+    chart.width, chart.height = width - 52, height - 56  # leave a top strip for the legend
     chart.data = [[p["planned"] for p in series], [p["actual"] for p in series]]
     chart.categoryAxis.categoryNames = [p["date"].strftime("%b %y") for p in series]
     chart.categoryAxis.labels.fontName = FONT_NAME
@@ -267,7 +276,7 @@ def scurve_chart(cfg, ctx, width, labels):
     chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2
     d.add(chart)
     d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width - 150, height - 8))
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
     return d
 
 
