@@ -34,6 +34,8 @@ from .services import _zone_grids
 from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, shape
 from .pdf_charts import (
     area_units_chart,
+    cashflow_chart,
+    cashflow_curve,
     duration_pie,
     gantt_chart,
     overall_donut,
@@ -732,6 +734,35 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         story += major(labels.get("gantt_schedule", "Project Schedule (Gantt)"))
         chart = gantt_chart(cfg, ctx["gantt"], fw, labels)
         story += _captioned(cfg, styles, chart, labels.get("gantt_schedule", "Schedule"), fig)
+
+    if sections.get("cashflow") and ctx.get("cashflow"):
+        story += major(labels.get("cashflow", "Cash Flow"))
+        story += _captioned(cfg, styles, cashflow_chart(cfg, ctx["cashflow"], fw, labels),
+                            labels.get("cashflow_monthly", "Monthly cash flow"), fig)
+        story += _captioned(cfg, styles, cashflow_curve(cfg, ctx["cashflow"], fw, labels),
+                            labels.get("cashflow_cumulative", "Cumulative cash flow"), fig)
+
+    if sections.get("invoices") and ctx.get("invoices"):
+        story += major(labels.get("invoices", "Invoices"))
+        rows = [[i["name"], f"{i['value']:,.2f}", _fmt_date(i["date"]) if i["date"] else "—"]
+                for i in ctx["invoices"]]
+        rows.append([labels.get("col_total", "Total"), f"{ctx['invoices_total']:,.2f}", ""])
+        story.append(_data_table(cfg, styles,
+            [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]],
+            rows, col_widths=[None, 36 * mm, 30 * mm]))
+
+    if sections.get("submittals") and ctx.get("submittals", {}).get("rows"):
+        sub = ctx["submittals"]
+        story += major(labels.get("submittals", "Submittals"))
+        story += _sub_heading(styles, labels.get("submittal_summary", "Status summary"))
+        story.append(_data_table(cfg, styles,
+            [labels["col_status"], labels.get("col_count", "Count")],
+            [[s["status"], str(s["count"])] for s in sub["summary"]], col_widths=[None, 30 * mm]))
+        story.append(Spacer(1, 8))
+        story.append(_data_table(cfg, styles,
+            [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
+             labels.get("col_discipline", "Discipline"), labels["col_status"]],
+            [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub["rows"]]))
 
     if sections.get("delays") and ctx.get("delays"):
         story += major(labels["delays"])

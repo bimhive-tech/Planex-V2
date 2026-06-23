@@ -295,6 +295,48 @@ class GanttRowsTests(TestCase):
         self.assertEqual(zone_row["progress"], 75.0)
 
 
+class FinanceReportTests(TestCase):
+    """Cash flow, invoices and submittals flow into the report context and PDF."""
+
+    def setUp(self):
+        from apps.projects.models import CashFlowEntry, Invoice, Submittal
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL, currency="EGP")
+        CashFlowEntry.objects.create(company=self.company, project=self.project,
+                                     month=datetime.date(2026, 1, 1), planned=100, actual=80)
+        CashFlowEntry.objects.create(company=self.company, project=self.project,
+                                     month=datetime.date(2026, 2, 1), planned=200, actual=150)
+        Invoice.objects.create(company=self.company, project=self.project, name="Extract 1", value=1500)
+        Invoice.objects.create(company=self.company, project=self.project, name="Extract 2", value=2500)
+        Submittal.objects.create(company=self.company, project=self.project, title="Rebar shop dwg",
+                                 submittal_type="shop_drawing", discipline="concrete", status="approved")
+        Submittal.objects.create(company=self.company, project=self.project, title="Paint sample",
+                                 submittal_type="material", discipline="architecture", status="pending")
+
+    def test_context_aggregates_finances(self):
+        from .services import build_report_context
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        self.assertEqual(len(ctx["cashflow"]), 2)
+        self.assertEqual(ctx["cashflow"][1]["cum_actual"], 230.0)  # 80 + 150
+        self.assertEqual(ctx["invoices_total"], 4000.0)
+        self.assertEqual(len(ctx["submittals"]["rows"]), 2)
+        approved = next(s for s in ctx["submittals"]["summary"] if s["key"] == "approved")
+        self.assertEqual(approved["count"], 1)
+
+    def test_pdf_renders_with_finance_sections(self):
+        from .services import build_report_context
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="Monthly", report_number="1")
+        ctx = build_report_context(rep)
+        rep.template = ReportTemplate(name="T", config=default_config())
+        data = build_report_pdf(rep, ctx)
+        self.assertTrue(data.startswith(b"%PDF"))
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")

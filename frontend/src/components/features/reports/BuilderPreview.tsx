@@ -34,6 +34,8 @@ export function BuilderPreview({ config, pageKey, name }: { config: ReportConfig
       {pageKey === "project_info" && <InfoPage g={g} />}
       {pageKey === "description" && <DescriptionPage g={g} />}
       {pageKey === "progress" && <ProgressPage g={g} on={on} />}
+      {pageKey === "finances" && <FinancesPage g={g} on={on} />}
+      {pageKey === "submittals" && <SubmittalsPage g={g} />}
       {pageKey === "photos" && <PhotosPage g={g} />}
       {pageKey === "attachments" && <AttachmentsPage g={g} />}
       {pageKey === "design" && <DesignPage g={g} />}
@@ -209,6 +211,51 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
           ))}
         </>
       )}
+    </div>
+  );
+}
+
+function FinancesPage({ g, on }: { g: G; on: On }) {
+  return (
+    <div>
+      {on("sections.cashflow") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.cashflow", "Cash Flow")}</h2>
+          <div className={styles.chartRow}>
+            <span className={`${styles.bar} ${styles.barPlanned}`} />
+            <span className={`${styles.bar} ${styles.barActual}`} />
+            <span className={`${styles.bar} ${styles.barPlanned}`} />
+            <span className={`${styles.bar} ${styles.barActual}`} />
+          </div>
+        </>
+      )}
+      {on("sections.invoices") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.invoices", "Invoices")}</h2>
+          <table className={styles.previewTable}>
+            <thead><tr><th>{g("labels.col_invoice", "Item")}</th><th>{g("labels.col_value", "Value")}</th><th>{g("labels.col_date", "Date")}</th></tr></thead>
+            <tbody>
+              <tr><td>{"{{invoice}}"}</td><td>1,500</td><td>{"{{date}}"}</td></tr>
+              <tr className={styles.zebra}><td>{g("labels.col_total", "Total")}</td><td>4,000</td><td /></tr>
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SubmittalsPage({ g }: { g: G }) {
+  return (
+    <div>
+      <h2 className={styles.previewTitle}>{g("labels.submittals", "Submittals")}</h2>
+      <table className={styles.previewTable}>
+        <thead><tr><th>{g("labels.col_invoice", "Title")}</th><th>{g("labels.col_type", "Type")}</th><th>{g("labels.col_discipline", "Discipline")}</th><th>{g("labels.col_status", "Status")}</th></tr></thead>
+        <tbody>
+          <tr><td>{"{{submittal}}"}</td><td>Shop Drawing</td><td>Concrete</td><td>Approved</td></tr>
+          <tr className={styles.zebra}><td>{"{{submittal}}"}</td><td>Material</td><td>Architecture</td><td>Pending</td></tr>
+        </tbody>
+      </table>
     </div>
   );
 }

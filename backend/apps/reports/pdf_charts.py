@@ -280,6 +280,64 @@ def scurve_chart(cfg, ctx, width, labels):
     return d
 
 
+def cashflow_chart(cfg, rows, width, labels):
+    """Monthly planned-vs-actual cash bars (the values the user typed in the
+    Finances tab — no derivation)."""
+    rows = rows[:24]
+    if not rows:
+        return None
+    height = 80 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 32, 28
+    chart.width, chart.height = width - 60, height - 62
+    chart.data = [[r["planned"] for r in rows], [r["actual"] for r in rows]]
+    chart.categoryAxis.categoryNames = [r["month"].strftime("%b %y") for r in rows]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.angle = 30
+    chart.categoryAxis.labels.boxAnchor = "ne"
+    chart.valueAxis.valueMin = 0
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 6
+    chart.groupSpacing = 6
+    chart.barSpacing = 1
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    d.add(chart)
+    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+    return d
+
+
+def cashflow_curve(cfg, rows, width, labels):
+    """Cumulative cash S-curve (planned vs actual added up month over month)."""
+    if len(rows) < 2:
+        return None
+    height = 78 * mm
+    d = Drawing(width, height)
+    chart = HorizontalLineChart()
+    chart.x, chart.y = 32, 26
+    chart.width, chart.height = width - 60, height - 56
+    chart.data = [[r["cum_planned"] for r in rows], [r["cum_actual"] for r in rows]]
+    chart.categoryAxis.categoryNames = [r["month"].strftime("%b %y") for r in rows]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.angle = 30
+    chart.categoryAxis.labels.boxAnchor = "ne"
+    chart.valueAxis.valueMin = 0
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 6
+    chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2
+    d.add(chart)
+    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+    return d
+
+
 def _add_month(d, months):
     y = d.year + (d.month - 1 + months) // 12
     m = (d.month - 1 + months) % 12 + 1

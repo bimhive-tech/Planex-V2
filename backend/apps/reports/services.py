@@ -5,7 +5,7 @@ Planned %, previous %, duration and delay are *derived* from data we already
 hold (project dates + dated snapshots) — no extra manual entry needed."""
 import datetime
 
-from apps.projects.models import ProjectImage, ProjectScope
+from apps.projects.models import ProjectImage, ProjectScope, Submittal
 from apps.projects.services import activity_progress_as_of, project_overall_progress
 
 from .models import ReportImage
@@ -503,6 +503,42 @@ def build_report_context(report):
         project.delays.order_by("sort_order", "-date").values("title", "description", "impact_days", "status", "date")
     )
 
+    # Finances — user-entered monthly cash flow (we add it up for the cumulative
+    # S-curve) and invoices. Values are stored as-is; nothing is computed here.
+    cum_p = cum_a = 0.0
+    cashflow = []
+    for e in project.cashflow_entries.order_by("month").values("month", "planned", "actual"):
+        p, a = float(e["planned"]), float(e["actual"])
+        cum_p += p
+        cum_a += a
+        cashflow.append({"month": e["month"], "planned": p, "actual": a,
+                         "cum_planned": cum_p, "cum_actual": cum_a})
+    cashflow_totals = {"planned": cum_p, "actual": cum_a}
+
+    invoices = [
+        {"name": i["name"], "value": float(i["value"]), "date": i["date"]}
+        for i in project.invoices.order_by("sort_order", "-date").values("name", "value", "date")
+    ]
+    invoices_total = sum(i["value"] for i in invoices)
+
+    # Submittals — table rows plus a status summary (counts per approval status).
+    status_labels = dict(Submittal.Status.choices)
+    type_labels = dict(Submittal.Type.choices)
+    disc_labels = dict(Submittal.Discipline.choices)
+    sub_rows = list(project.submittals.order_by("sort_order", "-date").values(
+        "title", "submittal_type", "discipline", "status", "reference", "date"))
+    status_counts = {}
+    for s in sub_rows:
+        status_counts[s["status"]] = status_counts.get(s["status"], 0) + 1
+    submittals = {
+        "rows": [{"title": s["title"], "type": type_labels.get(s["submittal_type"], ""),
+                  "discipline": disc_labels.get(s["discipline"], ""),
+                  "status": status_labels.get(s["status"], ""), "status_key": s["status"],
+                  "reference": s["reference"], "date": s["date"]} for s in sub_rows],
+        "summary": [{"status": label, "key": key, "count": status_counts.get(key, 0)}
+                    for key, label in status_labels.items()],
+    }
+
     # S-curve series: actual (from snapshots) vs planned at each snapshot date.
     scurve = [
         {
@@ -574,6 +610,11 @@ def build_report_context(report):
         # Internal: as-of progress map so the PDF's lazy grid matches the report
         # date (None when the project has no dated entries).
         "_progress": progress,
+        "cashflow": cashflow,
+        "cashflow_totals": cashflow_totals,
+        "invoices": invoices,
+        "invoices_total": invoices_total,
+        "submittals": submittals,
         "delays": delays,
         "scurve": scurve,
         "milestones": milestones,
