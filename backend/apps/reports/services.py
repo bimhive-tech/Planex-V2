@@ -233,6 +233,48 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     return rows
 
 
+def _discipline_rows(project, scope_ids=None, progress=None):
+    """Per-unit (subzone/building) progress split by trade — Concrete /
+    Architecture / Electrical / Mechanical — using each activity's *phase*
+    discipline tag (a zone-tracker phase is usually one trade's work package,
+    and a phase's direct parent is the unit, so no deep tree walk is needed).
+    Units with no tagged phases are omitted; untagged work is simply left out
+    of the trade columns rather than guessed at."""
+    predicate, _ = _scope_context(project, scope_ids)
+    disciplines = [d for d in ProjectScope.Discipline.values]
+
+    phases = {
+        str(s.id): s for s in project.scopes.filter(
+            scope_type=ProjectScope.ScopeType.PHASE).exclude(discipline="")
+    }
+    if not phases:
+        return []
+
+    unit_w, unit_pw = {}, {}
+    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        sid = str(sid)
+        phase = phases.get(sid)
+        if not phase or phase.parent_id is None or not predicate(sid, aid):
+            continue
+        unit_id = str(phase.parent_id)
+        w = float(weight)
+        prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
+        unit_w.setdefault(unit_id, {}).setdefault(phase.discipline, 0.0)
+        unit_pw.setdefault(unit_id, {}).setdefault(phase.discipline, 0.0)
+        unit_w[unit_id][phase.discipline] += w
+        unit_pw[unit_id][phase.discipline] += w * prog
+
+    units = {str(s.id): s for s in project.scopes.filter(id__in=unit_w.keys())}
+    rows = []
+    for uid, by_disc in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
+        row = {"name": units[uid].name}
+        for d in disciplines:
+            w = by_disc.get(d, 0.0)
+            row[d] = round(unit_pw[uid][d] / w, 1) if w else None
+        rows.append(row)
+    return rows
+
+
 def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
     """The schedule-style grid per zone: subzones as columns, tasks (grouped by
     phase) as rows, each cell an activity's progress. Honours the scope selection
@@ -320,6 +362,7 @@ def build_report_context(report):
 
     # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
+    discipline = _discipline_rows(project, report.scope_ids, progress)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
@@ -393,6 +436,7 @@ def build_report_context(report):
         "breakdown": breakdown,
         "zones": zones,
         "hierarchy": hierarchy,
+        "discipline": discipline,
         "zone_grids": zone_grids,
         # Internal: as-of progress map so the PDF's lazy grid matches the report
         # date (None when the project has no dated entries).

@@ -167,6 +167,17 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
           </table>
         </>
       )}
+      {on("sections.discipline_progress") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.discipline_progress", "Progress by Trade")}</h2>
+          <table className={styles.previewTable}>
+            <thead><tr><th>{g("labels.col_unit", "Unit")}</th><th>{g("labels.col_concrete", "Concrete")}</th><th>{g("labels.col_architecture", "Architecture")}</th><th>{g("labels.col_electrical", "Electrical")}</th><th>{g("labels.col_mechanical", "Mechanical")}</th></tr></thead>
+            <tbody>
+              <tr><td>{"{{unit}}"}</td><td>100%</td><td>96%</td><td>88%</td><td>81%</td></tr>
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

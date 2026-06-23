@@ -146,6 +146,48 @@ class HierarchyRowsTests(TestCase):
         self.assertIsNone(rows[0]["previous"])  # zone itself wasn't in the map
 
 
+class DisciplineRowsTests(TestCase):
+    """`_discipline_rows` splits one unit's progress by trade, using each
+    activity's phase's discipline tag (a phase's direct parent is the unit)."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+        zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A")
+        self.unit = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Building 1", parent=zone)
+        concrete_phase = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="phase", name="Concrete works",
+            parent=self.unit, discipline="concrete")
+        electrical_phase = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="phase", name="Electrical works",
+            parent=self.unit, discipline="electrical")
+        untagged_phase = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="phase", name="Misc", parent=self.unit)
+        Activity.objects.create(company=self.company, project=self.project, scope=concrete_phase,
+                                name="Pour", weight=1, progress_percent=80)
+        Activity.objects.create(company=self.company, project=self.project, scope=electrical_phase,
+                                name="Wiring", weight=1, progress_percent=20)
+        Activity.objects.create(company=self.company, project=self.project, scope=untagged_phase,
+                                name="Other work", weight=1, progress_percent=100)
+
+    def test_splits_progress_by_phase_discipline(self):
+        from .services import _discipline_rows
+
+        rows = _discipline_rows(self.project)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["name"], "Building 1")
+        self.assertEqual(row["concrete"], 80.0)
+        self.assertEqual(row["electrical"], 20.0)
+        self.assertIsNone(row["architecture"])
+        self.assertIsNone(row["mechanical"])  # untagged phase's work isn't guessed into a column
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")

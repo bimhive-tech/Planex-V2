@@ -657,6 +657,16 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         story += major(labels["hierarchy_progress"])
         story.append(_hierarchy_table(cfg, styles, ctx["hierarchy"], labels, rtl))
 
+    if sections.get("discipline_progress") and ctx.get("discipline"):
+        story += major(labels["discipline_progress"])
+        disc_header = [labels["col_unit"], labels["col_concrete"], labels["col_architecture"],
+                       labels["col_electrical"], labels["col_mechanical"], labels["col_other"]]
+        disc_rows = [
+            [r["name"]] + [_pct_or_dash(r.get(d)) for d in ("concrete", "architecture", "electrical", "mechanical", "other")]
+            for r in ctx["discipline"]
+        ]
+        story.append(_data_table(cfg, styles, disc_header, disc_rows))
+
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)
 
