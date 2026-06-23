@@ -18,6 +18,15 @@ const SCOPE_TYPES = [
   { value: "area", label: "Area" },
 ];
 
+const DISCIPLINES = [
+  { value: "", label: "Unclassified" },
+  { value: "concrete", label: "Concrete" },
+  { value: "architecture", label: "Architecture" },
+  { value: "electrical", label: "Electrical" },
+  { value: "mechanical", label: "Mechanical" },
+  { value: "other", label: "Other" },
+];
+
 interface Props {
   open: boolean;
   projectId: string;
@@ -32,6 +41,9 @@ export function ScopeFormModal({ open, projectId, parentId, scope, defaultType =
   const isEdit = !!scope;
   const [name, setName] = useState("");
   const [type, setType] = useState(defaultType);
+  const [plannedStart, setPlannedStart] = useState("");
+  const [plannedFinish, setPlannedFinish] = useState("");
+  const [discipline, setDiscipline] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +51,9 @@ export function ScopeFormModal({ open, projectId, parentId, scope, defaultType =
     if (open) {
       setName(scope?.name ?? "");
       setType(scope?.scope_type ?? defaultType);
+      setPlannedStart(scope?.planned_start ?? "");
+      setPlannedFinish(scope?.planned_finish ?? "");
+      setDiscipline(scope?.discipline ?? "");
       setError(null);
     }
   }, [open, scope, defaultType]);
@@ -47,11 +62,16 @@ export function ScopeFormModal({ open, projectId, parentId, scope, defaultType =
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    const payload = {
+      name, scope_type: type,
+      planned_start: plannedStart || null, planned_finish: plannedFinish || null,
+      discipline: type === "phase" ? discipline : "",
+    };
     try {
       if (isEdit && scope) {
-        await api.patch(`/projects/${projectId}/scopes/${scope.id}/`, { name, scope_type: type });
+        await api.patch(`/projects/${projectId}/scopes/${scope.id}/`, payload);
       } else {
-        await api.post(`/projects/${projectId}/scopes/`, { name, scope_type: type, parent: parentId });
+        await api.post(`/projects/${projectId}/scopes/`, { ...payload, parent: parentId });
       }
       onSaved();
       onClose();
@@ -64,7 +84,7 @@ export function ScopeFormModal({ open, projectId, parentId, scope, defaultType =
   return (
     <Modal
       open={open}
-      title={isEdit ? "Rename scope" : "Add scope"}
+      title={isEdit ? "Edit scope" : "Add scope"}
       onClose={onClose}
       footer={
         <>
@@ -79,6 +99,16 @@ export function ScopeFormModal({ open, projectId, parentId, scope, defaultType =
         <Select label="Level" options={SCOPE_TYPES} value={type} onChange={(e) => setType(e.target.value)} />
         <Input label="Name" name="name" required autoFocus placeholder="e.g. Substructure / Zone A"
           value={name} onChange={(e) => setName(e.target.value)} />
+        {type === "phase" && (
+          <Select label="Discipline" options={DISCIPLINES} value={discipline}
+            onChange={(e) => setDiscipline(e.target.value)} />
+        )}
+        <div className={styles.row2}>
+          <Input label="Planned start" type="date" name="planned_start"
+            value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} />
+          <Input label="Planned finish" type="date" name="planned_finish"
+            value={plannedFinish} onChange={(e) => setPlannedFinish(e.target.value)} />
+        </div>
         {error && <p className="formError">{error}</p>}
       </form>
     </Modal>

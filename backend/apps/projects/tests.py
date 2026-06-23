@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
-from .imports import parse_sheet
+from .imports import _guess_discipline, parse_sheet
 from .models import Project
 
 
@@ -41,6 +41,13 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(len(sheet["tasks"]), 1)
         self.assertEqual(sheet["tasks"][0]["weight"], 1.0)
         self.assertEqual(sheet["tasks"][0]["cells"], [100.0, 0.0])
+
+    def test_guesses_discipline_from_phase_name(self):
+        self.assertEqual(_guess_discipline("الاعمال الكهربائية"), "electrical")
+        self.assertEqual(_guess_discipline("اعمال الخرسانة"), "concrete")
+        self.assertEqual(_guess_discipline("اعمال التشطيبات"), "architecture")
+        self.assertEqual(_guess_discipline("شبكات الصرف الصحي"), "mechanical")
+        self.assertEqual(_guess_discipline("Random unrelated text"), "")
 
 STRONG_PW = "Str0ngPassw0rd!"
 
@@ -145,6 +152,21 @@ class ProjectApiTests(TestCase):
         # activities are lazy-loaded per scope
         acts = self.client.get(f"{base}/scopes/{phase['id']}/activities/").json()
         self.assertEqual(len(acts), 2)
+
+    def test_scope_dates_and_discipline_round_trip(self):
+        p = Project.objects.create(company=self.company_a, name="Resort3", project_type="commercial")
+        self.login("admin@acme.com")
+        base = f"/api/projects/{p.id}"
+        resp = self.client.post(f"{base}/scopes/", {
+            "scope_type": "phase", "name": "Electrical works", "discipline": "electrical",
+            "planned_start": "2026-01-01", "planned_finish": "2026-03-01",
+        }, content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        body = resp.json()
+        self.assertEqual(body["discipline"], "electrical")
+        self.assertEqual(body["discipline_display"], "Electrical")
+        self.assertEqual(body["planned_start"], "2026-01-01")
+        self.assertEqual(body["planned_finish"], "2026-03-01")
 
     def test_update_activity_progress_recomputes(self):
         p = Project.objects.create(company=self.company_a, name="Bridge", project_type="infrastructure")

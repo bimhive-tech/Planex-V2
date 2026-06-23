@@ -140,6 +140,8 @@ export interface ProgressBreakdown {
 
 export type ScopeType = "phase" | "zone" | "building" | "area";
 
+export type ScopeDiscipline = "concrete" | "architecture" | "electrical" | "mechanical" | "other" | "";
+
 export interface Scope {
   id: string;
   parent: string | null;
@@ -147,6 +149,11 @@ export interface Scope {
   scope_type_display: string;
   name: string;
   sort_order: number;
+  planned_start: string | null;
+  planned_finish: string | null;
+  revised_finish: string | null;
+  discipline: ScopeDiscipline;
+  discipline_display: string;
 }
 
 export interface Activity {

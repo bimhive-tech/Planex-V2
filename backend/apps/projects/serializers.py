@@ -105,16 +105,24 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
 # ── Work hierarchy ─────────────────────────────────────────────────────────
 class ScopeSerializer(serializers.ModelSerializer):
     scope_type_display = serializers.CharField(source="get_scope_type_display", read_only=True)
+    discipline_display = serializers.CharField(source="get_discipline_display", read_only=True)
 
     class Meta:
         model = ProjectScope
-        fields = ["id", "parent", "scope_type", "scope_type_display", "name", "sort_order"]
+        fields = [
+            "id", "parent", "scope_type", "scope_type_display", "name", "sort_order",
+            "planned_start", "planned_finish", "revised_finish",
+            "discipline", "discipline_display",
+        ]
 
 
 class ScopeWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectScope
-        fields = ["parent", "scope_type", "name", "sort_order"]
+        fields = [
+            "parent", "scope_type", "name", "sort_order",
+            "planned_start", "planned_finish", "revised_finish", "discipline",
+        ]
 
 
 class ActivitySerializer(serializers.ModelSerializer):

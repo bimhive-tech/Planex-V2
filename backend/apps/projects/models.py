@@ -264,6 +264,13 @@ class ProjectScope(TimestampedModel):
         AREA = "area", "Area"
         TASK = "task", "Task"
 
+    class Discipline(models.TextChoices):
+        CONCRETE = "concrete", "Concrete"
+        ARCHITECTURE = "architecture", "Architecture"
+        ELECTRICAL = "electrical", "Electrical"
+        MECHANICAL = "mechanical", "Mechanical"
+        OTHER = "other", "Other"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_scopes")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="scopes")
@@ -271,6 +278,19 @@ class ProjectScope(TimestampedModel):
     scope_type = models.CharField(max_length=20, choices=ScopeType.choices)
     name = models.CharField(max_length=180)
     sort_order = models.PositiveIntegerField(default=0)
+
+    # Optional own schedule (any node may carry one, independent of the
+    # project's dates) — backs per-area duration/time-performance and the
+    # Gantt-style report section. Blank = falls back to the project's dates.
+    planned_start = models.DateField(null=True, blank=True)
+    planned_finish = models.DateField(null=True, blank=True)
+    revised_finish = models.DateField(null=True, blank=True)
+
+    # Trade tag — meaningful on a Phase node (a zone-tracker phase usually IS
+    # one trade's work package); lets the report split one building's progress
+    # into Concrete/Architecture/Electrical/Mechanical columns without adding
+    # another tree level. Blank = unclassified.
+    discipline = models.CharField(max_length=20, choices=Discipline.choices, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["project", "parent"])]

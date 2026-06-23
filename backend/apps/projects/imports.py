@@ -43,6 +43,32 @@ MAX_TASKS_PER_ZONE = 2000
 MAX_SUBZONES_PER_ZONE = 300
 
 
+# Phase names in these trackers are usually already one trade's work package
+# (e.g. "الاعمال الكهربائية") — a quick keyword guess saves having to tag
+# hundreds of imported phases by hand. Blank ("") means unclassified; the
+# user can still correct it via the phase's edit form.
+_DISCIPLINE_KEYWORDS = {
+    ProjectScope.Discipline.CONCRETE: ["خرسان", "حفر", "اساسات", "هيكل", "concrete", "structure"],
+    ProjectScope.Discipline.ARCHITECTURE: [
+        "تشطيب", "بياض", "دهان", "سيراميك", "رخام", "نجارة", "حدادة", "بلاط", "ارضيات",
+        "architecture", "finish",
+    ],
+    ProjectScope.Discipline.ELECTRICAL: ["كهرب", "تيار خفيف", "اضاءة", "انارة", "electrical"],
+    ProjectScope.Discipline.MECHANICAL: [
+        "صحي", "صرف", "تكييف", "ميكانيك", "حريق", "مكافحة الحريق", "تهوية", "مياه", "ري",
+        "mechanical", "plumbing", "hvac",
+    ],
+}
+
+
+def _guess_discipline(phase_name: str) -> str:
+    name = (phase_name or "").lower()
+    for discipline, keywords in _DISCIPLINE_KEYWORDS.items():
+        if any(k in name for k in keywords):
+            return discipline
+    return ""
+
+
 def _is_num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
@@ -210,7 +236,8 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
             subzone_total += 1
             for pi, ph in enumerate(order):
                 phase = Scope(company=company, project=project, parent=subzone,
-                              scope_type=Scope.ScopeType.PHASE, name=ph, sort_order=pi)
+                              scope_type=Scope.ScopeType.PHASE, name=ph, sort_order=pi,
+                              discipline=_guess_discipline(ph))
                 phases.append(phase)
                 for task in by_phase[ph]:
                     val = task["cells"][c]
