@@ -28,6 +28,10 @@ class Permission(models.TextChoices):
     DELETE_PROGRESS_IMAGES = "delete_progress_images", "Delete progress images"
     EXPORT_REPORTS = "export_reports", "Export reports"
 
+    # Finances (money is sensitive — gated separately from general project access).
+    VIEW_FINANCES = "view_finances", "View finances"
+    MANAGE_FINANCES = "manage_finances", "Manage finances"
+
 
 # Convenience groupings.
 ALL_PERMISSIONS = [p.value for p in Permission]
@@ -67,6 +71,10 @@ PERMISSION_GROUPS = [
         Permission.APPROVE_PROGRESS.value,
         Permission.DELETE_PROGRESS_IMAGES.value,
         Permission.EXPORT_REPORTS.value,
+    ]),
+    ("Finances", [
+        Permission.VIEW_FINANCES.value,
+        Permission.MANAGE_FINANCES.value,
     ]),
     ("Platform", PLATFORM_PERMISSIONS),
 ]

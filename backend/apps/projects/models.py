@@ -393,3 +393,109 @@ class ProgressImage(TimestampedModel):
 
     def __str__(self):
         return self.caption or "progress photo"
+
+
+class CashFlowEntry(TimestampedModel):
+    """One month's planned vs actual cash for a project. The user enters both
+    numbers (we don't compute them); the report charts them as-is and can add
+    them up for a cumulative S-curve."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="cashflow_entries")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="cashflow_entries")
+    month = models.DateField()  # first day of the month it represents
+    planned = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    actual = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["project", "month"], name="uniq_cashflow_month"),
+        ]
+        indexes = [models.Index(fields=["project", "month"])]
+        ordering = ["month"]
+
+    def __str__(self):
+        return f"{self.project_id} {self.month:%Y-%m}"
+
+
+def invoice_image_key(instance, filename):
+    """Stable private R2 key for an invoice scan/photo."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"projects/{instance.project_id}/invoices/{uuid.uuid4()}.{ext}"
+
+
+class Invoice(TimestampedModel):
+    """A project invoice / extract (مستخلص): a value, a name/reason, and an
+    optional scan. Surfaced in the report's invoices section."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="invoices")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="invoices")
+    name = models.CharField(max_length=200)  # reason / title of the invoice
+    value = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    date = models.DateField(null=True, blank=True)
+    image = models.ImageField(upload_to=invoice_image_key, null=True, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_invoices")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["project", "sort_order"]),
+            models.Index(fields=["project", "-date"]),
+        ]
+        ordering = ["sort_order", "-date", "-created_at"]
+
+    def __str__(self):
+        return self.name
+
+
+def submittal_attachment_key(instance, filename):
+    """Stable private R2 key for a submittal attachment (drawing/PDF/image)."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"projects/{instance.project_id}/submittals/{uuid.uuid4()}.{ext}"
+
+
+class Submittal(TimestampedModel):
+    """A shop-drawing or material submittal and its approval status (the report's
+    «موقف الرسومات / موقف اعتماد المواد» section)."""
+
+    class Type(models.TextChoices):
+        SHOP_DRAWING = "shop_drawing", "Shop Drawing"
+        MATERIAL = "material", "Material"
+
+    class Discipline(models.TextChoices):
+        CONCRETE = "concrete", "Concrete"
+        ARCHITECTURE = "architecture", "Architecture"
+        ELECTRICAL = "electrical", "Electrical"
+        MECHANICAL = "mechanical", "Mechanical"
+        OTHER = "other", "Other"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        UNDER_REVIEW = "under_review", "Under Review"
+        APPROVED = "approved", "Approved"
+        APPROVED_WITH_COMMENTS = "approved_with_comments", "Approved with comments"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="submittals")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="submittals")
+    title = models.CharField(max_length=200)
+    submittal_type = models.CharField(max_length=20, choices=Type.choices, default=Type.SHOP_DRAWING)
+    discipline = models.CharField(max_length=20, choices=Discipline.choices, default=Discipline.OTHER)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING)
+    reference = models.CharField(max_length=80, blank=True)
+    date = models.DateField(null=True, blank=True)  # submission date
+    attachment = models.FileField(upload_to=submittal_attachment_key, null=True, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_submittals")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["project", "sort_order"]),
+            models.Index(fields=["project", "status"]),
+        ]
+        ordering = ["sort_order", "-date", "-created_at"]
+
+    def __str__(self):
+        return self.title

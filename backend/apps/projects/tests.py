@@ -394,3 +394,90 @@ class ProjectApiTests(TestCase):
         emails = {u["email"] for u in self.client.get(f"/api/projects/{p.id}/assignable-users/").json()}
         self.assertIn("admin@acme.com", emails)
         self.assertNotIn("viewer@acme.com", emails)  # already a member
+
+
+class FinanceSubmittalApiTests(TestCase):
+    """Cash flow + invoices are gated by the dedicated finance permissions;
+    submittals follow the normal view/manage-projects gates."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        admin_role = Role.objects.create(
+            company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.admin = User.objects.create_user(email="fa@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.admin, role=admin_role)
+
+        # Can view the project + finances, but cannot manage anything.
+        fin_role = Role.objects.create(
+            company=self.company, name="FinViewer",
+            permissions=[Permission.VIEW_PROJECTS.value, Permission.VIEW_FINANCES.value])
+        self.fin_viewer = User.objects.create_user(email="fv@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.fin_viewer, role=fin_role)
+
+        # Project access only — no finance permission at all.
+        plain_role = Role.objects.create(
+            company=self.company, name="Plain", permissions=[Permission.VIEW_PROJECTS.value])
+        self.plain = User.objects.create_user(email="pl@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.plain, role=plain_role)
+
+        self.project = Project.objects.create(company=self.company, name="Tower", project_type="commercial")
+
+    def login(self, email):
+        resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_finance_hidden_without_view_finances(self):
+        self.login("pl@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/cashflow/").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/invoices/").status_code, 403)
+
+    def test_finance_viewer_can_read_not_write(self):
+        self.login("fv@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/cashflow/").status_code, 200)
+        resp = self.client.put(f"/api/projects/{self.project.id}/cashflow/",
+                               [{"month": "2026-01-15", "planned": 100, "actual": 80}],
+                               content_type="application/json")
+        self.assertEqual(resp.status_code, 403)  # needs MANAGE_FINANCES
+
+    def test_cashflow_bulk_replace_normalises_month(self):
+        self.login("fa@acme.com")
+        resp = self.client.put(f"/api/projects/{self.project.id}/cashflow/",
+                               [{"month": "2026-01-15", "planned": 100, "actual": 80},
+                                {"month": "2026-02-01", "planned": 200, "actual": 150}],
+                               content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        entries = resp.json()["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["month"], "2026-01-01")  # snapped to 1st of month
+        # Replacing again wipes the old rows.
+        resp = self.client.put(f"/api/projects/{self.project.id}/cashflow/",
+                               [{"month": "2026-03-01", "planned": 50, "actual": 0}],
+                               content_type="application/json")
+        self.assertEqual(len(resp.json()["entries"]), 1)
+
+    def test_invoice_crud(self):
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/invoices/",
+                                {"name": "Extract #1", "value": "1500.50", "date": "2026-02-01"})
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertFalse(resp.json()["has_image"])
+        iid = resp.json()["id"]
+        self.assertEqual(len(self.client.get(f"/api/projects/{self.project.id}/invoices/").json()), 1)
+        self.assertEqual(self.client.delete(f"/api/projects/{self.project.id}/invoices/{iid}/").status_code, 204)
+
+    def test_submittal_uses_project_perms_not_finance(self):
+        # Plain project-viewer (no finance perm) CAN read submittals...
+        self.login("pl@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 200)
+        # ...but cannot create (needs MANAGE_PROJECTS).
+        resp = self.client.post(f"/api/projects/{self.project.id}/submittals/", {"title": "Door schedule"})
+        self.assertEqual(resp.status_code, 403)
+
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/submittals/",
+                                {"title": "Door schedule", "submittal_type": "shop_drawing",
+                                 "discipline": "architecture", "status": "approved"})
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["status_display"], "Approved")
+        self.assertEqual(resp.json()["discipline_display"], "Architecture")
