@@ -154,6 +154,85 @@ def _zone_rows(project, scope_ids=None, progress=None):
     return rows
 
 
+def _scope_planned_progress(scope, project, as_of):
+    """Time-based planned % for one scope's own dates, falling back to the
+    project's when the scope doesn't carry its own (most don't, yet)."""
+    start = scope.planned_start or project.planned_start
+    finish = scope.planned_finish or project.planned_finish
+    if not (start and finish and as_of and finish > start):
+        return None
+    frac = (as_of - start).days / (finish - start).days
+    return round(max(0.0, min(1.0, frac)) * 100, 1)
+
+
+def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=None):
+    """Project -> Zone -> Subzone progress rollup (actual / previous / planned %)
+    for the report's nested breakdown table. One level deeper than `_zone_rows`,
+    using each scope's own planned dates when set. `prev_scopes` is the previous
+    snapshot's full scope_id->% map (blank on snapshots taken before that existed,
+    so deeper "previous" values may legitimately be missing)."""
+    predicate, _ = _scope_context(project, scope_ids)
+    prev_scopes = prev_scopes or {}
+
+    direct_w, direct_pw = {}, {}
+    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        if not predicate(sid, aid):
+            continue
+        sid = str(sid)
+        w = float(weight)
+        prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
+        direct_w[sid] = direct_w.get(sid, 0.0) + w
+        direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
+
+    scopes = {str(s.id): s for s in project.scopes.all()}
+    children = {}
+    for s in scopes.values():
+        if s.parent_id:
+            children.setdefault(str(s.parent_id), []).append(str(s.id))
+
+    weight, pweight = {}, {}
+
+    def agg(sid):
+        w, pw = direct_w.get(sid, 0.0), direct_pw.get(sid, 0.0)
+        for cid in children.get(sid, []):
+            cw, cpw = agg(cid)
+            w += cw
+            pw += cpw
+        weight[sid], pweight[sid] = w, pw
+        return w, pw
+
+    def pct(sid):
+        w = weight.get(sid, 0.0)
+        return round(pweight[sid] / w, 1) if w else None
+
+    zones = sorted(
+        (s for s in scopes.values() if s.parent_id is None and s.scope_type == ProjectScope.ScopeType.ZONE),
+        key=lambda s: (s.sort_order, s.name),
+    )
+
+    rows = []
+    for zone in zones:
+        zid = str(zone.id)
+        agg(zid)
+        if not weight.get(zid):
+            continue
+        sub_rows = []
+        for cid in sorted(children.get(zid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+            if not weight.get(cid):
+                continue
+            child = scopes[cid]
+            sub_rows.append({
+                "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
+                "planned": _scope_planned_progress(child, project, as_of),
+            })
+        rows.append({
+            "name": zone.name, "actual": pct(zid), "previous": prev_scopes.get(zid),
+            "planned": _scope_planned_progress(zone, project, as_of),
+            "children": sub_rows,
+        })
+    return rows
+
+
 def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
     """The schedule-style grid per zone: subzones as columns, tasks (grouped by
     phase) as rows, each cell an activity's progress. Honours the scope selection
@@ -221,7 +300,7 @@ def build_report_context(report):
         project.milestones.order_by("sort_order", "date").values("title", "date", "status")
     )
     snapshots = list(
-        project.snapshots.order_by("date").values("date", "overall_progress", "source", "zones")
+        project.snapshots.order_by("date").values("date", "overall_progress", "source", "zones", "scopes")
     )
 
     # Previous actual = the most recent snapshot strictly before the report date.
@@ -229,6 +308,7 @@ def build_report_context(report):
         (s for s in reversed(snapshots) if s["date"] and s["date"] < as_of), None
     )
     prev_zone = {z.get("name"): z.get("progress") for z in (prev_snap["zones"] or [])} if prev_snap else {}
+    prev_scopes_map = (prev_snap.get("scopes") or {}) if prev_snap else {}
     prev_overall = float(prev_snap["overall_progress"]) if prev_snap else None
 
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
@@ -237,6 +317,9 @@ def build_report_context(report):
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
+
+    # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
+    hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
@@ -309,6 +392,7 @@ def build_report_context(report):
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
+        "hierarchy": hierarchy,
         "zone_grids": zone_grids,
         # Internal: as-of progress map so the PDF's lazy grid matches the report
         # date (None when the project has no dated entries).

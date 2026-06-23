@@ -195,7 +195,7 @@ def _save_snapshot(project, *, date, source):
     ProgressSnapshot.objects.update_or_create(
         project=project, date=date,
         defaults={"company": project.company, "overall_progress": project_overall_progress(project),
-                  "breakdown": breakdown, "zones": zones, "source": source[:200]},
+                  "breakdown": breakdown, "zones": zones, "scopes": progress, "source": source[:200]},
     )
 
 

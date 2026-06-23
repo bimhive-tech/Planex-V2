@@ -106,6 +106,10 @@ class ProgressSnapshot(TimestampedModel):
     overall_progress = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     breakdown = models.JSONField(default=dict, blank=True)   # {total, completed, in_progress, not_started}
     zones = models.JSONField(default=list, blank=True)        # [{name, progress}]
+    # Every scope's rolled-up progress at this date ({scope_id: progress}) — lets
+    # the report's hierarchy table show a "previous %" below the zone level, not
+    # just at the top. Blank on snapshots taken before this existed.
+    scopes = models.JSONField(default=dict, blank=True)
     source = models.CharField(max_length=200, blank=True)     # e.g. the workbook file name
 
     class Meta:

@@ -155,6 +155,18 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
           </table>
         </>
       )}
+      {on("sections.hierarchy_progress") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.hierarchy_progress", "Progress Breakdown")}</h2>
+          <table className={styles.previewTable}>
+            <thead><tr><th>{g("labels.col_zone", "Zone")}</th><th>{g("labels.col_actual", "Actual %")}</th><th>{g("labels.col_previous", "Previous %")}</th><th>{g("labels.col_planned", "Planned %")}</th></tr></thead>
+            <tbody>
+              <tr><td>{"{{zone}}"}</td><td>92%</td><td>88%</td><td>100%</td></tr>
+              <tr className={styles.zebra}><td>{"  {{subzone}}"}</td><td>90%</td><td>85%</td><td>100%</td></tr>
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

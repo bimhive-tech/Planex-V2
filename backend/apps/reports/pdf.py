@@ -269,6 +269,54 @@ def _data_table(cfg, styles, header, rows, col_widths=None):
     return t
 
 
+def _pct_or_dash(v):
+    return f"{v:.1f}%" if v is not None else "—"
+
+
+def _hierarchy_table(cfg, styles, rows, labels, rtl):
+    """Project -> Zone -> Subzone rollup. Zone rows are bold; subzone rows are
+    indented one level — same shape as the report's nested breakdown table."""
+    c, tcfg = cfg["colors"], cfg["table"]
+    head = ParagraphStyle("hih", parent=styles["body"], fontName=BOLD,
+                          textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
+    name_style = ParagraphStyle("hin", parent=styles["body"], alignment=TA_RIGHT if rtl else TA_LEFT)
+    name_bold = ParagraphStyle("hinb", parent=name_style, fontName=BOLD)
+    pct_style = ParagraphStyle("hip", parent=styles["body"], alignment=TA_CENTER)
+
+    header = [labels["col_zone"], labels["col_actual"], labels["col_previous"], labels["col_planned"]]
+    data = [[Paragraph(shape(h), head) for h in header]]
+    zebra_rows = []
+    for zone in rows:
+        zebra_rows.append(len(data))
+        data.append([
+            Paragraph(shape(zone["name"]), name_bold),
+            Paragraph(_pct_or_dash(zone["actual"]), pct_style),
+            Paragraph(_pct_or_dash(zone["previous"]), pct_style),
+            Paragraph(_pct_or_dash(zone["planned"]), pct_style),
+        ])
+        for child in zone["children"]:
+            indented = "    " + shape(child["name"])
+            data.append([
+                Paragraph(indented, name_style),
+                Paragraph(_pct_or_dash(child["actual"]), pct_style),
+                Paragraph(_pct_or_dash(child["previous"]), pct_style),
+                Paragraph(_pct_or_dash(child["planned"]), pct_style),
+            ])
+
+    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm], repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for r in zebra_rows:
+        style.append(("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_row_alt"])))
+    if tcfg.get("border"):
+        style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def _storage_image_flowable(key, max_width, max_height):
     """Build a contained ReportLab Image flowable from private storage."""
     if not key:
@@ -604,6 +652,10 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in ctx["zones"]]
         story.append(_data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
                                  col_widths=[None, 40 * mm]))
+
+    if sections.get("hierarchy_progress") and ctx.get("hierarchy"):
+        story += major(labels["hierarchy_progress"])
+        story.append(_hierarchy_table(cfg, styles, ctx["hierarchy"], labels, rtl))
 
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)

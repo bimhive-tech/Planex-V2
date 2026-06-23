@@ -103,6 +103,49 @@ class PdfTests(SimpleTestCase):
         self.assertTrue(build_report_pdf(report, _sample_ctx()).startswith(b"%PDF"))
 
 
+class HierarchyRowsTests(TestCase):
+    """`_hierarchy_rows` rolls up Project -> Zone -> Subzone (one level deeper
+    than the existing zone table), using each scope's own dates when set."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+        self.zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A")
+        self.sub = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Building 1",
+            parent=self.zone, planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 7, 1))
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=self.sub,
+            name="Task", weight=1, progress_percent=40)
+
+    def test_rolls_up_zone_and_subzone_with_own_dates(self):
+        from .services import _hierarchy_rows
+
+        as_of = datetime.date(2026, 4, 1)  # 91/181 days into Building 1's own span
+        rows = _hierarchy_rows(self.project, as_of=as_of)
+        self.assertEqual(len(rows), 1)
+        zone_row = rows[0]
+        self.assertEqual(zone_row["name"], "Zone A")
+        self.assertEqual(zone_row["actual"], 40.0)
+        self.assertEqual(len(zone_row["children"]), 1)
+        sub_row = zone_row["children"][0]
+        self.assertEqual(sub_row["name"], "Building 1")
+        self.assertEqual(sub_row["actual"], 40.0)
+        self.assertAlmostEqual(sub_row["planned"], 49.7, delta=0.5)  # 90/181 days
+
+    def test_uses_previous_scopes_map_when_given(self):
+        from .services import _hierarchy_rows
+
+        rows = _hierarchy_rows(self.project, prev_scopes={str(self.sub.id): 25.0})
+        self.assertEqual(rows[0]["children"][0]["previous"], 25.0)
+        self.assertIsNone(rows[0]["previous"])  # zone itself wasn't in the map
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")
