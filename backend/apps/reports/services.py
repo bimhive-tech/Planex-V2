@@ -21,21 +21,35 @@ def _planned_progress(project, as_of):
     return round(max(0.0, min(1.0, frac)) * 100, 1)
 
 
-def _duration(project, as_of):
-    """Contract duration / elapsed / remaining / delay in calendar days."""
-    s, f = project.planned_start, project.planned_finish
+def _duration_for(s, f, revised_finish, as_of):
+    """Duration / elapsed / remaining / delay in calendar days for any
+    start+finish pair — shared by the project-level and per-zone duration."""
     if not (s and f and f > s):
         return None
     total = (f - s).days
     elapsed = max(0, min(total, (as_of - s).days)) if as_of else 0
     remaining = max(0, total - elapsed)
-    if project.revised_finish and project.revised_finish > f:
-        delay = (project.revised_finish - f).days
+    if revised_finish and revised_finish > f:
+        delay = (revised_finish - f).days
     elif as_of and as_of > f:
         delay = (as_of - f).days
     else:
         delay = 0
     return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
+
+
+def _duration(project, as_of):
+    """Contract duration / elapsed / remaining / delay in calendar days."""
+    return _duration_for(project.planned_start, project.planned_finish, project.revised_finish, as_of)
+
+
+def _zone_duration(zone, project, as_of):
+    """Same as `_duration`, but using the zone's own dates when it carries
+    them — falls back to the project's otherwise (most zones don't, yet)."""
+    s = zone.planned_start or project.planned_start
+    f = zone.planned_finish or project.planned_finish
+    revised = zone.revised_finish or project.revised_finish
+    return _duration_for(s, f, revised, as_of)
 
 
 def _breakdown(project, progress=None):
@@ -226,7 +240,7 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
                 "planned": _scope_planned_progress(child, project, as_of),
             })
         rows.append({
-            "name": zone.name, "actual": pct(zid), "previous": prev_scopes.get(zid),
+            "id": zid, "name": zone.name, "actual": pct(zid), "previous": prev_scopes.get(zid),
             "planned": _scope_planned_progress(zone, project, as_of),
             "children": sub_rows,
         })
@@ -273,6 +287,49 @@ def _discipline_rows(project, scope_ids=None, progress=None):
             row[d] = round(unit_pw[uid][d] / w, 1) if w else None
         rows.append(row)
     return rows
+
+
+def _subtree_ids(project, root_id):
+    """All scope ids in the subtree rooted at root_id (inclusive)."""
+    children = {}
+    for sid, pid in project.scopes.values_list("id", "parent_id"):
+        if pid:
+            children.setdefault(str(pid), []).append(str(sid))
+    out, stack = [], [str(root_id)]
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        stack.extend(children.get(node, []))
+    return out
+
+
+def _area_dashboards(project, hierarchy, as_of):
+    """Per-zone dashboard data: its own duration/time-performance (falls back
+    to the project's when it has none of its own) and a handful of recent
+    progress photos from its subtree. The planned-vs-actual bar chart is drawn
+    straight from `hierarchy`'s children, so this only adds what that doesn't."""
+    from apps.projects.models import ProgressImage
+
+    zone_ids = [z["id"] for z in hierarchy]
+    zones_by_id = {str(s.id): s for s in project.scopes.filter(id__in=zone_ids)}
+
+    out = []
+    for z in hierarchy:
+        zone = zones_by_id.get(z["id"])
+        if not zone:
+            continue
+        subtree = _subtree_ids(project, z["id"])
+        photos = list(
+            ProgressImage.objects.filter(entry__project=project, entry__activity__scope_id__in=subtree)
+            .order_by("-entry__date", "-created_at")
+            .values("image", "caption")[:4]
+        )
+        out.append({
+            "name": z["name"], "actual": z["actual"], "planned": z["planned"],
+            "children": z["children"], "duration": _zone_duration(zone, project, as_of),
+            "photos": photos,
+        })
+    return out
 
 
 def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
@@ -363,6 +420,7 @@ def build_report_context(report):
     # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
     discipline = _discipline_rows(project, report.scope_ids, progress)
+    area_dashboards = _area_dashboards(project, hierarchy, as_of)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
@@ -437,6 +495,7 @@ def build_report_context(report):
         "zones": zones,
         "hierarchy": hierarchy,
         "discipline": discipline,
+        "area_dashboards": area_dashboards,
         "zone_grids": zone_grids,
         # Internal: as-of progress map so the PDF's lazy grid matches the report
         # date (None when the project has no dated entries).

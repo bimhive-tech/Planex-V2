@@ -33,10 +33,12 @@ from .richtext import html_to_flowables
 from .services import _zone_grids
 from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, shape
 from .pdf_charts import (
+    area_units_chart,
     duration_pie,
     overall_donut,
     planned_actual_chart,
     scurve_chart,
+    zone_duration_pie,
     zone_progress_chart,
 )
 from .pdf_layout import BORDER_INSET, draw_cover, draw_page_furniture, frame_rect
@@ -440,6 +442,32 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
     return flow
 
 
+def _area_dashboard_section(cfg, styles, areas, width, labels):
+    """One page per zone: a planned-vs-actual bar for its sub-units, a duration
+    pie (the zone's own dates when set, else the project's), and a few recent
+    photos from its subtree. Only the first zone's heading is TOC-listed (one
+    entry per zone would clutter it on projects with many zones) — same trick
+    as the detailed grid section."""
+    flow = []
+    for i, area in enumerate(areas):
+        flow.append(PageBreak())
+        flow += _heading(styles, labels.get("area_dashboards", "Area Dashboards"), listed=(i == 0))
+        flow += _sub_heading(styles, area["name"])
+        chart = area_units_chart(cfg, area, width, labels)
+        if chart:
+            flow += [chart, Spacer(1, 6)]
+        dur = area.get("duration")
+        if dur:
+            pie = zone_duration_pie(cfg, dur, width, labels)
+            table = _data_table(cfg, styles,
+                [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
+                [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
+            flow += [pie or Spacer(1, 1), table, Spacer(1, 8)]
+        if area.get("photos"):
+            flow.append(_photo_page_table(cfg, styles, area["photos"], width, 70 * mm))
+    return flow
+
+
 def draw_dash(canvas, doc):
     """Landscape page chrome for the executive dashboard: border + title + page #."""
     cfg, ctx = doc.cfg, doc.ctx
@@ -666,6 +694,9 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             for r in ctx["discipline"]
         ]
         story.append(_data_table(cfg, styles, disc_header, disc_rows))
+
+    if sections.get("area_dashboards") and ctx.get("area_dashboards"):
+        story += _area_dashboard_section(cfg, styles, ctx["area_dashboards"], fw, labels)
 
     if sections.get("detailed_progress") and ctx.get("zone_grids"):
         story += _grid_section(cfg, styles, ctx["zone_grids"], fw, labels, rtl)

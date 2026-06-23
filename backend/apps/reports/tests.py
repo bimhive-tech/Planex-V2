@@ -188,6 +188,43 @@ class DisciplineRowsTests(TestCase):
         self.assertIsNone(row["mechanical"])  # untagged phase's work isn't guessed into a column
 
 
+class AreaDashboardsTests(TestCase):
+    """`_area_dashboards` adds each zone's own duration (falling back to the
+    project's) and recent subtree photos on top of the hierarchy rows."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProgressEntry, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+        self.zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A",
+            planned_start=datetime.date(2026, 2, 1), planned_finish=datetime.date(2026, 8, 1))
+        activity = Activity.objects.create(
+            company=self.company, project=self.project, scope=self.zone,
+            name="Task", weight=1, progress_percent=50)
+        entry = ProgressEntry.objects.create(
+            company=self.company, project=self.project, activity=activity,
+            date=datetime.date(2026, 4, 1), progress_percent=50)
+        from apps.projects.models import ProgressImage
+        ProgressImage.objects.create(company=self.company, entry=entry, caption="Pour")
+
+    def test_uses_zone_dates_and_finds_subtree_photos(self):
+        from .services import _area_dashboards, _hierarchy_rows
+
+        as_of = datetime.date(2026, 5, 1)
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        areas = _area_dashboards(self.project, hierarchy, as_of)
+        self.assertEqual(len(areas), 1)
+        area = areas[0]
+        self.assertEqual(area["name"], "Zone A")
+        self.assertEqual(area["duration"]["total"], 181)  # Zone A's own Feb-Aug span, not the project's
+        self.assertEqual(len(area["photos"]), 1)
+        self.assertEqual(area["photos"][0]["caption"], "Pour")
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")

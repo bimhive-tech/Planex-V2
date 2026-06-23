@@ -178,6 +178,20 @@ function ProgressPage({ g, on }: { g: G; on: On }) {
           </table>
         </>
       )}
+      {on("sections.area_dashboards") && (
+        <>
+          <h2 className={styles.previewTitle}>{g("labels.area_dashboards", "Area Dashboards")}</h2>
+          <div className={styles.chartRow}>
+            <span className={`${styles.bar} ${styles.barPlanned}`} />
+            <span className={`${styles.bar} ${styles.barActual}`} />
+            <span className={`${styles.bar} ${styles.barPlanned}`} />
+            <span className={`${styles.bar} ${styles.barActual}`} />
+          </div>
+          <div className={styles.photoGrid}>
+            {[0, 1].map((i) => <div key={i} className={styles.photoCell}>Photo {i + 1}</div>)}
+          </div>
+        </>
+      )}
     </div>
   );
 }

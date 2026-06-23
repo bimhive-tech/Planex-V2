@@ -115,6 +115,8 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "sections.zone_progress", label: "Show zone table", type: "toggle" },
       { path: "sections.hierarchy_progress", label: "Show zone/subzone breakdown table", type: "toggle" },
       { path: "sections.discipline_progress", label: "Show progress-by-trade table", type: "toggle" },
+      { path: "sections.area_dashboards", label: "Show per-area dashboard pages", type: "toggle" },
+      { path: "labels.area_dashboards", label: "Area dashboard heading", type: "text" },
       { path: "sections.detailed_progress", label: "Show detailed activity tables", type: "toggle" },
       { path: "labels.detailed_progress", label: "Detailed heading", type: "text" },
       { path: "labels.col_task", label: "Column: Task", type: "text" },

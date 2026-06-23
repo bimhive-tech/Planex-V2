@@ -91,9 +91,48 @@ def planned_actual_chart(cfg, ctx, width, labels):
     return d
 
 
-def duration_pie(cfg, ctx, width, labels):
-    """Project duration vs delay days (reference duration pie)."""
-    dur = ctx.get("duration")
+def area_units_chart(cfg, area, width, labels):
+    """Grouped planned-vs-actual bars per sub-unit within one zone (the
+    per-area dashboard's chart) — same shape as `planned_actual_chart`, just
+    sourced from one zone's children instead of the project's top-level zones.
+    Skipped above a sane bar count (a zone with hundreds of subzones would
+    just produce an unreadable chart; the breakdown table already covers it)."""
+    units = [u for u in area.get("children", []) if u.get("planned") is not None][:15]
+    if not units or len(area.get("children", [])) > 30:
+        return None
+    height = 78 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 24, 30
+    chart.width, chart.height = width - 48, height - 54
+    chart.data = [
+        [round(u["planned"], 1) for u in units],
+        [round(u["actual"], 1) for u in units],
+    ]
+    chart.categoryAxis.categoryNames = [shape(u["name"]) for u in units]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.angle = 30
+    chart.categoryAxis.labels.boxAnchor = "ne"
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 7
+    chart.groupSpacing = 8
+    chart.barSpacing = 1
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 6
+    chart.barLabelFormat = "%0.0f%%"
+    chart.barLabels.nudge = 6
+    d.add(chart)
+    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width - 150, height - 8))
+    return d
+
+
+def _duration_pie_for(cfg, dur, width, labels):
     if not dur:
         return None
     height = 62 * mm
@@ -112,6 +151,16 @@ def duration_pie(cfg, ctx, width, labels):
     d.add(_legend([(cfg["colors"]["chart_planned"], labels["duration_days"]),
                    (cfg["colors"]["chart_actual"], labels["delay_days"])], width - 150, height - 8))
     return d
+
+
+def duration_pie(cfg, ctx, width, labels):
+    """Project duration vs delay days (reference duration pie)."""
+    return _duration_pie_for(cfg, ctx.get("duration"), width, labels)
+
+
+def zone_duration_pie(cfg, dur, width, labels):
+    """Same pie, for one zone's own duration (the per-area dashboard)."""
+    return _duration_pie_for(cfg, dur, width, labels)
 
 
 def overall_donut(cfg, ctx, width, labels):
