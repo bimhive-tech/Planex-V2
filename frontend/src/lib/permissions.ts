@@ -13,6 +13,8 @@ export const Permission = {
   APPROVE_PROGRESS: "approve_progress",
   DELETE_PROGRESS_IMAGES: "delete_progress_images",
   EXPORT_REPORTS: "export_reports",
+  VIEW_FINANCES: "view_finances",
+  MANAGE_FINANCES: "manage_finances",
 } as const;
 
 export type PermissionKey = (typeof Permission)[keyof typeof Permission];

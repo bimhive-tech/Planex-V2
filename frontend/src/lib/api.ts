@@ -65,8 +65,9 @@ async function upload<T>(path: string, file: File, field = "file"): Promise<T> {
   return data as T;
 }
 
-async function uploadApi<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", body: form });
+async function uploadApi<T>(path: string, form: FormData, method = "POST"): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method, credentials: "include", body: form });
+  if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = (data as ApiErrorBody | null)?.error;

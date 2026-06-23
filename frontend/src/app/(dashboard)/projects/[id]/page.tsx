@@ -23,6 +23,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     review: has(Permission.REVIEW_PROGRESS),
     approve: has(Permission.APPROVE_PROGRESS),
     deletePhotos: has(Permission.MANAGE_PROJECTS) || has(Permission.DELETE_PROGRESS_IMAGES),
+    viewFinances: has(Permission.VIEW_FINANCES) || has(Permission.MANAGE_FINANCES),
+    manageFinances: has(Permission.MANAGE_FINANCES),
   };
   return <ProjectWorkspace project={project} canManage={perms.manage} perms={perms} />;
 }

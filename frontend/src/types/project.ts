@@ -75,6 +75,8 @@ export interface ProjectPerms {
   review: boolean;
   approve: boolean;
   deletePhotos: boolean;
+  viewFinances: boolean;
+  manageFinances: boolean;
 }
 
 export type ProjectImageType = "site_photo" | "cover" | "logo_left" | "logo_right";
