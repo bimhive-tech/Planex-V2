@@ -268,3 +268,81 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
         "overall_progress": project_overall_progress(project),
         "snapshot_date": snap_date.isoformat(),
     }
+
+
+def parse_schedule_workbook(file_obj) -> list:
+    """Parse a flat schedule export — Activity Name + Start + Finish columns,
+    the same shape Primavera P6 exports to Excel — into [{name, start, finish}].
+    Extra columns (duration, float, % complete...) are ignored; rows missing a
+    name or both dates are skipped."""
+    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
+    try:
+        rows = list(wb.worksheets[0].iter_rows(values_only=True))
+    finally:
+        wb.close()
+    if not rows:
+        return []
+
+    header = [str(h or "").strip().lower() for h in rows[0]]
+
+    def find_col(*names):
+        for n in names:
+            if n in header:
+                return header.index(n)
+        return None
+
+    name_col = find_col("activity name", "name", "zone", "phase")
+    start_col = find_col("start", "planned start", "start date")
+    finish_col = find_col("finish", "planned finish", "finish date", "end")
+    if name_col is None or (start_col is None and finish_col is None):
+        return []
+
+    def as_date(v):
+        if isinstance(v, datetime.datetime):
+            return v.date()
+        return v if isinstance(v, datetime.date) else None
+
+    out = []
+    for row in rows[1:]:
+        name = row[name_col] if name_col < len(row) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        start = as_date(row[start_col]) if start_col is not None and start_col < len(row) else None
+        finish = as_date(row[finish_col]) if finish_col is not None and finish_col < len(row) else None
+        if not start and not finish:
+            continue
+        out.append({"name": name.strip(), "start": start, "finish": finish})
+    return out
+
+
+@transaction.atomic
+def import_schedule(project, file_obj) -> dict:
+    """Match each parsed row's name (case-insensitive) to existing scope(s) and
+    set their planned dates — never creates or deletes structure, only ever
+    sets dates on scopes that already exist. Rows matching no scope, and
+    scopes with no matching row, are simply left alone."""
+    rows = parse_schedule_workbook(file_obj)
+    if not rows:
+        return {"matched": 0, "unmatched": 0, "total_rows": 0}
+
+    by_name = {}
+    for s in project.scopes.only("id", "name", "planned_start", "planned_finish"):
+        by_name.setdefault(s.name.strip().lower(), []).append(s)
+
+    matched, unmatched, to_update = 0, 0, []
+    for row in rows:
+        scopes = by_name.get(row["name"].lower())
+        if not scopes:
+            unmatched += 1
+            continue
+        for s in scopes:
+            if row["start"]:
+                s.planned_start = row["start"]
+            if row["finish"]:
+                s.planned_finish = row["finish"]
+            to_update.append(s)
+        matched += 1
+
+    if to_update:
+        ProjectScope.objects.bulk_update(to_update, ["planned_start", "planned_finish"], batch_size=1000)
+    return {"matched": matched, "unmatched": unmatched, "total_rows": len(rows)}

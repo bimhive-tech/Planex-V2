@@ -48,7 +48,9 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [scheduleImporting, setScheduleImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const scheduleFileRef = useRef<HTMLInputElement>(null);
 
   const [zoneFilter, setZoneFilter] = useState("");
   const [subzoneFilter, setSubzoneFilter] = useState("");
@@ -73,6 +75,27 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleScheduleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setScheduleImporting(true);
+    setActionError(null);
+    setImportMsg(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await api.uploadApi<{ matched: number; unmatched: number; total_rows: number }>(
+        `/projects/${projectId}/schedule-import/`, form);
+      setImportMsg(`Matched ${r.matched} of ${r.total_rows} schedule rows to existing zones/phases (${r.unmatched} unmatched). Dates are now set on the matching scopes.`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Schedule import failed.");
+    } finally {
+      setScheduleImporting(false);
     }
   }
 
@@ -186,6 +209,11 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
             <Button size="sm" variant="secondary" disabled={importing}
               onClick={() => fileRef.current?.click()}>
               {importing ? "Importing…" : "Import Excel"}
+            </Button>
+            <input ref={scheduleFileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleScheduleImport} />
+            <Button size="sm" variant="secondary" disabled={scheduleImporting}
+              onClick={() => scheduleFileRef.current?.click()}>
+              {scheduleImporting ? "Importing…" : "Import Schedule"}
             </Button>
             <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
               onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>

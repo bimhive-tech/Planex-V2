@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
-from .imports import _guess_discipline, parse_sheet
+from .imports import _guess_discipline, import_schedule, parse_sheet
 from .models import Project
 
 
@@ -48,6 +48,48 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(_guess_discipline("اعمال التشطيبات"), "architecture")
         self.assertEqual(_guess_discipline("شبكات الصرف الصحي"), "mechanical")
         self.assertEqual(_guess_discipline("Random unrelated text"), "")
+
+
+class ScheduleImportTests(TestCase):
+    """`import_schedule` matches a flat Activity Name/Start/Finish export (the
+    shape Primavera P6 exports to Excel) to existing scopes by name and sets
+    their dates — never touches structure."""
+
+    def _workbook(self, header, rows):
+        import io
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(header)
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_matches_by_name_and_sets_dates(self):
+        import datetime
+
+        from apps.accounts.models import Company
+        from .models import ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        zone = ProjectScope.objects.create(company=company, project=project, scope_type="zone", name="ZONE (A)")
+
+        wb = self._workbook(
+            ["Activity Name", "Start", "Finish"],
+            [["ZONE (A)", datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)],
+             ["No Match Here", datetime.date(2026, 1, 1), datetime.date(2026, 2, 1)]],
+        )
+        result = import_schedule(project, wb)
+        self.assertEqual(result, {"matched": 1, "unmatched": 1, "total_rows": 2})
+        zone.refresh_from_db()
+        self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
+        self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
 
 STRONG_PW = "Str0ngPassw0rd!"
 
