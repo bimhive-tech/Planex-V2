@@ -19,11 +19,13 @@ import styles from "./reports.module.css";
 interface Props {
   open: boolean;
   onClose: () => void;
+  // When set, the report is locked to this project (used by the project hub).
+  lockedProjectId?: string;
 }
 
-export function ReportFormDrawer({ open, onClose }: Props) {
+export function ReportFormDrawer({ open, onClose, lockedProjectId }: Props) {
   const router = useRouter();
-  const [project, setProject] = useState("");
+  const [project, setProject] = useState(lockedProjectId ?? "");
   const [template, setTemplate] = useState("");
   const [title, setTitle] = useState("Monthly Progress Report");
   const [projects, setProjects] = useState<ProjectListRow[]>([]);
@@ -41,7 +43,8 @@ export function ReportFormDrawer({ open, onClose }: Props) {
       .then(([p, t]) => {
         setProjects(p.results);
         setTemplates(t.results);
-        if (!project && p.results[0]) setProject(p.results[0].id);
+        if (lockedProjectId) setProject(lockedProjectId);
+        else if (!project && p.results[0]) setProject(p.results[0].id);
         const def = t.results.find((x) => x.is_default) ?? t.results[0];
         if (!template && def) setTemplate(def.id);
       })
@@ -88,7 +91,7 @@ export function ReportFormDrawer({ open, onClose }: Props) {
       }
     >
       <form id="report-form" onSubmit={handleSubmit} className={styles.drawerForm}>
-        <Select label="Project (data source)" name="project" required options={projectOptions} value={project} onChange={(e) => setProject(e.target.value)} />
+        <Select label="Project (data source)" name="project" required options={projectOptions} value={project} onChange={(e) => setProject(e.target.value)} disabled={!!lockedProjectId} />
         <Select label="Template (design)" name="template" options={templateOptions} value={template} onChange={(e) => setTemplate(e.target.value)} />
         <Input label="Title" name="title" required value={title} onChange={(e) => setTitle(e.target.value)} />
         <p className={styles.hint}>You&apos;ll set the date, description, and images in the builder next.</p>
