@@ -6,6 +6,7 @@ APPROVE_PROGRESS gives final acceptance (which updates the activity's official
 progress) or rejects. Rejected submissions stay in history; the user resubmits a
 new one. Everything is permission-gated, not role-gated.
 """
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -33,7 +34,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
             "id", "activity", "activity_name", "activity_path",
             "previous_progress", "submitted_progress", "status", "status_display",
             "note", "review_comment", "submitted_by_name", "reviewed_by_name",
-            "approved_by_name", "created_at", "updated_at",
+            "approved_by_name", "reviewed_at", "decided_at", "created_at", "updated_at",
         ]
 
     def get_activity_path(self, obj):
@@ -186,21 +187,23 @@ class SubmissionDecisionView(APIView):
                 raise ValidationError({"status": "This submission isn't awaiting review."})
             sub.reviewed_by = request.user
             sub.review_comment = comment
+            sub.reviewed_at = timezone.now()
             sub.status = S.PENDING_PM if decision == "approve" else S.REVIEWER_REJECTED
-            sub.save(update_fields=["reviewed_by", "review_comment", "status", "updated_at"])
+            sub.save(update_fields=["reviewed_by", "review_comment", "reviewed_at", "status", "updated_at"])
         else:  # approve (final / PM)
             _require(request, Permission.APPROVE_PROGRESS.value)
             if sub.status != S.PENDING_PM:
                 raise ValidationError({"status": "This submission isn't awaiting approval."})
             sub.approved_by = request.user
             sub.review_comment = comment or sub.review_comment
+            sub.decided_at = timezone.now()
             if decision == "approve":
                 sub.status = S.ACCEPTED
                 sub.activity.progress_percent = sub.submitted_progress  # becomes official
                 sub.activity.save(update_fields=["progress_percent", "updated_at"])
             else:
                 sub.status = S.PM_REJECTED
-            sub.save(update_fields=["approved_by", "review_comment", "status", "updated_at"])
+            sub.save(update_fields=["approved_by", "review_comment", "decided_at", "status", "updated_at"])
 
         notify_decision(sub, stage=self.stage, decision=decision, actor=request.user)
         return Response(SubmissionSerializer(sub).data)

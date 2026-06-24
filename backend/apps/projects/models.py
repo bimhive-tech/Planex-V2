@@ -150,6 +150,9 @@ class ProgressSubmission(TimestampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_REVIEW)
     note = models.TextField(blank=True)            # submitter note
     review_comment = models.TextField(blank=True)  # reviewer/PM comment (required on reject)
+    # Per-stage timestamps for the audit trail (created_at is the submit time).
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [

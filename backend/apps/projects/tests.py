@@ -339,6 +339,24 @@ class ProjectApiTests(TestCase):
         act.refresh_from_db()
         self.assertEqual(float(act.progress_percent), 60.0)  # accepted -> official
 
+    def test_audit_timestamps_recorded(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng3@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login("eng3@acme.com")
+        sid = self.client.post(f"/api/projects/{p.id}/submissions/",
+                               {"activity": str(act.id), "submitted_progress": "30"},
+                               content_type="application/json").json()["id"]
+        self.login("admin@acme.com")
+        rev = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                               {"decision": "approve"}, content_type="application/json").json()
+        self.assertIsNotNone(rev["reviewed_at"])
+        self.assertIsNone(rev["decided_at"])
+        app = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/approve/",
+                               {"decision": "approve"}, content_type="application/json").json()
+        self.assertIsNotNone(app["decided_at"])
+
     def test_reject_requires_comment_and_keeps_progress(self):
         p, act = self._activity()
         from apps.accounts.constants import Permission as P

@@ -65,6 +65,8 @@ export interface ProjectSubmission {
   submitted_by_name: string;
   reviewed_by_name: string;
   approved_by_name: string;
+  reviewed_at: string | null;
+  decided_at: string | null;
   created_at: string;
   updated_at: string;
 }

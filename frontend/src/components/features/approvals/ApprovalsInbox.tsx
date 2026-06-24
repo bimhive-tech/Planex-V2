@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
 import { RejectModal } from "./RejectModal";
+import { AuditTrailDrawer } from "./AuditTrailDrawer";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import { formatDate } from "@/lib/format";
@@ -30,6 +31,7 @@ export function ApprovalsInbox({ canReview, canApprove }: { canReview: boolean; 
     [stage],
   );
   const [reject, setReject] = useState<InboxSubmission | null>(null);
+  const [trail, setTrail] = useState<InboxSubmission | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const rows = data?.results ?? [];
 
@@ -94,6 +96,7 @@ export function ApprovalsInbox({ canReview, canApprove }: { canReview: boolean; 
               <div className={styles.cardActions}>
                 <Button size="sm" onClick={() => decide(s, "approve")}>Approve</Button>
                 <Button size="sm" variant="secondary" onClick={() => setReject(s)}>Reject</Button>
+                <Button size="sm" variant="ghost" onClick={() => setTrail(s)}>History</Button>
               </div>
             </div>
           ))}
@@ -106,6 +109,8 @@ export function ApprovalsInbox({ canReview, canApprove }: { canReview: boolean; 
           onReject={async (comment) => { await decide(reject, "reject", comment); setReject(null); }}
         />
       )}
+
+      <AuditTrailDrawer submission={trail} onClose={() => setTrail(null)} />
     </div>
   );
 }
