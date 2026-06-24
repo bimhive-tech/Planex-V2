@@ -2,6 +2,7 @@
 // (Progress %, report rollups, milestones and team arrive with their modules.)
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
+import type { IconName } from "@/components/ui/Icon";
 import { ProgressDonut } from "@/components/ui/ProgressDonut";
 import { formatDate } from "@/lib/format";
 import type { ProjectDetail } from "@/types/project";
@@ -47,6 +48,36 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+// Card header with a small leading icon chip — used by every overview card.
+function CardHead({ icon, title, sub }: { icon: IconName; title: string; sub?: string }) {
+  return (
+    <header className={styles.cardHead}>
+      <span className={styles.headIcon}>
+        <Icon name={icon} size={16} />
+      </span>
+      <div>
+        <h2 className={styles.cardTitle}>{title}</h2>
+        {sub && <p className={styles.cardSub}>{sub}</p>}
+      </div>
+    </header>
+  );
+}
+
+// Compact at-a-glance metric tile for the KPI strip at the top of the overview.
+function Stat({ icon, tone, value, label }: { icon: IconName; tone: string; value: React.ReactNode; label: string }) {
+  return (
+    <div className={styles.stat}>
+      <span className={`${styles.statIcon} ${styles[`accent_${tone}`]}`}>
+        <Icon name={icon} size={18} />
+      </span>
+      <div className={styles.statText}>
+        <span className={`${styles.statValue} tnum`}>{value}</span>
+        <span className={styles.statLabel}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function StatusBar({ tone, label, count, pct }: { tone: string; label: string; count: number; pct: number }) {
   return (
     <div className={styles.statusRow}>
@@ -69,15 +100,27 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
   const t = timeline(p.planned_start, p.planned_finish);
   const b = stats.breakdown;
   const pct = (n: number) => (b.total ? Math.round((n / b.total) * 100) : 0);
+  const daysLeft = t ? t.remaining : null;
 
   return (
-    <div className={styles.grid}>
+    <div className={styles.page}>
+      {/* At-a-glance KPI strip */}
+      <section className={styles.statStrip}>
+        <Stat icon="check" tone="primary" value={`${Math.round(stats.overall)}%`} label="Overall progress" />
+        <Stat icon="list" tone="info" value={b.total.toLocaleString()} label="Activities" />
+        <Stat icon="flag" tone="success" value={`${pct(b.completed)}%`} label="Completed" />
+        <Stat
+          icon="clock"
+          tone={daysLeft !== null && daysLeft < 0 ? "danger" : "warning"}
+          value={daysLeft === null ? "—" : daysLeft < 0 ? "Overdue" : daysLeft.toLocaleString()}
+          label={daysLeft !== null && daysLeft < 0 ? "Past end date" : "Days remaining"}
+        />
+      </section>
+
+      <div className={styles.grid}>
       {/* Progress summary (rolled up from the Schedule activities) */}
-      <section className={styles.card}>
-        <header className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Progress Summary</h2>
-          <p className={styles.cardSub}>Rolled up from {b.total} activities.</p>
-        </header>
+      <section className={`${styles.card} ${styles.wide}`}>
+        <CardHead icon="check" title="Progress Summary" sub={`Rolled up from ${b.total} activities.`} />
         {b.total > 0 ? (
           <div className={styles.progressLayout}>
             <ProgressDonut value={stats.overall} />
@@ -99,10 +142,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
 
       {/* Project details */}
       <section className={styles.card}>
-        <header className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Project Details</h2>
-          <p className={styles.cardSub}>Key information for this project.</p>
-        </header>
+        <CardHead icon="projects" title="Project Details" sub="Key information for this project." />
         <Row label="Project Manager">{p.manager_name || "—"}</Row>
         <Row label="Client">{p.client_name || "—"}</Row>
         <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
@@ -117,10 +157,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
 
       {/* Timeline (computed) */}
       <section className={styles.card}>
-        <header className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Timeline</h2>
-          <p className={styles.cardSub}>Schedule and elapsed time.</p>
-        </header>
+        <CardHead icon="calendar" title="Timeline" sub="Schedule and elapsed time." />
         <Row label="Start date">{p.planned_start ? formatDate(p.planned_start) : "—"}</Row>
         <Row label="End date">{p.planned_finish ? formatDate(p.planned_finish) : "—"}</Row>
         {p.revised_finish && <Row label="Revised finish">{formatDate(p.revised_finish)}</Row>}
@@ -135,10 +172,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
 
       {/* Contacts */}
       <section className={styles.card}>
-        <header className={styles.cardHead}>
-          <h2 className={styles.cardTitle}>Contacts</h2>
-          <p className={styles.cardSub}>Consultant and contractor.</p>
-        </header>
+        <CardHead icon="users" title="Contacts" sub="Consultant and contractor." />
         <div className={styles.contactGroup}>
           <span className={styles.contactRole}>Consultant</span>
           <Row label="Name">{p.consultant_name || "—"}</Row>
@@ -155,9 +189,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
 
       {(p.description || p.notes) && (
         <section className={`${styles.card} ${styles.full}`}>
-          <header className={styles.cardHead}>
-            <h2 className={styles.cardTitle}>About</h2>
-          </header>
+          <CardHead icon="text" title="About" />
           {p.description && <p className={styles.prose}>{p.description}</p>}
           {p.notes && (
             <p className={styles.notes}>
@@ -169,6 +201,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
 
       <ProgressTimeline projectId={p.id} />
       <MilestonesPanel projectId={p.id} canManage={canManage} />
+      </div>
     </div>
   );
 }
