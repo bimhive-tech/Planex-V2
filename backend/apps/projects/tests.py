@@ -407,6 +407,36 @@ class ProjectApiTests(TestCase):
         self.assertEqual(data["approve_count"], 0)
         self.assertEqual(data["results"], [])
 
+    # ── Notifications ─────────────────────────────────────────────────────
+    def test_submit_notifies_reviewer(self):
+        p, act = self._activity()
+        self._submit(p, act)  # leaves client logged in as the engineer
+        self.login("admin@acme.com")  # admin can review
+        data = self.client.get("/api/notifications/").json()
+        self.assertGreaterEqual(data["unread_count"], 1)
+        self.assertIn("submitted", [n["kind"] for n in data["results"]])
+
+    def test_reject_notifies_submitter_and_mark_read(self):
+        p, act = self._activity()
+        sid = self._submit(p, act)
+        eng_email = f"eng-{act.id}@acme.com"
+        self.login("admin@acme.com")
+        self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                         {"decision": "reject", "comment": "Recheck"}, content_type="application/json")
+        self.login(eng_email)
+        data = self.client.get("/api/notifications/").json()
+        self.assertEqual(data["unread_count"], 1)
+        self.assertEqual(data["results"][0]["kind"], "review_rejected")
+        read = self.client.post("/api/notifications/read/")
+        self.assertEqual(read.json()["unread_count"], 0)
+
+    def test_notifications_are_per_recipient(self):
+        # The submitter shouldn't receive the "submitted" notice meant for reviewers.
+        p, act = self._activity()
+        self._submit(p, act)  # client is the engineer
+        data = self.client.get("/api/notifications/").json()
+        self.assertEqual(data["unread_count"], 0)
+
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")

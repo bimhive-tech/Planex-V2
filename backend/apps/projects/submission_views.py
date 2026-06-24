@@ -16,6 +16,7 @@ from apps.accounts.constants import Permission
 
 from .access import accessible_scope_ids
 from .models import Activity, ProgressSubmission, Project
+from .notifications import notify_decision, notify_submitted
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -115,6 +116,7 @@ class ProjectSubmissionsView(APIView):
             submitted_progress=value, note=request.data.get("note", ""),
         )
         sub = ProgressSubmission.objects.select_related(*_SUBMISSIONS_QS).get(pk=sub.pk)
+        notify_submitted(sub)
         return Response(SubmissionSerializer(sub).data, status=status.HTTP_201_CREATED)
 
 
@@ -200,4 +202,5 @@ class SubmissionDecisionView(APIView):
                 sub.status = S.PM_REJECTED
             sub.save(update_fields=["approved_by", "review_comment", "status", "updated_at"])
 
+        notify_decision(sub, stage=self.stage, decision=decision, actor=request.user)
         return Response(SubmissionSerializer(sub).data)

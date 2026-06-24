@@ -2,6 +2,7 @@
 
 // Top header: mobile hamburger, search field, notification/help icons.
 import { Icon } from "@/components/ui/Icon";
+import { NotificationBell } from "./NotificationBell";
 import styles from "./Header.module.css";
 
 interface Props {
@@ -21,9 +22,7 @@ export function Header({ onMenuClick }: Props) {
       </div>
 
       <div className={styles.actions}>
-        <button className={styles.iconBtn} aria-label="Notifications">
-          <Icon name="bell" />
-        </button>
+        <NotificationBell />
         <button className={styles.iconBtn} aria-label="Help">
           <Icon name="help" />
         </button>

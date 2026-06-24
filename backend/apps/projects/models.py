@@ -499,3 +499,40 @@ class Submittal(TimestampedModel):
 
     def __str__(self):
         return self.title
+
+
+class Notification(TimestampedModel):
+    """A per-user, in-app notification raised by the approval workflow.
+
+    Denormalises the human-readable message + project link so it survives the
+    referenced submission being deleted, and stays cheap to list."""
+
+    class Kind(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted for review"
+        REVIEW_APPROVED = "review_approved", "Awaiting your approval"
+        REVIEW_REJECTED = "review_rejected", "Rejected by reviewer"
+        ACCEPTED = "accepted", "Accepted"
+        PM_REJECTED = "pm_rejected", "Rejected by approver"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="notifications")
+    recipient = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="triggered_notifications")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    message = models.TextField()
+    project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name="notifications")
+    submission = models.ForeignKey("ProgressSubmission", on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name="notifications")
+    is_read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "is_read"]),
+            models.Index(fields=["recipient", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} -> {self.recipient_id}"
