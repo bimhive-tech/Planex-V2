@@ -425,6 +425,23 @@ class ProjectApiTests(TestCase):
         self.assertEqual(data["approve_count"], 0)
         self.assertEqual(data["results"], [])
 
+    # ── Global search ─────────────────────────────────────────────────────
+    def test_search_finds_projects_and_activities(self):
+        p, act = self._activity()  # project "Lab", activity "Pour"
+        self.login("viewer@acme.com")  # has VIEW_PROJECTS
+        data = self.client.get("/api/search/?q=La").json()
+        self.assertIn("Lab", [pr["name"] for pr in data["projects"]])
+        data2 = self.client.get("/api/search/?q=Pour").json()
+        self.assertIn("Pour", [a["name"] for a in data2["activities"]])
+        self.assertEqual(data2["activities"][0]["project_name"], "Lab")
+
+    def test_search_short_query_is_empty(self):
+        self._activity()
+        self.login("viewer@acme.com")
+        data = self.client.get("/api/search/?q=L").json()
+        self.assertEqual(data["projects"], [])
+        self.assertEqual(data["activities"], [])
+
     # ── Notifications ─────────────────────────────────────────────────────
     def test_submit_notifies_reviewer(self):
         p, act = self._activity()

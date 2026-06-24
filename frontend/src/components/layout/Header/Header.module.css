@@ -21,26 +21,8 @@
   background: var(--bg-canvas);
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.spacer {
   flex: 1;
-  max-width: 420px;
-  padding: 8px 12px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-muted);
-}
-
-.searchInput {
-  border: none;
-  background: transparent;
-  outline: none;
-  width: 100%;
-  font-size: 14px;
-  color: var(--text-primary);
 }
 
 .actions {

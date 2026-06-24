@@ -38,6 +38,7 @@ from .progress_views import (
 )
 from .image_views import ProjectImageDetailView, ProjectImageFileView, ProjectImageListCreateView
 from .notification_views import NotificationListView, NotificationReadView
+from .search_views import GlobalSearchView
 from .submission_views import ApprovalsInboxView, ProjectSubmissionsView, SubmissionDecisionView
 from .team_views import (
     AssignableUsersView,
@@ -82,6 +83,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
     path("projects/<uuid:project_id>/project-zones/", ProjectZonesView.as_view(), name="project-zones-list"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/scope-access/", MemberScopeAccessView.as_view(), name="member-scope-access"),
+    path("search/", GlobalSearchView.as_view(), name="global-search"),
     path("approvals/", ApprovalsInboxView.as_view(), name="approvals-inbox"),
     path("notifications/", NotificationListView.as_view(), name="notifications"),
     path("notifications/read/", NotificationReadView.as_view(), name="notifications-read"),
