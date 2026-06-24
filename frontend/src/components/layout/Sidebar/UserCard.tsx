@@ -1,6 +1,8 @@
 "use client";
 
-// Bottom-of-sidebar user card: initials avatar, name, role, logout.
+// Bottom-of-sidebar user card: initials avatar, name, role (links to account), logout.
+import Link from "next/link";
+
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { ROUTES } from "@/lib/constants";
@@ -26,13 +28,15 @@ export function UserCard({ user }: { user: CurrentUser }) {
 
   return (
     <div className={styles.card}>
-      <span className={styles.avatar} aria-hidden="true">
-        {initials(user)}
-      </span>
-      <div className={styles.meta}>
-        <span className={styles.name}>{user.full_name}</span>
-        <span className={styles.role}>{roleLabel}</span>
-      </div>
+      <Link href={ROUTES.account} className={styles.profile} title="Account settings">
+        <span className={styles.avatar} aria-hidden="true">
+          {initials(user)}
+        </span>
+        <div className={styles.meta}>
+          <span className={styles.name}>{user.full_name}</span>
+          <span className={styles.role}>{roleLabel}</span>
+        </div>
+      </Link>
       <button className={styles.logout} onClick={handleLogout} aria-label="Sign out" title="Sign out">
         <Icon name="logout" size={18} />
       </button>

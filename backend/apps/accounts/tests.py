@@ -51,3 +51,45 @@ class AuthFlowTests(TestCase):
         resp = self.client.get(reverse("auth-me"))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["email"], "superadmin@planex.app")
+
+    def _login(self):
+        self.client.post(
+            reverse("auth-login"),
+            {"email": "superadmin@planex.app", "password": "12345678"},
+            content_type="application/json",
+        )
+
+    def test_change_password_requires_auth(self):
+        resp = self.client.post(reverse("auth-change-password"))
+        self.assertEqual(resp.status_code, 401)
+
+    def test_change_password_success(self):
+        self._login()
+        resp = self.client.post(
+            reverse("auth-change-password"),
+            {"current_password": "12345678", "new_password": "newpass789"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 204)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("newpass789"))
+
+    def test_change_password_rejects_wrong_current(self):
+        self._login()
+        resp = self.client.post(
+            reverse("auth-change-password"),
+            {"current_password": "wrong", "new_password": "newpass789"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("12345678"))
+
+    def test_change_password_rejects_weak_new(self):
+        self._login()
+        resp = self.client.post(
+            reverse("auth-change-password"),
+            {"current_password": "12345678", "new_password": "123"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)

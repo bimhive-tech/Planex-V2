@@ -13,6 +13,7 @@ export const ROUTES = {
   settings: "/settings",
   reports: "/reports",
   reportTemplates: "/reports/templates",
+  account: "/account",
   home: "/",
 } as const;
 

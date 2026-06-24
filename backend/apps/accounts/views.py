@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from . import services
 from .cookies import clear_auth_cookies, set_auth_cookies
-from .serializers import CurrentUserSerializer, LoginSerializer
+from .serializers import ChangePasswordSerializer, CurrentUserSerializer, LoginSerializer
 
 
 class LoginView(APIView):
@@ -60,3 +60,17 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(CurrentUserSerializer(request.user).data)
+
+
+class ChangePasswordView(APIView):
+    """Self-service password change for the signed-in user."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        return Response(status=status.HTTP_204_NO_CONTENT)

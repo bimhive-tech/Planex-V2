@@ -1,4 +1,6 @@
 """Serializers for the auth endpoints. One serializer per use case."""
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import Company, User
@@ -9,6 +11,26 @@ class LoginSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Self-service password change: confirm the current password, set a new one."""
+
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate_new_password(self, value):
+        try:
+            validate_password(value, self.context["request"].user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
 
 
 class CompanyBriefSerializer(serializers.ModelSerializer):
