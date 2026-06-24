@@ -1,8 +1,8 @@
 "use client";
 
-// Full-page notifications list: all of the user's recent notifications with
-// mark-all-read and click-through to the related project. Mirrors the bell
-// dropdown but with room to breathe.
+// Full-page notifications list: All / Unread / Read tabs, mark-all-read, and
+// per-item read. Clicking an item marks just that one read and navigates to
+// the project it points to.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -15,15 +15,31 @@ import { formatDateTime } from "@/lib/format";
 import type { NotificationsResponse } from "@/types/notification";
 import styles from "./notifications.module.css";
 
+type Filter = "all" | "unread" | "read";
+const TABS: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "unread", label: "Unread" },
+  { key: "read", label: "Read" },
+];
+
 export function NotificationsList() {
   const router = useRouter();
+  const [filter, setFilter] = useState<Filter>("all");
   const { data, loading, error, reload } = useFetch(
-    () => api.get<NotificationsResponse>("/notifications/"),
-    [],
+    () => api.get<NotificationsResponse>(`/notifications/?filter=${filter}`),
+    [filter],
   );
   const [busy, setBusy] = useState(false);
   const items = data?.results ?? [];
   const unread = data?.unread_count ?? 0;
+
+  async function markRead(ids: string[]) {
+    try {
+      await api.post("/notifications/read/", { ids });
+    } catch {
+      /* best effort */
+    }
+  }
 
   async function markAllRead() {
     setBusy(true);
@@ -35,10 +51,8 @@ export function NotificationsList() {
     }
   }
 
-  async function openItem(projectId: string | null) {
-    if (unread > 0) {
-      try { await api.post("/notifications/read/"); } catch { /* navigate anyway */ }
-    }
+  async function openItem(id: string, projectId: string | null, isRead: boolean) {
+    if (!isRead) await markRead([id]);
     if (projectId) router.push(`/projects/${projectId}`);
     else reload();
   }
@@ -48,20 +62,26 @@ export function NotificationsList() {
       <header className={styles.head}>
         <div>
           <h1 className={styles.title}>Notifications</h1>
-          <p className={styles.subtitle}>
-            {unread > 0 ? `${unread} unread` : "You're all caught up."}
-          </p>
+          <p className={styles.subtitle}>{unread > 0 ? `${unread} unread` : "You're all caught up."}</p>
         </div>
         {unread > 0 && (
-          <Button variant="secondary" size="sm" disabled={busy} onClick={markAllRead}>
-            Mark all read
-          </Button>
+          <Button variant="secondary" size="sm" disabled={busy} onClick={markAllRead}>Mark all read</Button>
         )}
       </header>
 
+      <div className={styles.tabs}>
+        {TABS.map((t) => (
+          <button key={t.key} className={`${styles.tab} ${filter === t.key ? styles.active : ""}`}
+            onClick={() => setFilter(t.key)}>
+            {t.label}
+            {t.key === "unread" && unread > 0 && <span className={styles.count}>{unread}</span>}
+          </button>
+        ))}
+      </div>
+
       <StateView
         loading={loading} error={error} isEmpty={items.length === 0}
-        emptyTitle="No notifications"
+        emptyTitle={filter === "unread" ? "Nothing unread" : "No notifications"}
         emptyText="Updates about your submissions and approvals will show up here."
         onRetry={reload}
       >
@@ -70,7 +90,7 @@ export function NotificationsList() {
             <li key={n.id}>
               <button
                 className={`${styles.item} ${n.is_read ? "" : styles.unread}`}
-                onClick={() => openItem(n.project_id)}
+                onClick={() => openItem(n.id, n.project_id, n.is_read)}
               >
                 {!n.is_read && <span className={styles.dot} aria-hidden="true" />}
                 <span className={styles.body}>

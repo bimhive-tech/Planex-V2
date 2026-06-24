@@ -26,8 +26,16 @@ class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Notification.objects.filter(recipient=request.user).select_related("actor", "project")
-        unread = qs.filter(is_read=False).count()
+        base = Notification.objects.filter(recipient=request.user)
+        unread = base.filter(is_read=False).count()  # always the true total, regardless of filter
+
+        qs = base.select_related("actor", "project")
+        filt = request.query_params.get("filter")
+        if filt == "unread":
+            qs = qs.filter(is_read=False)
+        elif filt == "read":
+            qs = qs.filter(is_read=True)
+
         data = NotificationSerializer(qs[:_RECENT_LIMIT], many=True).data
         return Response({"results": data, "unread_count": unread})
 

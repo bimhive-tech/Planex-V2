@@ -50,9 +50,17 @@ export function NotificationBell() {
     }
   }
 
-  function openItem(projectId: string | null) {
+  function openItem(id: string, projectId: string | null, isRead: boolean) {
     setOpen(false);
-    if (unread > 0) markAllRead();
+    if (!isRead) {
+      // Optimistically mark just this one read, then persist.
+      setData((d) => d ? {
+        ...d,
+        results: d.results.map((n) => n.id === id ? { ...n, is_read: true } : n),
+        unread_count: Math.max(0, d.unread_count - 1),
+      } : d);
+      api.post("/notifications/read/", { ids: [id] }).catch(() => load());
+    }
     if (projectId) router.push(`/projects/${projectId}`);
   }
 
@@ -80,7 +88,7 @@ export function NotificationBell() {
                 <li key={n.id}>
                   <button
                     className={`${styles.item} ${n.is_read ? "" : styles.unread}`}
-                    onClick={() => openItem(n.project_id)}
+                    onClick={() => openItem(n.id, n.project_id, n.is_read)}
                   >
                     {!n.is_read && <span className={styles.dot} aria-hidden="true" />}
                     <span className={styles.message}>{n.message}</span>

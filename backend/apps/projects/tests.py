@@ -460,6 +460,20 @@ class ProjectApiTests(TestCase):
         data = self.client.get("/api/notifications/").json()
         self.assertEqual(data["unread_count"], 0)
 
+    def test_notification_filter_and_per_item_read(self):
+        p, act = self._activity()
+        self._submit(p, act)
+        self.login("admin@acme.com")
+        unread = self.client.get("/api/notifications/?filter=unread").json()
+        self.assertGreaterEqual(len(unread["results"]), 1)
+        nid = unread["results"][0]["id"]
+        # Mark just this one read.
+        self.client.post("/api/notifications/read/", {"ids": [nid]}, content_type="application/json")
+        after_unread = [n["id"] for n in self.client.get("/api/notifications/?filter=unread").json()["results"]]
+        after_read = [n["id"] for n in self.client.get("/api/notifications/?filter=read").json()["results"]]
+        self.assertNotIn(nid, after_unread)
+        self.assertIn(nid, after_read)
+
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")
