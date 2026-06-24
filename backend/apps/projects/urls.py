@@ -37,7 +37,7 @@ from .progress_views import (
     ProgressImagesListView,
 )
 from .image_views import ProjectImageDetailView, ProjectImageFileView, ProjectImageListCreateView
-from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
+from .submission_views import ApprovalsInboxView, ProjectSubmissionsView, SubmissionDecisionView
 from .team_views import (
     AssignableUsersView,
     MemberScopeAccessView,
@@ -81,6 +81,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
     path("projects/<uuid:project_id>/project-zones/", ProjectZonesView.as_view(), name="project-zones-list"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/scope-access/", MemberScopeAccessView.as_view(), name="member-scope-access"),
+    path("approvals/", ApprovalsInboxView.as_view(), name="approvals-inbox"),
     path("projects/<uuid:project_id>/submissions/", ProjectSubmissionsView.as_view(), name="project-submissions"),
     path("projects/<uuid:project_id>/submissions/<uuid:submission_id>/review/",
          SubmissionDecisionView.as_view(stage="review"), name="submission-review"),

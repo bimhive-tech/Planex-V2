@@ -365,6 +365,48 @@ class ProjectApiTests(TestCase):
                              {"activity": str(act.id), "submitted_progress": "10"}, content_type="application/json")
         self.assertEqual(r.status_code, 403)
 
+    # ── Approvals inbox (cross-project) ───────────────────────────────────
+    def _submit(self, project, activity, value="40"):
+        eng_email = f"eng-{activity.id}@acme.com"
+        eng = User.objects.create_user(email=eng_email, password=STRONG_PW, company=self.company_a)
+        from apps.accounts.constants import Permission as P
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login(eng_email)
+        return self.client.post(f"/api/projects/{project.id}/submissions/",
+                                {"activity": str(activity.id), "submitted_progress": value},
+                                content_type="application/json").json()["id"]
+
+    def test_inbox_lists_pending_for_reviewer(self):
+        p, act = self._activity()
+        self._submit(p, act)
+        # admin holds review + approve perms.
+        self.login("admin@acme.com")
+        data = self.client.get("/api/approvals/?stage=review").json()
+        self.assertEqual(data["review_count"], 1)
+        self.assertEqual(len(data["results"]), 1)
+        self.assertEqual(data["results"][0]["project_name"], "Lab")
+        self.assertIn("project_id", data["results"][0])
+
+    def test_inbox_moves_to_approve_after_review(self):
+        p, act = self._activity()
+        sid = self._submit(p, act)
+        self.login("admin@acme.com")
+        self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                         {"decision": "approve"}, content_type="application/json")
+        review = self.client.get("/api/approvals/?stage=review").json()
+        approve = self.client.get("/api/approvals/?stage=approve").json()
+        self.assertEqual(review["review_count"], 0)
+        self.assertEqual(approve["approve_count"], 1)
+
+    def test_inbox_empty_without_perms(self):
+        p, act = self._activity()
+        self._submit(p, act)
+        self.login("viewer@acme.com")  # only VIEW_PROJECTS
+        data = self.client.get("/api/approvals/").json()
+        self.assertEqual(data["review_count"], 0)
+        self.assertEqual(data["approve_count"], 0)
+        self.assertEqual(data["results"], [])
+
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")
