@@ -5,10 +5,12 @@
 // the badge stays fresh without a websocket.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import { Icon } from "@/components/ui/Icon";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { api } from "@/lib/api";
+import { ROUTES } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import type { NotificationsResponse } from "@/types/notification";
 import styles from "./NotificationBell.module.css";
@@ -88,6 +90,10 @@ export function NotificationBell() {
               ))}
             </ul>
           )}
+
+          <Link href={ROUTES.notifications} className={styles.viewAll} onClick={() => setOpen(false)}>
+            View all notifications
+          </Link>
         </div>
       )}
     </div>

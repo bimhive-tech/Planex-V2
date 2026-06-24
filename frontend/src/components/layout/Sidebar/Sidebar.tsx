@@ -26,7 +26,6 @@ export function Sidebar({ user, open, onClose }: Props) {
     if (item.platformOnly && !user.is_platform_admin) return false;
     if (user.is_platform_admin) return true;
     if (item.permission && !hasPermission(user, item.permission)) return false;
-    if (item.anyPermission && !item.anyPermission.some((p) => hasPermission(user, p))) return false;
     return true;
   });
 

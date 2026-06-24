@@ -48,16 +48,6 @@ class SubmissionSerializer(serializers.ModelSerializer):
         return " / ".join(reversed(parts))
 
 
-class InboxSubmissionSerializer(SubmissionSerializer):
-    """Submission shape for the cross-project inbox — adds project identity."""
-
-    project_id = serializers.UUIDField(source="project.id", read_only=True)
-    project_name = serializers.CharField(source="project.name", read_only=True)
-
-    class Meta(SubmissionSerializer.Meta):
-        fields = SubmissionSerializer.Meta.fields + ["project_id", "project_name"]
-
-
 def _project(request, project_id):
     try:
         return Project.objects.get(pk=project_id, company=request.user.company)
@@ -119,45 +109,6 @@ class ProjectSubmissionsView(APIView):
         sub = ProgressSubmission.objects.select_related(*_SUBMISSIONS_QS).get(pk=sub.pk)
         notify_submitted(sub)
         return Response(SubmissionSerializer(sub).data, status=status.HTTP_201_CREATED)
-
-
-class ApprovalsInboxView(APIView):
-    """Cross-project queue of submissions awaiting the current user's action.
-
-    Reviewers (REVIEW_PROGRESS) see Pending Review; approvers (APPROVE_PROGRESS)
-    see Pending PM Approval; a user with both sees both. Tenant-isolated to the
-    caller's company. Decisions are taken via the per-project review/approve
-    endpoints (the rows carry project_id)."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        perms = request.user.effective_permissions()
-        S = ProgressSubmission.Status
-        can_review = Permission.REVIEW_PROGRESS.value in perms
-        can_approve = Permission.APPROVE_PROGRESS.value in perms
-
-        stages = []
-        if can_review:
-            stages.append(S.PENDING_REVIEW)
-        if can_approve:
-            stages.append(S.PENDING_PM)
-        if not stages:
-            return Response({"results": [], "review_count": 0, "approve_count": 0})
-
-        base = ProgressSubmission.objects.filter(company=request.user.company, status__in=stages)
-        review_count = base.filter(status=S.PENDING_REVIEW).count() if can_review else 0
-        approve_count = base.filter(status=S.PENDING_PM).count() if can_approve else 0
-
-        qs = base.select_related(*_SUBMISSIONS_QS, "project").order_by("-created_at")
-        stage = request.query_params.get("stage")
-        if stage == "review" and can_review:
-            qs = qs.filter(status=S.PENDING_REVIEW)
-        elif stage == "approve" and can_approve:
-            qs = qs.filter(status=S.PENDING_PM)
-
-        data = InboxSubmissionSerializer(qs[:200], many=True).data
-        return Response({"results": data, "review_count": review_count, "approve_count": approve_count})
 
 
 class SubmissionDecisionView(APIView):

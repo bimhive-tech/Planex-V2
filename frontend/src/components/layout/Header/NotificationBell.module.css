@@ -124,3 +124,20 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+
+.viewAll {
+  display: block;
+  position: sticky;
+  bottom: 0;
+  padding: var(--space-3);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+.viewAll:hover {
+  background: var(--bg-canvas);
+}
