@@ -17,6 +17,30 @@
   gap: var(--space-2);
 }
 
+/* Export link styled to match a secondary Button (Button renders a <button>;
+   this needs to be an <a> for the file download). */
+.exportLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 34px;
+  padding: 0 var(--space-3);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+.exportLink:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-canvas);
+}
+.exportLink svg {
+  color: var(--text-secondary);
+}
+
 .back {
   display: inline-flex;
   align-items: center;

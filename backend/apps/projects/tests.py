@@ -425,6 +425,25 @@ class ProjectApiTests(TestCase):
         self.assertEqual(data["approve_count"], 0)
         self.assertEqual(data["results"], [])
 
+    # ── P6 export ─────────────────────────────────────────────────────────
+    def test_p6_export_returns_xlsx(self):
+        p, act = self._activity()
+        self.login("admin@acme.com")  # holds export_reports via company-admin perms
+        resp = self.client.get(f"/api/projects/{p.id}/export/p6/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("spreadsheetml", resp["Content-Type"])
+        self.assertTrue(resp["Content-Disposition"].endswith('.xlsx"'))
+        self.assertEqual(resp.content[:2], b"PK")  # xlsx is a zip
+
+    def test_p6_export_forbidden_without_perm(self):
+        p, _ = self._activity()
+        # A user with only SUBMIT_PROGRESS (no export/manage).
+        from apps.accounts.constants import Permission as P
+        u = User.objects.create_user(email="noexp@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(u, P.SUBMIT_PROGRESS.value)
+        self.login("noexp@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{p.id}/export/p6/").status_code, 403)
+
     # ── Global search ─────────────────────────────────────────────────────
     def test_search_finds_projects_and_activities(self):
         p, act = self._activity()  # project "Lab", activity "Pour"
