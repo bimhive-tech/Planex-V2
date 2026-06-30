@@ -404,6 +404,13 @@ class ProjectApiTests(TestCase):
         self.assertTrue(resp["Content-Disposition"].endswith('.xlsx"'))
         self.assertEqual(resp.content[:2], b"PK")  # xlsx is a zip
 
+    def test_p6_prepare_instant_without_source_workbook(self):
+        p, _ = self._activity()
+        self.login("admin@acme.com")
+        resp = self.client.post(f"/api/projects/{p.id}/export/p6/prepare/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["mode"], "instant")
+
     def test_p6_export_forbidden_without_perm(self):
         p, _ = self._activity()
         # A user with only SUBMIT_PROGRESS (no export/manage).

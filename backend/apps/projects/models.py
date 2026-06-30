@@ -7,6 +7,22 @@ from django.db import models
 from apps.accounts.models import Company, TimestampedModel
 
 
+def source_workbook_key(instance, filename):
+    """Private R2 key for a project's original imported tracker workbook, kept so
+    the Primavera 'FOR (P6)' export can be returned byte-identical (only its
+    progress column refreshed)."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else "xlsx"
+    return f"projects/{instance.id}/source/workbook.{ext}"
+
+
+def p6_export_key(instance, filename):
+    """Private R2 key for the generated P6 export (the refreshed workbook). These
+    files are large, so generation runs in the background and the result is cached
+    here until the next refresh."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else "xlsx"
+    return f"projects/{instance.id}/export/p6.{ext}"
+
+
 class Project(TimestampedModel):
     class ProjectType(models.TextChoices):
         COMMERCIAL = "commercial", "Commercial"
@@ -48,6 +64,21 @@ class Project(TimestampedModel):
     notes = models.TextField(blank=True)
 
     is_archived = models.BooleanField(default=False)
+
+    # Original imported tracker workbook (.xlsm/.xlsx), retained for the P6 export.
+    source_workbook = models.FileField(upload_to=source_workbook_key, null=True, blank=True)
+
+    # Cached P6 export (the refreshed workbook) + its background-build status.
+    # Generation is slow for big trackers, so it runs off the request cycle.
+    class P6Status(models.TextChoices):
+        IDLE = "idle", "Idle"
+        GENERATING = "generating", "Generating"
+        READY = "ready", "Ready"
+        ERROR = "error", "Error"
+
+    p6_export = models.FileField(upload_to=p6_export_key, null=True, blank=True)
+    p6_export_status = models.CharField(max_length=12, choices=P6Status.choices, default=P6Status.IDLE)
+    p6_export_started_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [

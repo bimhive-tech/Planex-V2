@@ -37,7 +37,7 @@ from .progress_views import (
     ProgressImagesListView,
 )
 from .image_views import ProjectImageDetailView, ProjectImageFileView, ProjectImageListCreateView
-from .export_views import ProjectP6ExportView
+from .export_views import ProjectP6ExportView, ProjectP6PrepareView, ProjectP6StatusView
 from .notification_views import NotificationListView, NotificationReadView
 from .search_views import GlobalSearchView
 from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
@@ -62,6 +62,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/schedule-import/", ProjectScheduleImportView.as_view(), name="project-schedule-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),
     path("projects/<uuid:project_id>/export/p6/", ProjectP6ExportView.as_view(), name="project-p6-export"),
+    path("projects/<uuid:project_id>/export/p6/prepare/", ProjectP6PrepareView.as_view(), name="project-p6-prepare"),
+    path("projects/<uuid:project_id>/export/p6/status/", ProjectP6StatusView.as_view(), name="project-p6-status"),
     path("projects/<uuid:project_id>/activities/<uuid:activity_id>/progress/", ActivityProgressView.as_view(), name="activity-progress"),
     path("projects/<uuid:project_id>/progress-entries/<uuid:entry_id>/", ProgressEntryDetailView.as_view(), name="progress-entry"),
     path("projects/<uuid:project_id>/progress-entries/<uuid:entry_id>/images/", ProgressEntryImagesView.as_view(), name="progress-entry-images"),

@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import type { IconName } from "@/components/ui/Icon";
-import { API_BASE } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
+import { P6ExportButton } from "./P6ExportButton";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
@@ -66,16 +66,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <span>Back to Projects</span>
         </Link>
         <div className={styles.topActions}>
-          {perms.exportReports && (
-            <a
-              className={styles.exportLink}
-              href={`${API_BASE}/projects/${project.id}/export/p6/`}
-              download
-            >
-              <Icon name="download" size={15} />
-              <span>Export P6</span>
-            </a>
-          )}
+          {perms.exportReports && <P6ExportButton projectId={project.id} />}
           <ProjectReportButton projectId={project.id} />
           {canManage && (
             <Button variant="secondary" size="sm" leadingIcon={<Icon name="edit" size={15} />}

@@ -294,6 +294,17 @@ class ProjectImportView(APIView):
             result = import_workbook(project, upload, source=upload.name)
         except Exception as exc:  # parsing failures shouldn't 500
             raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
+
+        # Retain the original workbook so the P6 export can be returned with only
+        # its progress column refreshed (see exports.build_p6_export).
+        try:
+            upload.seek(0)
+            if project.source_workbook:
+                project.source_workbook.delete(save=False)
+            project.source_workbook.save(upload.name, upload, save=True)
+        except Exception:  # keeping the source is best-effort; the import already succeeded
+            pass
+
         return Response(result)
 
 
