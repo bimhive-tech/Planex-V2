@@ -3,6 +3,10 @@
 Routes are nested under a project. Reads need VIEW_PROJECTS; writes need
 MANAGE_PROJECTS. Everything is company- and project-scoped (tenant isolation).
 """
+import logging
+from io import BytesIO
+
+from django.core.files.base import ContentFile
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -11,6 +15,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
+
+logger = logging.getLogger(__name__)
 
 from .access import accessible_scope_ids
 from .imports import import_schedule, import_workbook
@@ -290,20 +296,25 @@ class ProjectImportView(APIView):
             raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
         if upload.size > MAX_IMPORT_BYTES:
             raise ValidationError({"file": "File is too large (max 40 MB)."})
+
+        # Read the bytes once: import parses from a copy, and the same bytes are
+        # retained verbatim for the P6 export (so neither read disturbs the other).
+        raw = upload.read()
         try:
-            result = import_workbook(project, upload, source=upload.name)
+            result = import_workbook(project, BytesIO(raw), source=upload.name)
         except Exception as exc:  # parsing failures shouldn't 500
             raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
 
         # Retain the original workbook so the P6 export can be returned with only
-        # its progress column refreshed (see exports.build_p6_export).
+        # its progress column refreshed (see exports.refresh_source_workbook).
+        # Non-fatal: the structure import already succeeded — but log failures
+        # (don't swallow them) so a misconfigured store is visible, not silent.
         try:
-            upload.seek(0)
             if project.source_workbook:
                 project.source_workbook.delete(save=False)
-            project.source_workbook.save(upload.name, upload, save=True)
-        except Exception:  # keeping the source is best-effort; the import already succeeded
-            pass
+            project.source_workbook.save(upload.name, ContentFile(raw), save=True)
+        except Exception:
+            logger.exception("Failed to retain source workbook for project %s", project.id)
 
         return Response(result)
 
