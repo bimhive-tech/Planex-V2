@@ -43,7 +43,13 @@ def _building_code(text) -> str:
 
 
 def _progress_lookup(project) -> dict:
-    """(building_code, normalised name) -> weighted accepted progress (0–100)."""
+    """(building_code, normalised name) -> list of accepted progress values (0–100),
+    one per Planex activity, in import order.
+
+    A task that repeats across a building (e.g. several identical 'وجه 2' rows)
+    has several P6 rows AND several Planex activities; we map them positionally so
+    each P6 row gets its own activity's value, instead of collapsing them to one
+    (averaging) and writing the same number onto every row."""
     scopes = {sid: (name, pid) for sid, name, pid
               in project.scopes.values_list("id", "name", "parent_id")}
 
@@ -57,13 +63,13 @@ def _progress_lookup(project) -> dict:
             node = pid
         return ""
 
-    w_acc, pw_acc = defaultdict(float), defaultdict(float)
-    for sid, name, w, p in project.activities.values_list("scope_id", "name", "weight", "progress_percent"):
-        key = (building_for(sid), _norm(name))
-        w = float(w) or 1.0
-        w_acc[key] += w
-        pw_acc[key] += w * float(p)
-    return {k: pw_acc[k] / w_acc[k] for k in w_acc if w_acc[k]}
+    lookup = defaultdict(list)
+    # created_at, id ≈ the order rows were read from the source grid, which lines
+    # up with the order the same rows appear in the P6 sheet.
+    for sid, name, p in (project.activities.order_by("created_at", "id")
+                         .values_list("scope_id", "name", "progress_percent")):
+        lookup[(building_for(sid), _norm(name))].append(float(p))
+    return lookup
 
 
 # --- refresh the original workbook ----------------------------------------
@@ -99,6 +105,7 @@ def refresh_source_workbook(project) -> tuple[bytes, str] | None:
         return None
 
     lookup = _progress_lookup(project)
+    seen = defaultdict(int)  # how many P6 rows of each (building, name) we've consumed
     current_building = ""
     for row in ws.iter_rows():
         a = row[_ID_COL - 1].value if len(row) >= _ID_COL else None
@@ -113,10 +120,15 @@ def refresh_source_workbook(project) -> tuple[bytes, str] | None:
                 current_building = code
             continue
 
-        progress = lookup.get((current_building, _norm(b)))
-        if progress is not None and len(row) >= _PCT_COL:
+        key = (current_building, _norm(b))
+        values = lookup.get(key)
+        if values and len(row) >= _PCT_COL:
+            i = seen[key]
+            seen[key] += 1
+            # Nth P6 row of this task -> Nth Planex activity (clamp if counts differ).
+            value = values[i] if i < len(values) else values[-1]
             # Store as a 0–1 fraction (the sheet's convention); keep the cell's format.
-            row[_PCT_COL - 1].value = round(progress / 100, 4)
+            row[_PCT_COL - 1].value = round(value / 100, 4)
 
     buf = BytesIO()
     wb.save(buf)
