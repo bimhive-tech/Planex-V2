@@ -9,6 +9,7 @@ new one. Everything is permission-gated, not role-gated.
 import mimetypes
 
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -22,7 +23,7 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 
 from .access import accessible_scope_ids
-from .models import Activity, ProgressSubmission, Project, SubmissionImage
+from .models import Activity, ProgressEntry, ProgressImage, ProgressSubmission, Project, SubmissionImage
 from .notifications import notify_decision, notify_submitted
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -131,6 +132,23 @@ class ProjectSubmissionsView(APIView):
         return Response(SubmissionSerializer(sub).data, status=status.HTTP_201_CREATED)
 
 
+def _record_accepted_entry(sub):
+    """On final acceptance, write a dated ProgressEntry (so the accepted value
+    shows up in the activity's history) and copy the submission's evidence
+    photos onto it (so they appear in the zone's photo-history gallery, which
+    only reads ProgressImage — SubmissionImage stays too, as the approval
+    audit trail on the submission card itself)."""
+    entry = ProgressEntry.objects.create(
+        company=sub.company, project=sub.project, activity=sub.activity,
+        date=timezone.now().date(), progress_percent=sub.submitted_progress,
+        note=sub.note, recorded_by=sub.submitted_by,
+    )
+    for simg in sub.images.all():
+        pimg = ProgressImage(company=sub.company, entry=entry, caption=simg.caption, uploaded_by=simg.uploaded_by)
+        name = simg.image.name.rsplit("/", 1)[-1]
+        pimg.image.save(name, ContentFile(simg.image.read()), save=True)
+
+
 class SubmissionDecisionView(APIView):
     """POST a review or PM decision (approve/reject) on a submission."""
 
@@ -172,6 +190,7 @@ class SubmissionDecisionView(APIView):
                 sub.status = S.ACCEPTED
                 sub.activity.progress_percent = sub.submitted_progress  # becomes official
                 sub.activity.save(update_fields=["progress_percent", "updated_at"])
+                _record_accepted_entry(sub)
             else:
                 sub.status = S.PM_REJECTED
             sub.save(update_fields=["approved_by", "review_comment", "decided_at", "status", "updated_at"])

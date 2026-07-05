@@ -433,6 +433,29 @@ class ProjectApiTests(TestCase):
         resp = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/images/", {"image": bad})
         self.assertEqual(resp.status_code, 400)
 
+    def test_accepted_submission_photo_appears_in_progress_gallery(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng6@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login("eng6@acme.com")
+        sid = self.client.post(f"/api/projects/{p.id}/submissions/",
+                               {"activity": str(act.id), "submitted_progress": "55"},
+                               content_type="application/json").json()["id"]
+        self.client.post(f"/api/projects/{p.id}/submissions/{sid}/images/",
+                         {"image": self._png(), "caption": "Rebar laid"})
+
+        self.login("admin@acme.com")
+        self.client.post(f"/api/projects/{p.id}/submissions/{sid}/review/",
+                         {"decision": "approve"}, content_type="application/json")
+        self.client.post(f"/api/projects/{p.id}/submissions/{sid}/approve/",
+                         {"decision": "approve"}, content_type="application/json")
+
+        gallery = self.client.get(f"/api/projects/{p.id}/progress-images/").json()
+        matches = [g for g in gallery if g["activity_id"] == str(act.id)]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["caption"], "Rebar laid")
+
     def test_reject_requires_comment_and_keeps_progress(self):
         p, act = self._activity()
         from apps.accounts.constants import Permission as P
