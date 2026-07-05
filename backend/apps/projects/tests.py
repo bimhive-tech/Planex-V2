@@ -495,6 +495,34 @@ class ProjectApiTests(TestCase):
         self.assertNotIn(nid, after_unread)
         self.assertIn(nid, after_read)
 
+    def test_review_notification_targets_assigned_project_reviewer(self):
+        # A reviewer elsewhere in the company (not on this project) shouldn't be
+        # notified; the project's assigned Reviewer should be — this is what makes
+        # the project role meaningful instead of a cosmetic label.
+        from .models import ProjectMember
+        from apps.accounts.constants import Permission as P
+        p, act = self._activity()
+
+        reviewer_role = Role.objects.create(company=self.company_a, name="Reviewer role",
+                                            permissions=[P.REVIEW_PROGRESS.value])
+
+        offproject = User.objects.create_user(email="offproject@acme.com", password=STRONG_PW, company=self.company_a)
+        Membership.objects.create(company=self.company_a, user=offproject, role=reviewer_role)
+        # capable, but never added to this project
+
+        onproject = User.objects.create_user(email="onproject@acme.com", password=STRONG_PW, company=self.company_a)
+        Membership.objects.create(company=self.company_a, user=onproject, role=reviewer_role)
+        ProjectMember.objects.create(company=self.company_a, project=p, user=onproject,
+                                     role=ProjectMember.ProjectRole.REVIEWER)
+
+        self._submit(p, act)
+
+        self.login("onproject@acme.com")
+        self.assertGreaterEqual(self.client.get("/api/notifications/").json()["unread_count"], 1)
+
+        self.login("offproject@acme.com")
+        self.assertEqual(self.client.get("/api/notifications/").json()["unread_count"], 0)
+
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")

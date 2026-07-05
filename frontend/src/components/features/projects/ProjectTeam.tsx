@@ -167,7 +167,9 @@ function AddTeamModal({ projectId, onClose, onAdded }: { projectId: string; onCl
           <SearchSelect label="" placeholder="Search company users" options={options} value={userIds} onChange={setUserIds} multiple />
           <Select label="Project role" options={[...PROJECT_ROLES]} value={role} onChange={(e) => setRole(e.target.value)} />
           <p className="formHint">
-            Which modules they can access comes from their company role (Settings → Permissions), not this form.
+            This is who&apos;s responsible for this project — the Reviewer gets notified first when
+            progress is submitted here, the Manager when it&apos;s ready for final approval. Which
+            modules someone can open at all comes from their company role instead (Settings → Permissions).
           </p>
         </div>
 
