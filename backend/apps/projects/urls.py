@@ -40,7 +40,12 @@ from .image_views import ProjectImageDetailView, ProjectImageFileView, ProjectIm
 from .export_views import ProjectP6ExportView, ProjectP6PrepareView, ProjectP6StatusView
 from .notification_views import NotificationListView, NotificationReadView
 from .search_views import GlobalSearchView
-from .submission_views import ProjectSubmissionsView, SubmissionDecisionView
+from .submission_views import (
+    ProjectSubmissionsView,
+    SubmissionDecisionView,
+    SubmissionImageFileView,
+    SubmissionImagesView,
+)
 from .team_views import (
     AssignableUsersView,
     MemberScopeAccessView,
@@ -95,6 +100,10 @@ urlpatterns = [
          SubmissionDecisionView.as_view(stage="review"), name="submission-review"),
     path("projects/<uuid:project_id>/submissions/<uuid:submission_id>/approve/",
          SubmissionDecisionView.as_view(stage="approve"), name="submission-approve"),
+    path("projects/<uuid:project_id>/submissions/<uuid:submission_id>/images/",
+         SubmissionImagesView.as_view(), name="submission-images"),
+    path("projects/<uuid:project_id>/submissions/<uuid:submission_id>/images/<uuid:image_id>/file/",
+         SubmissionImageFileView.as_view(), name="submission-image-file"),
     path("projects/<uuid:project_id>/milestones/", MilestoneListView.as_view(), name="project-milestones"),
     path("projects/<uuid:project_id>/milestones/<uuid:milestone_id>/", MilestoneDetailView.as_view(), name="project-milestone"),
     path("projects/<uuid:project_id>/scopes/", ScopeListCreateView.as_view(), name="scope-create"),

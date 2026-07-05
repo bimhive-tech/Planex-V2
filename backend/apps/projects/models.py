@@ -423,6 +423,32 @@ class ProgressImage(TimestampedModel):
         return self.caption or "progress photo"
 
 
+def submission_image_key(instance, filename):
+    """Stable private storage key for a submission's supporting photo."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"projects/{instance.submission.project_id}/submissions/{uuid.uuid4()}.{ext}"
+
+
+class SubmissionImage(TimestampedModel):
+    """A photo attached as evidence to a progress submission (separate from
+    ProgressEntry photos — this is evidence for the review/approval chain, not
+    the accepted history). Optional caption."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="submission_images")
+    submission = models.ForeignKey(ProgressSubmission, on_delete=models.CASCADE, related_name="images")
+    image = models.ImageField(upload_to=submission_image_key)
+    caption = models.CharField(max_length=200, blank=True)
+    uploaded_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="uploaded_submission_images")
+
+    class Meta:
+        indexes = [models.Index(fields=["submission", "created_at"])]
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return self.caption or "submission photo"
+
+
 class CashFlowEntry(TimestampedModel):
     """One month's planned vs actual cash for a project. The user enters both
     numbers (we don't compute them); the report charts them as-is and can add

@@ -75,7 +75,7 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
                   Update
                 </button>
               )}
-              {canSubmit && (
+              {canSubmit && !canManage && (
                 <button className={styles.submitBtn} title="Submit progress for review" onClick={() => setSubmitFor(a)}>
                   Submit
                 </button>

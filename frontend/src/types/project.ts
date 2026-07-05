@@ -64,6 +64,7 @@ export interface ProjectSubmission {
   submitted_by_name: string;
   reviewed_by_name: string;
   approved_by_name: string;
+  images: { id: string; url: string; caption: string; created_at: string }[];
   reviewed_at: string | null;
   decided_at: string | null;
   created_at: string;

@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
 import { RejectModal } from "@/components/features/approvals/RejectModal";
 import { AuditTrailDrawer } from "@/components/features/approvals/AuditTrailDrawer";
+import { SubmissionPhotos } from "@/components/features/approvals/SubmissionPhotos";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import { formatDate } from "@/lib/format";
@@ -95,6 +96,7 @@ export function ProjectApprovals({ projectId, perms, onChanged }: {
                     by {s.submitted_by_name || "—"} · {formatDate(s.created_at)}
                   </span>
                   {s.note && <p className={styles.note}>“{s.note}”</p>}
+                  <SubmissionPhotos images={s.images} />
                   {s.review_comment && <p className={styles.comment}>Comment: {s.review_comment}</p>}
                 </div>
                 <div className={styles.cardActions}>

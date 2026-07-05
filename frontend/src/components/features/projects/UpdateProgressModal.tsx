@@ -7,7 +7,7 @@
 // saving; on save we create (or update) the entry, then upload staged photos.
 // Recent entries are listed below; the author can edit/delete their own and
 // managers can edit/delete any.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/Input";
 import { Icon } from "@/components/ui/Icon";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
+import { useStagedPhotos } from "@/hooks/useStagedPhotos";
 import type { Activity, ProgressEntry } from "@/types/project";
+import { StagedPhotoPicker } from "./StagedPhotoPicker";
 import styles from "./updateProgress.module.css";
 
 interface Props {
@@ -25,13 +27,6 @@ interface Props {
   onSaved: () => void;
 }
 
-interface StagedPhoto {
-  id: string; // local key only
-  file: File;
-  caption: string;
-  preview: string;
-}
-
 // Today in the browser's local timezone (YYYY-MM-DD) — used as default and max.
 const todayLocal = () => new Date().toLocaleDateString("en-CA");
 
@@ -39,7 +34,7 @@ export function UpdateProgressModal({ projectId, activity, onClose, onSaved }: P
   const [value, setValue] = useState(activity.progress_percent);
   const [date, setDate] = useState(todayLocal());
   const [note, setNote] = useState("");
-  const [photos, setPhotos] = useState<StagedPhoto[]>([]);
+  const { photos, addFiles, removePhoto, setCaption, reset: resetPhotos } = useStagedPhotos();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,35 +45,11 @@ export function UpdateProgressModal({ projectId, activity, onClose, onSaved }: P
   );
   const entries = history.data ?? [];
 
-  // Revoke object URLs on unmount to avoid leaking blobs.
-  useEffect(() => () => photos.forEach((p) => URL.revokeObjectURL(p.preview)), [photos]);
-
-  function addFiles(files: FileList | null) {
-    if (!files) return;
-    const next = Array.from(files).map((file) => ({
-      id: crypto.randomUUID(), file, caption: "", preview: URL.createObjectURL(file),
-    }));
-    setPhotos((prev) => [...prev, ...next]);
-  }
-
-  function removePhoto(id: string) {
-    setPhotos((prev) => {
-      const gone = prev.find((p) => p.id === id);
-      if (gone) URL.revokeObjectURL(gone.preview);
-      return prev.filter((p) => p.id !== id);
-    });
-  }
-
-  function setCaption(id: string, caption: string) {
-    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, caption } : p)));
-  }
-
   function resetForm() {
     setValue(activity.progress_percent);
     setDate(todayLocal());
     setNote("");
-    photos.forEach((p) => URL.revokeObjectURL(p.preview));
-    setPhotos([]);
+    resetPhotos();
     setEditingId(null);
   }
 
@@ -156,30 +127,7 @@ export function UpdateProgressModal({ projectId, activity, onClose, onSaved }: P
         <textarea id="update-note" className={styles.textarea} rows={2}
           value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything worth recording…" />
 
-        <div className={styles.photosHead}>
-          <span className={styles.label}>Photos (optional)</span>
-          <label className={styles.addPhoto}>
-            <Icon name="image" size={15} /> Add photos
-            <input type="file" accept="image/png,image/jpeg,image/webp" multiple
-              onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
-          </label>
-        </div>
-
-        {photos.length > 0 && (
-          <ul className={styles.photoList}>
-            {photos.map((p) => (
-              <li key={p.id} className={styles.photoItem}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview, not an R2 asset */}
-                <img className={styles.thumb} src={p.preview} alt="" />
-                <input className={styles.captionInput} value={p.caption} placeholder="Caption (optional)"
-                  onChange={(e) => setCaption(p.id, e.target.value)} />
-                <button type="button" className={styles.removePhoto} aria-label="Remove photo" onClick={() => removePhoto(p.id)}>
-                  <Icon name="trash" size={14} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <StagedPhotoPicker photos={photos} onAdd={addFiles} onRemove={removePhoto} onCaption={setCaption} />
 
         {editingId && (
           <button type="button" className={styles.cancelEdit} onClick={resetForm}>Cancel edit — record a new entry instead</button>

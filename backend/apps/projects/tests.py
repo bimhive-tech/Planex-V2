@@ -371,6 +371,68 @@ class ProjectApiTests(TestCase):
                                {"decision": "approve"}, content_type="application/json").json()
         self.assertIsNotNone(app["decided_at"])
 
+    # ── Submission photos ─────────────────────────────────────────────────
+    # Minimal valid 1x1 PNG, used across these tests as upload fixture bytes.
+    _PNG_BYTES = (
+        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00'
+        b'\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    )
+
+    def _png(self, name="photo.png"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile(name, self._PNG_BYTES, content_type="image/png")
+
+    def test_submission_photo_upload_and_serialized(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng4@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login("eng4@acme.com")
+        sid = self.client.post(f"/api/projects/{p.id}/submissions/",
+                               {"activity": str(act.id), "submitted_progress": "40"},
+                               content_type="application/json").json()["id"]
+
+        resp = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/images/",
+                                {"image": self._png(), "caption": "Poured slab"})
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["caption"], "Poured slab")
+
+        # eng4 only has SUBMIT_PROGRESS (not VIEW_PROJECTS) -- check the listing as
+        # someone who can actually view the project.
+        self.login("admin@acme.com")
+        listing = self.client.get(f"/api/projects/{p.id}/submissions/").json()
+        sub = next(s for s in listing if s["id"] == sid)
+        self.assertEqual(len(sub["images"]), 1)
+        self.assertEqual(sub["images"][0]["caption"], "Poured slab")
+
+        # The file streams back through the authed endpoint.
+        img_id = resp.json()["id"]
+        file_resp = self.client.get(f"/api/projects/{p.id}/submissions/{sid}/images/{img_id}/file/")
+        self.assertEqual(file_resp.status_code, 200)
+
+    def test_submission_photo_requires_submit_permission(self):
+        p, act = self._activity()
+        sid = self._submit(p, act)  # creates the submission via a throwaway engineer
+        # A plain viewer (no submit_progress) cannot attach a photo.
+        self.login("viewer@acme.com")
+        resp = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/images/",
+                                {"image": self._png()})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_submission_photo_rejects_bad_content_type(self):
+        p, act = self._activity()
+        from apps.accounts.constants import Permission as P
+        eng = User.objects.create_user(email="eng5@acme.com", password=STRONG_PW, company=self.company_a)
+        self._grant(eng, P.SUBMIT_PROGRESS.value)
+        self.login("eng5@acme.com")
+        sid = self.client.post(f"/api/projects/{p.id}/submissions/",
+                               {"activity": str(act.id), "submitted_progress": "10"},
+                               content_type="application/json").json()["id"]
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        bad = SimpleUploadedFile("notes.txt", b"hello", content_type="text/plain")
+        resp = self.client.post(f"/api/projects/{p.id}/submissions/{sid}/images/", {"image": bad})
+        self.assertEqual(resp.status_code, 400)
+
     def test_reject_requires_comment_and_keeps_progress(self):
         p, act = self._activity()
         from apps.accounts.constants import Permission as P

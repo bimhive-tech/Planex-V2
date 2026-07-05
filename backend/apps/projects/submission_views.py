@@ -6,9 +6,15 @@ APPROVE_PROGRESS gives final acceptance (which updates the activity's official
 progress) or rejects. Rejected submissions stay in history; the user resubmits a
 new one. Everything is permission-gated, not role-gated.
 """
+import mimetypes
+
+from django.conf import settings
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,8 +22,21 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 
 from .access import accessible_scope_ids
-from .models import Activity, ProgressSubmission, Project
+from .models import Activity, ProgressSubmission, Project, SubmissionImage
 from .notifications import notify_decision, notify_submitted
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+class SubmissionImageSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SubmissionImage
+        fields = ["id", "url", "caption", "created_at"]
+
+    def get_url(self, obj):
+        return f"/api/projects/{obj.submission.project_id}/submissions/{obj.submission_id}/images/{obj.id}/file/"
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -27,6 +46,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     submitted_by_name = serializers.CharField(source="submitted_by.full_name", default="", read_only=True)
     reviewed_by_name = serializers.CharField(source="reviewed_by.full_name", default="", read_only=True)
     approved_by_name = serializers.CharField(source="approved_by.full_name", default="", read_only=True)
+    images = SubmissionImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProgressSubmission
@@ -34,7 +54,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
             "id", "activity", "activity_name", "activity_path",
             "previous_progress", "submitted_progress", "status", "status_display",
             "note", "review_comment", "submitted_by_name", "reviewed_by_name",
-            "approved_by_name", "reviewed_at", "decided_at", "created_at", "updated_at",
+            "approved_by_name", "images", "reviewed_at", "decided_at", "created_at", "updated_at",
         ]
 
     def get_activity_path(self, obj):
@@ -75,7 +95,7 @@ class ProjectSubmissionsView(APIView):
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view(request)
-        qs = project.submissions.select_related(*_SUBMISSIONS_QS)
+        qs = project.submissions.select_related(*_SUBMISSIONS_QS).prefetch_related("images")
         status_filter = request.query_params.get("status")
         if status_filter == "open":
             qs = qs.filter(status__in=ProgressSubmission.OPEN_STATES)
@@ -158,3 +178,44 @@ class SubmissionDecisionView(APIView):
 
         notify_decision(sub, stage=self.stage, decision=decision, actor=request.user)
         return Response(SubmissionSerializer(sub).data)
+
+
+class SubmissionImagesView(APIView):
+    """POST supporting evidence photos onto a submission (staged client-side,
+    then attached right after the submission is created)."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, project_id, submission_id):
+        project = _project(request, project_id)
+        _require(request, Permission.SUBMIT_PROGRESS.value)
+        sub = get_object_or_404(ProgressSubmission, pk=submission_id, project=project)
+        image = request.FILES.get("image")
+        if not image:
+            raise ValidationError({"image": "No image provided."})
+        if image.size > settings.MAX_UPLOAD_BYTES:
+            raise ValidationError({"image": f"Image must be {settings.MAX_UPLOAD_BYTES // (1024 * 1024)}MB or smaller."})
+        if getattr(image, "content_type", None) not in ALLOWED_IMAGE_TYPES:
+            raise ValidationError({"image": "Upload a JPG, PNG, or WebP image."})
+        obj = SubmissionImage.objects.create(
+            company=project.company, submission=sub, image=image,
+            caption=request.data.get("caption", ""), uploaded_by=request.user,
+        )
+        return Response(SubmissionImageSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class SubmissionImageFileView(APIView):
+    """Stream a submission photo's bytes through an authed, tenant-scoped
+    endpoint — no public URL, same on local disk and R2."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, submission_id, image_id):
+        project = _project(request, project_id)
+        _require_view(request)
+        img = get_object_or_404(SubmissionImage, pk=image_id, submission_id=submission_id, submission__project=project)
+        if not img.image:
+            raise Http404
+        content_type = mimetypes.guess_type(img.image.name)[0] or "application/octet-stream"
+        return FileResponse(img.image.open("rb"), content_type=content_type)
