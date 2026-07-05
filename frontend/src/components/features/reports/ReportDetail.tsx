@@ -243,9 +243,17 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />
                     </div>
-                    {/* Project branding used by every PDF for this project (logos, cover, site photos). */}
+                    {/* Project logos — shown on every report's cover for this project.
+                        (Cover image and photos have their own sub-tabs.) */}
                     {form.project && (
-                      <ProjectReportAssets projectId={form.project} canManage={canManage} onChanged={bump} />
+                      <ProjectReportAssets
+                        projectId={form.project}
+                        canManage={canManage}
+                        onChanged={bump}
+                        types={["logo_left", "logo_right"]}
+                        title="Logos"
+                        subtitle="Left and right logos, shown on the cover of every report for this project."
+                      />
                     )}
                   </section>
                 )}

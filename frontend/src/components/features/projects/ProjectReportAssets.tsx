@@ -18,15 +18,21 @@ const IMAGE_TYPES: { value: ProjectImageType; label: string }[] = [
   { value: "logo_left", label: "Left logo" },
   { value: "logo_right", label: "Right logo" },
 ];
+const ALL_TYPES: ProjectImageType[] = IMAGE_TYPES.map((t) => t.value);
 
 interface Props {
   projectId: string;
   canManage: boolean;
   onChanged?: () => void; // notify parent (e.g. to refresh a PDF preview)
+  types?: ProjectImageType[]; // limit which image kinds this panel manages
+  title?: string;
+  subtitle?: string;
 }
 
-export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) {
-  const [imageType, setImageType] = useState<ProjectImageType>("site_photo");
+export function ProjectReportAssets({ projectId, canManage, onChanged, types, title, subtitle }: Props) {
+  const allowed = types ?? ALL_TYPES;
+  const typeOptions = IMAGE_TYPES.filter((t) => allowed.includes(t.value));
+  const [imageType, setImageType] = useState<ProjectImageType>(typeOptions[0]?.value ?? "logo_left");
   const [caption, setCaption] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +42,7 @@ export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) 
     () => api.get<ProjectImage[]>(`/projects/${projectId}/images/`),
     [projectId],
   );
-  const images = Array.isArray(data) ? data : [];
+  const images = (Array.isArray(data) ? data : []).filter((i) => allowed.includes(i.image_type));
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();
@@ -74,14 +80,14 @@ export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) 
   return (
     <section className={`${styles.card} ${styles.full}`}>
       <header className={styles.cardHead}>
-        <h2 className={styles.cardTitle}>Report Assets</h2>
-        <p className={styles.cardSub}>Logos, cover image, and site photos rendered in generated PDFs.</p>
+        <h2 className={styles.cardTitle}>{title ?? "Report Assets"}</h2>
+        <p className={styles.cardSub}>{subtitle ?? "Logos, cover image, and site photos rendered in generated PDFs."}</p>
       </header>
 
       {canManage && (
         <form className={styles.assetForm} onSubmit={upload}>
           <select className={styles.assetSelect} value={imageType} onChange={(e) => setImageType(e.target.value as ProjectImageType)}>
-            {IMAGE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            {typeOptions.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
           </select>
           <input className={styles.assetInput} value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Caption" />
           <input className={styles.fileInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -97,8 +103,8 @@ export function ProjectReportAssets({ projectId, canManage, onChanged }: Props) 
         loading={loading}
         error={error}
         isEmpty={images.length === 0}
-        emptyTitle="No report images yet"
-        emptyText={canManage ? "Upload logos and site photos to match the reference report." : "No images have been uploaded."}
+        emptyTitle="Nothing uploaded yet"
+        emptyText={canManage ? "Upload images to brand the generated reports." : "No images have been uploaded."}
         onRetry={reload}
       >
         <div className={styles.assetGrid}>
