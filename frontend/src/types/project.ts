@@ -47,6 +47,7 @@ export interface ProjectDetail {
   manager_name: string;
   team_count: number;
   open_submission_count: number;
+  my_project_permissions: string[];
   created_at: string;
   updated_at: string;
 }
@@ -72,7 +73,14 @@ export interface ProjectSubmission {
 }
 
 export interface ProjectPerms {
-  manage: boolean;
+  manage: boolean; // company MANAGE_PROJECTS — admin actions (edit project, manage team)
+  // Per-project module access (from project.my_project_permissions).
+  overview: boolean;
+  schedule: boolean;
+  team: boolean;
+  areasOfConcern: boolean;
+  submittals: boolean;
+  reports: boolean;
   submit: boolean;
   review: boolean;
   approve: boolean;
@@ -127,6 +135,13 @@ export interface ProjectMember {
   full_name: string;
   role: string;
   role_display: string;
+  permissions: string[];
+}
+
+// One group in the project-permission matrix (mirrors the backend catalog).
+export interface ProjectPermGroup {
+  group: string;
+  permissions: { key: string; label: string }[];
 }
 
 export const PROJECT_ROLES = [

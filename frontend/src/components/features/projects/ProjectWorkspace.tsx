@@ -43,15 +43,19 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
 
 export function ProjectWorkspace({ project, canManage, perms }: { project: ProjectDetail; canManage: boolean; perms: ProjectPerms }) {
   const router = useRouter();
-  const showApprovals = perms.review || perms.approve || perms.submit;
+  // Each tab shows only if the user holds that module permission on this project
+  // (admins hold all of them). Least privilege: members see only their modules.
   const tabs: Tab[] = [
-    "Overview", "Schedule", "Team", "Areas of Concern",
+    ...(perms.overview ? (["Overview"] as Tab[]) : []),
+    ...(perms.schedule ? (["Schedule"] as Tab[]) : []),
+    ...(perms.team ? (["Team"] as Tab[]) : []),
+    ...(perms.areasOfConcern ? (["Areas of Concern"] as Tab[]) : []),
     ...(perms.viewFinances ? (["Finances"] as Tab[]) : []),
-    "Submittals",
-    "Reports",
-    ...(showApprovals ? (["Approvals"] as Tab[]) : []),
+    ...(perms.submittals ? (["Submittals"] as Tab[]) : []),
+    ...(perms.reports ? (["Reports"] as Tab[]) : []),
+    ...(perms.review || perms.approve ? (["Approvals"] as Tab[]) : []),
   ];
-  const [tab, setTab] = useState<Tab>("Overview");
+  const [tab, setTab] = useState<Tab>(tabs[0] ?? "Overview");
   const [editOpen, setEditOpen] = useState(false);
   const [stats, setStats] = useState<ProjectStats>({
     overall: project.overall_progress,

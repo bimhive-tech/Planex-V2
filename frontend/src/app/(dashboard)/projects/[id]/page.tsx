@@ -17,15 +17,25 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const has = (perm: string) => user.is_platform_admin || user.permissions.includes(perm);
+  // Tab/module visibility comes from the user's PER-PROJECT permissions (admins
+  // get all of them from the backend); company MANAGE_PROJECTS still gates admin
+  // actions such as editing the project.
+  const P = new Set(project.my_project_permissions);
   const perms = {
     manage: has(Permission.MANAGE_PROJECTS),
-    submit: has(Permission.SUBMIT_PROGRESS),
-    review: has(Permission.REVIEW_PROGRESS),
-    approve: has(Permission.APPROVE_PROGRESS),
+    overview: P.has("overview"),
+    schedule: P.has("schedule"),
+    team: P.has("team"),
+    areasOfConcern: P.has("areas_of_concern"),
+    submittals: P.has("submittals"),
+    reports: P.has("reports"),
+    submit: P.has("submit_progress"),
+    review: P.has("review"),
+    approve: P.has("approve"),
     deletePhotos: has(Permission.MANAGE_PROJECTS) || has(Permission.DELETE_PROGRESS_IMAGES),
-    viewFinances: has(Permission.VIEW_FINANCES) || has(Permission.MANAGE_FINANCES),
-    manageFinances: has(Permission.MANAGE_FINANCES),
-    exportReports: has(Permission.EXPORT_REPORTS),
+    viewFinances: P.has("finances_view"),
+    manageFinances: P.has("finances_manage"),
+    exportReports: P.has("reports"),
   };
   return <ProjectWorkspace project={project} canManage={perms.manage} perms={perms} />;
 }
