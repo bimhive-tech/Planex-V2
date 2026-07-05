@@ -20,6 +20,7 @@ import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
 import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
+import { ProjectReportAssets } from "@/components/features/projects/ProjectReportAssets";
 import { ScopeTree } from "./ScopeTree";
 import styles from "./reports.module.css";
 
@@ -242,6 +243,10 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />
                     </div>
+                    {/* Project branding used by every PDF for this project (logos, cover, site photos). */}
+                    {form.project && (
+                      <ProjectReportAssets projectId={form.project} canManage={canManage} onChanged={bump} />
+                    )}
                   </section>
                 )}
 
