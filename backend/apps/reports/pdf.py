@@ -477,7 +477,8 @@ def _area_dashboard_section(cfg, styles, areas, width, labels, fig):
             pie = zone_duration_pie(cfg, dur, width, labels)
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
-                [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
+                [[f'{dur["total"]} {labels["unit_days"]}', f'{dur["elapsed"]} {labels["unit_days"]}',
+                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']])
             cap_name = f'{labels["duration_section"]} — {area["name"]}'
             flow += _captioned(cfg, styles, pie, cap_name, fig) + [table, Spacer(1, 8)]
         if area.get("photos"):
@@ -620,9 +621,10 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             f"{p['name']} — {ctx['overall']:.1f}% — {b['total']} {labels['activities']}.",
             force=TA_RIGHT if rtl else TA_LEFT))
         story.append(Spacer(1, 4))
+        act = labels["activities"]
         story.append(_data_table(cfg, styles,
             [labels["completed"], labels["in_progress"], labels["not_started"]],
-            [[str(b["completed"]), str(b["in_progress"]), str(b["not_started"])]]))
+            [[f"{b['completed']} {act}", f"{b['in_progress']} {act}", f"{b['not_started']} {act}"]]))
         story.append(Spacer(1, 10))
 
     if sections.get("project_info"):
@@ -637,12 +639,12 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             (labels["info_type"], p["type"]),
             (labels["info_location"], p["location"]),
             (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p["budget"] else ""),
-            (labels.get("info_duration", "Duration"), str(dur["total"]) if dur.get("total") else ""),
+            (labels.get("info_duration", "Duration"), f"{dur['total']} {labels['unit_days']}" if dur.get("total") else ""),
             (labels["info_start"], _fmt_date(p["planned_start"])),
             (labels["info_finish"], _fmt_date(p["planned_finish"])),
             (labels.get("info_revised", "Forecast finish"), _fmt_date(p["revised_finish"]) if p.get("revised_finish") else ""),
-            (labels.get("info_delay", "Delay"), str(dur["delay"]) if dur.get("delay") else ""),
-            (labels["info_size"], f"{p['size_sqm']:,.0f}" if p["size_sqm"] else ""),
+            (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
+            (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p["size_sqm"] else ""),
         ]
         rows = [(k, v) for k, v in rows if v and v != "—"]
         story.append(_info_table(cfg, styles, rows, rtl))
@@ -686,7 +688,8 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             pie = None if dash_on else duration_pie(cfg, ctx, fw, labels)
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
-                [[str(dur["total"]), str(dur["elapsed"]), str(dur["remaining"]), str(dur["delay"])]])
+                [[f'{dur["total"]} {labels["unit_days"]}', f'{dur["elapsed"]} {labels["unit_days"]}',
+                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']])
             story.append(KeepTogether(_sub_heading(styles, labels["duration_section"]) +
                                       _captioned(cfg, styles, pie, labels["duration_section"], fig) + [table, Spacer(1, 10)]))
         if sections.get("scurve") and not dash_on:

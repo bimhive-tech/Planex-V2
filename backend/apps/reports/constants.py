@@ -150,6 +150,9 @@ DEFAULT_CONFIG = {
         "delay_days": "Delay (days)",
         "duration_elapsed": "Elapsed",
         "duration_remaining": "Remaining",
+        # Unit words appended to bare numbers so a reader knows what they mean.
+        "unit_days": "days",
+        "unit_sqm": "m²",
         "scurve": "Time Performance",
         "progress_compare": "Progress vs Plan",
         "figure": "شكل",
