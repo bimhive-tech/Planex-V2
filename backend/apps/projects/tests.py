@@ -456,6 +456,38 @@ class ProjectApiTests(TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["caption"], "Rebar laid")
 
+    def test_backfill_migration_carries_old_accepted_photos(self):
+        # Simulate "old data": an accepted submission with a photo but no
+        # ProgressEntry (as it would exist before the carry-over feature).
+        import importlib
+        from django.apps import apps as global_apps
+        from django.utils import timezone
+        from .models import ProgressEntry, ProgressImage, ProgressSubmission, SubmissionImage
+
+        p, act = self._activity()
+        sub = ProgressSubmission.objects.create(
+            company=self.company_a, project=p, activity=act,
+            submitted_by=self.admin, previous_progress=0, submitted_progress=70,
+            status=ProgressSubmission.Status.ACCEPTED, note="old one",
+            decided_at=timezone.now(),
+        )
+        SubmissionImage.objects.create(
+            company=self.company_a, submission=sub, image=self._png(),
+            caption="Old evidence", uploaded_by=self.admin)
+        self.assertFalse(ProgressEntry.objects.filter(activity=act).exists())
+
+        mig = importlib.import_module(
+            "apps.projects.migrations.0025_backfill_accepted_submission_photos")
+        mig.backfill(global_apps, None)
+
+        gallery = ProgressImage.objects.filter(entry__activity=act)
+        self.assertEqual(gallery.count(), 1)
+        self.assertEqual(gallery.first().caption, "Old evidence")
+
+        # Idempotent: a second run must not duplicate.
+        mig.backfill(global_apps, None)
+        self.assertEqual(ProgressImage.objects.filter(entry__activity=act).count(), 1)
+
     def test_reject_requires_comment_and_keeps_progress(self):
         p, act = self._activity()
         from apps.accounts.constants import Permission as P
