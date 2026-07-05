@@ -13,6 +13,7 @@ import { API_BASE } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
 import { ReportCard } from "@/components/features/reports/ReportCard";
 import { ReportFormDrawer } from "@/components/features/reports/ReportFormDrawer";
+import { ProjectReportAssets } from "./ProjectReportAssets";
 import type { ReportRow } from "@/types/report";
 import styles from "@/components/features/reports/reports.module.css";
 
@@ -56,6 +57,9 @@ export function ProjectReports({ projectId, canManage }: { projectId: string; ca
           <Button leadingIcon={<Icon name="plus" size={16} />} onClick={() => setDrawerOpen(true)}>New report</Button>
         )}
       </div>
+
+      {/* Project-level report branding (logos, cover, site photos) used by every PDF. */}
+      <ProjectReportAssets projectId={projectId} canManage={canManage} />
 
       {actionError && <p className="formError">{actionError}</p>}
 
