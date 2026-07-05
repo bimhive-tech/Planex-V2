@@ -1,10 +1,10 @@
-"""Project team API: list/add/update/remove members, and list assignable users.
+"""Project team API: list/add/remove members, and list assignable users.
 
 Reads need VIEW_PROJECTS; writes need MANAGE_PROJECTS. Members must be users of
-the same company as the project (tenant isolation). Module access itself comes
-from each user's company role permissions (not stored per membership) — a
-membership only carries a display role label and, optionally, scope grants
-(which parts of the project the member can see).
+the same company as the project (tenant isolation). Module access comes from
+each user's company role permissions (Settings -> Permissions) — nothing about
+a membership is editable except scope grants (which parts of the project the
+member can see; see MemberScopeAccessView).
 """
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -80,8 +80,7 @@ class ProjectMemberListView(APIView):
         for user in users:
             if user.id in already:
                 continue
-            member = ProjectMember.objects.create(
-                company=project.company, project=project, user=user, role=data["role"])
+            member = ProjectMember.objects.create(company=project.company, project=project, user=user)
             _set_scope(project, user, data["scope_ids"])
             created.append(member)
 
@@ -97,17 +96,6 @@ class ProjectMemberDetailView(APIView):
             return ProjectMember.objects.select_related("user").get(pk=member_id, project=project)
         except (ProjectMember.DoesNotExist, ValueError, TypeError):
             raise NotFound("Member not found.")
-
-    def patch(self, request, project_id, member_id):
-        project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
-        member = self._get(project, member_id)
-        role = request.data.get("role")
-        if role not in dict(ProjectMember.ProjectRole.choices):
-            raise ValidationError({"role": "Invalid role."})
-        member.role = role
-        member.save(update_fields=["role", "updated_at"])
-        return Response(ProjectMemberSerializer(member).data)
 
     def delete(self, request, project_id, member_id):
         project = _project(request, project_id)

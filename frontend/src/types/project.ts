@@ -44,7 +44,6 @@ export interface ProjectDetail {
   overall_progress: number;
   activity_count: number;
   progress_breakdown: ProgressBreakdown;
-  manager_name: string;
   team_count: number;
   open_submission_count: number;
   created_at: string;
@@ -133,16 +132,10 @@ export interface ProjectMember {
   user_id: string;
   email: string;
   full_name: string;
-  role: string;
-  role_display: string;
+  // The user's actual company role(s) (Settings -> Roles) — read-only display;
+  // there's no separate per-project role anymore.
+  role_names: string[];
 }
-
-export const PROJECT_ROLES = [
-  { value: "manager", label: "Project Manager" },
-  { value: "reviewer", label: "Reviewer" },
-  { value: "engineer", label: "Site Engineer" },
-  { value: "member", label: "Member" },
-] as const;
 
 export interface ProgressBreakdown {
   total: number;

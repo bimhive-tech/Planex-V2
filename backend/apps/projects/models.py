@@ -246,29 +246,23 @@ class ProjectDelay(TimestampedModel):
 
 
 class ProjectMember(TimestampedModel):
-    """A company user assigned to a project, with a project-level role."""
-
-    class ProjectRole(models.TextChoices):
-        MANAGER = "manager", "Project Manager"
-        REVIEWER = "reviewer", "Reviewer"
-        ENGINEER = "engineer", "Site Engineer"
-        MEMBER = "member", "Member"
+    """A company user assigned to a project. What they can DO comes from their
+    company role (Settings -> Permissions); what part of the project they can
+    SEE comes from their scope grants (ProjectScopeAccess) below."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_members")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="project_memberships")
-    role = models.CharField(max_length=20, choices=ProjectRole.choices, default=ProjectRole.MEMBER)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["project", "user"], name="uniq_project_member"),
         ]
-        indexes = [models.Index(fields=["project", "role"])]
-        ordering = ["role", "created_at"]
+        ordering = ["created_at"]
 
     def __str__(self):
-        return f"{self.user.email} · {self.get_role_display()}"
+        return self.user.email
 
 
 class ProjectScopeAccess(TimestampedModel):

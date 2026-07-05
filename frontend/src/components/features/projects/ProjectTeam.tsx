@@ -1,29 +1,24 @@
 "use client";
 
-// Team tab: member cards (avatar, name, role, email) + add/remove/scope. Module
-// access (which tabs a member sees) comes from their COMPANY role — configured
-// in Settings → Permissions — not from this screen. What IS project-specific is
-// scope: which parts of the project a member can see within the modules their
-// role already grants them.
+// Team tab: member cards (avatar, name, their real company role, email) +
+// add/remove/edit-access. There's no separate per-project role — everyone's
+// role badge is their actual company role from Settings → Roles, read-only
+// here. What IS project-specific is scope: which parts of THIS project a
+// member can see within whatever modules their company role already grants.
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
 import { SearchSelect } from "@/components/ui/SearchSelect";
 import { Modal } from "@/components/ui/Modal";
 import { StateView } from "@/components/ui/StateView";
 import { ScopeTree } from "@/components/features/reports/ScopeTree";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import { PROJECT_ROLES, type ProjectMember } from "@/types/project";
+import type { ProjectMember } from "@/types/project";
 import { ScopeAccessModal } from "./ScopeAccessModal";
 import styles from "./projectTeam.module.css";
-
-const ROLE_TONE: Record<string, "info" | "success" | "warning" | "neutral"> = {
-  manager: "info", reviewer: "warning", engineer: "success", member: "neutral",
-};
 
 function initials(name: string, email: string) {
   const base = name.trim() || email;
@@ -40,16 +35,6 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
   const [accessFor, setAccessFor] = useState<ProjectMember | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const members = data ?? [];
-
-  async function changeRole(m: ProjectMember, role: string) {
-    setActionError(null);
-    try {
-      await api.patch(`/projects/${projectId}/members/${m.id}/`, { role });
-      reload();
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't update role.");
-    }
-  }
 
   async function remove(m: ProjectMember) {
     if (!window.confirm(`Remove ${m.full_name || m.email} from the team?`)) return;
@@ -89,18 +74,18 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
                 <span className={styles.name}>{m.full_name || m.email}</span>
                 <span className={styles.email}>{m.email}</span>
                 <div className={styles.roleRow}>
-                  {canManage ? (
-                    <Select className={styles.roleSelect} options={[...PROJECT_ROLES]} value={m.role}
-                      onChange={(e) => changeRole(m, e.target.value)} aria-label="Role" />
+                  {m.role_names.length > 0 ? (
+                    m.role_names.map((r) => <Badge key={r} tone="neutral">{r}</Badge>)
                   ) : (
-                    <Badge tone={ROLE_TONE[m.role] ?? "neutral"}>{m.role_display}</Badge>
+                    <span className={styles.muted}>No role</span>
                   )}
                 </div>
               </div>
               {canManage && (
                 <div className={styles.cardActions}>
-                  <button className={styles.accessBtn} title="Manage scope" onClick={() => setAccessFor(m)}>
-                    Scope
+                  <button className={styles.accessBtn} title="Edit which parts of the project they can see"
+                    onClick={() => setAccessFor(m)}>
+                    Edit access
                   </button>
                   <button className={styles.remove} aria-label="Remove member" onClick={() => remove(m)}>
                     <Icon name="close" size={16} />
@@ -122,7 +107,7 @@ export function ProjectTeam({ projectId, canManage }: { projectId: string; canMa
   );
 }
 
-// --- Add members: pick users -> role -> scope -------------------------------
+// --- Add members: pick users -> scope ---------------------------------------
 
 function AddTeamModal({ projectId, onClose, onAdded }: { projectId: string; onClose: () => void; onAdded: () => void }) {
   const { data: users } = useFetch(
@@ -130,7 +115,6 @@ function AddTeamModal({ projectId, onClose, onAdded }: { projectId: string; onCl
     [projectId],
   );
   const [userIds, setUserIds] = useState<string[]>([]);
-  const [role, setRole] = useState("member");
   const [scope, setScope] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +128,7 @@ function AddTeamModal({ projectId, onClose, onAdded }: { projectId: string; onCl
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/projects/${projectId}/members/`, { user_ids: userIds, role, scope_ids: scope });
+      await api.post(`/projects/${projectId}/members/`, { user_ids: userIds, scope_ids: scope });
       onAdded();
       onClose();
     } catch (err) {
@@ -165,11 +149,9 @@ function AddTeamModal({ projectId, onClose, onAdded }: { projectId: string; onCl
         <div className={styles.step}>
           <span className={styles.stepLabel}>1 · Users</span>
           <SearchSelect label="" placeholder="Search company users" options={options} value={userIds} onChange={setUserIds} multiple />
-          <Select label="Project role" options={[...PROJECT_ROLES]} value={role} onChange={(e) => setRole(e.target.value)} />
           <p className="formHint">
-            This is who&apos;s responsible for this project — the Reviewer gets notified first when
-            progress is submitted here, the Manager when it&apos;s ready for final approval. Which
-            modules someone can open at all comes from their company role instead (Settings → Permissions).
+            Which modules they can open comes from their company role (Settings → Permissions) —
+            shown next to their name below once added.
           </p>
         </div>
 

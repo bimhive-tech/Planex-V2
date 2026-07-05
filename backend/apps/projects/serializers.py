@@ -33,7 +33,6 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     overall_progress = serializers.SerializerMethodField()
     activity_count = serializers.SerializerMethodField()
     progress_breakdown = serializers.SerializerMethodField()
-    manager_name = serializers.SerializerMethodField()
     team_count = serializers.SerializerMethodField()
     open_submission_count = serializers.SerializerMethodField()
 
@@ -44,16 +43,12 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             "priority", "priority_display", "location", "description",
             "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
-            "manager_name", "team_count", "open_submission_count", "created_at", "updated_at",
+            "team_count", "open_submission_count", "created_at", "updated_at",
         ]
 
     def get_open_submission_count(self, obj):
         from .models import ProgressSubmission
         return obj.submissions.filter(status__in=ProgressSubmission.OPEN_STATES).count()
-
-    def get_manager_name(self, obj):
-        m = next((m for m in obj.members.all() if m.role == ProjectMember.ProjectRole.MANAGER), None)
-        return m.user.full_name if m else ""
 
     def get_team_count(self, obj):
         return obj.members.count()
@@ -192,21 +187,24 @@ class ProjectImageUploadSerializer(serializers.ModelSerializer):
 
 # ── Team ───────────────────────────────────────────────────────────────────
 class ProjectMemberSerializer(serializers.ModelSerializer):
-    role_display = serializers.CharField(source="get_role_display", read_only=True)
     user_id = serializers.CharField(source="user.id", read_only=True)
     email = serializers.CharField(source="user.email", read_only=True)
     full_name = serializers.CharField(source="user.full_name", read_only=True)
+    role_names = serializers.SerializerMethodField()
 
     class Meta:
         model = ProjectMember
-        fields = ["id", "user_id", "email", "full_name", "role", "role_display"]
+        fields = ["id", "user_id", "email", "full_name", "role_names"]
+
+    def get_role_names(self, obj):
+        """The user's actual company role(s) (Settings -> Roles) — read-only here;
+        edit them in Settings, not on the project."""
+        return [m.role.name for m in obj.user.memberships.filter(is_active=True).select_related("role")]
 
 
 class ProjectMemberWriteSerializer(serializers.Serializer):
-    """Add one or more members with the same project role + scope. Module access
-    comes from each user's company role permissions, not from this assignment."""
+    """Add one or more members with a shared scope grant. Module access comes
+    from each user's company role permissions, not from this assignment."""
 
     user_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
-    role = serializers.ChoiceField(choices=ProjectMember.ProjectRole.choices,
-                                   default=ProjectMember.ProjectRole.MEMBER)
     scope_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=True, default=list)

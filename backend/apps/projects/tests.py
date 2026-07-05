@@ -240,24 +240,24 @@ class ProjectApiTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     # ── Team ──────────────────────────────────────────────────────────────
-    def test_add_member_and_manager_surfaces_on_detail(self):
+    def test_add_member_surfaces_company_role_on_detail(self):
         p = Project.objects.create(company=self.company_a, name="Clinic", project_type="commercial")
         self.login("admin@acme.com")
         resp = self.client.post(
             f"/api/projects/{p.id}/members/",
-            {"user_ids": [str(self.viewer.id)], "role": "manager"},
+            {"user_ids": [str(self.viewer.id)]},
             content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()[0]["role_display"], "Project Manager")
+        # The member's displayed role is their real company role — read-only here.
+        self.assertEqual(resp.json()[0]["role_names"], ["Viewer"])
         detail = self.client.get(f"/api/projects/{p.id}/").json()
-        self.assertEqual(detail["manager_name"], self.viewer.full_name)
         self.assertEqual(detail["team_count"], 1)
 
     def test_cannot_add_user_from_other_company(self):
         p = Project.objects.create(company=self.company_a, name="Bridge2", project_type="infrastructure")
         self.login("admin@acme.com")
         resp = self.client.post(
-            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.user_b.id)], "role": "member"},
+            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.user_b.id)]},
             content_type="application/json")
         self.assertEqual(resp.status_code, 400)
 
@@ -265,7 +265,7 @@ class ProjectApiTests(TestCase):
         p = Project.objects.create(company=self.company_a, name="Depot3", project_type="industrial")
         self.login("viewer@acme.com")
         resp = self.client.post(
-            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.admin.id)], "role": "member"},
+            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.admin.id)]},
             content_type="application/json")
         self.assertEqual(resp.status_code, 403)
 
@@ -297,7 +297,7 @@ class ProjectApiTests(TestCase):
         z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
         self.login("admin@acme.com")
         m = self.client.post(f"/api/projects/{p.id}/members/",
-                             {"user_ids": [str(self.viewer.id)], "role": "engineer"},
+                             {"user_ids": [str(self.viewer.id)]},
                              content_type="application/json").json()[0]
         put = self.client.put(f"/api/projects/{p.id}/members/{m['id']}/scope-access/",
                               {"scope_ids": [str(z1.id)]}, content_type="application/json")
@@ -313,7 +313,7 @@ class ProjectApiTests(TestCase):
         z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
         self.login("admin@acme.com")
         resp = self.client.post(f"/api/projects/{p.id}/members/", {
-            "user_ids": [str(self.viewer.id)], "role": "member", "scope_ids": [str(z1.id)],
+            "user_ids": [str(self.viewer.id)], "scope_ids": [str(z1.id)],
         }, content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertTrue(ProjectScopeAccess.objects.filter(project=p, user=self.viewer, scope=z1).exists())
@@ -495,34 +495,6 @@ class ProjectApiTests(TestCase):
         self.assertNotIn(nid, after_unread)
         self.assertIn(nid, after_read)
 
-    def test_review_notification_targets_assigned_project_reviewer(self):
-        # A reviewer elsewhere in the company (not on this project) shouldn't be
-        # notified; the project's assigned Reviewer should be — this is what makes
-        # the project role meaningful instead of a cosmetic label.
-        from .models import ProjectMember
-        from apps.accounts.constants import Permission as P
-        p, act = self._activity()
-
-        reviewer_role = Role.objects.create(company=self.company_a, name="Reviewer role",
-                                            permissions=[P.REVIEW_PROGRESS.value])
-
-        offproject = User.objects.create_user(email="offproject@acme.com", password=STRONG_PW, company=self.company_a)
-        Membership.objects.create(company=self.company_a, user=offproject, role=reviewer_role)
-        # capable, but never added to this project
-
-        onproject = User.objects.create_user(email="onproject@acme.com", password=STRONG_PW, company=self.company_a)
-        Membership.objects.create(company=self.company_a, user=onproject, role=reviewer_role)
-        ProjectMember.objects.create(company=self.company_a, project=p, user=onproject,
-                                     role=ProjectMember.ProjectRole.REVIEWER)
-
-        self._submit(p, act)
-
-        self.login("onproject@acme.com")
-        self.assertGreaterEqual(self.client.get("/api/notifications/").json()["unread_count"], 1)
-
-        self.login("offproject@acme.com")
-        self.assertEqual(self.client.get("/api/notifications/").json()["unread_count"], 0)
-
     # ── Milestones ────────────────────────────────────────────────────────
     def test_milestones_crud_and_permissions(self):
         p = Project.objects.create(company=self.company_a, name="Resort", project_type="commercial")
@@ -548,7 +520,7 @@ class ProjectApiTests(TestCase):
         p = Project.objects.create(company=self.company_a, name="Plaza", project_type="commercial")
         self.login("admin@acme.com")
         self.client.post(f"/api/projects/{p.id}/members/",
-                         {"user_id": str(self.viewer.id), "role": "engineer"}, content_type="application/json")
+                         {"user_id": str(self.viewer.id)}, content_type="application/json")
         emails = {u["email"] for u in self.client.get(f"/api/projects/{p.id}/assignable-users/").json()}
         self.assertIn("admin@acme.com", emails)
         self.assertNotIn("viewer@acme.com", emails)  # already a member

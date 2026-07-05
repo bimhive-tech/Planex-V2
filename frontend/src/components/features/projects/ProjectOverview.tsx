@@ -143,7 +143,6 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
       {/* Project details */}
       <section className={styles.card}>
         <CardHead icon="projects" title="Project Details" sub="Key information for this project." />
-        <Row label="Project Manager">{p.manager_name || "—"}</Row>
         <Row label="Client">{p.client_name || "—"}</Row>
         <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
         <Row label="Size">{p.size_sqm ? `${Number(p.size_sqm).toLocaleString()} sqm` : "—"}</Row>

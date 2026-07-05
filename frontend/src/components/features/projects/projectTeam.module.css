@@ -86,11 +86,10 @@
 }
 
 .roleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
   margin-top: var(--space-2);
-}
-
-.roleSelect {
-  max-width: 180px;
 }
 
 .cardActions {
