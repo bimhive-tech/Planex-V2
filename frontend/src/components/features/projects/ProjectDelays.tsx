@@ -52,7 +52,7 @@ export function ProjectDelays({ projectId, canManage }: { projectId: string; can
   return (
     <section className={styles.card}>
       <header className={styles.head}>
-        <h2 className={styles.title}>Obstacles &amp; Delays</h2>
+        <h2 className={styles.title}>Areas of Concern</h2>
         {canManage && (
           <Button size="sm" variant="secondary" leadingIcon={<Icon name="plus" size={15} />}
             onClick={() => setModal({ delay: null })}>

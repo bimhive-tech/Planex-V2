@@ -191,10 +191,10 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
     fields: [{ path: "labels.photos", label: "Section heading", type: "text" }],
   },
   {
-    title: "Delays",
+    title: "Areas of Concern",
     key: "delays",
     enablePath: "sections.delays",
-    hint: "Obstacles & delays — logged on the project's Delays tab.",
+    hint: "Areas of concern — logged on the project's Areas of Concern tab.",
     fields: [
       { path: "labels.delays", label: "Section heading", type: "text" },
       { path: "labels.col_delay", label: "Column: Obstacle", type: "text" },

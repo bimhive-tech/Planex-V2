@@ -30,7 +30,7 @@ export interface ProjectStats {
   breakdown: ProgressBreakdown;
 }
 
-type Tab = "Overview" | "Schedule" | "Team" | "Delays" | "Finances" | "Submittals" | "Reports" | "Approvals";
+type Tab = "Overview" | "Schedule" | "Team" | "Areas of Concern" | "Finances" | "Submittals" | "Reports" | "Approvals";
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
@@ -45,7 +45,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
   const router = useRouter();
   const showApprovals = perms.review || perms.approve || perms.submit;
   const tabs: Tab[] = [
-    "Overview", "Schedule", "Team", "Delays",
+    "Overview", "Schedule", "Team", "Areas of Concern",
     ...(perms.viewFinances ? (["Finances"] as Tab[]) : []),
     "Submittals",
     "Reports",
@@ -110,7 +110,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
         )}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
-        {tab === "Delays" && <ProjectDelays projectId={project.id} canManage={canManage} />}
+        {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={canManage} />}
         {tab === "Finances" && <ProjectFinances projectId={project.id} canManage={perms.manageFinances} />}
         {tab === "Submittals" && <ProjectSubmittals projectId={project.id} canManage={canManage} />}
         {tab === "Reports" && <ProjectReports projectId={project.id} canManage={perms.exportReports} />}
