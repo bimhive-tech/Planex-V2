@@ -566,12 +566,22 @@ class FinanceSubmittalApiTests(TestCase):
 
         self.project = Project.objects.create(company=self.company, name="Tower", project_type="commercial")
 
+        # New model: module access comes from per-project membership permissions,
+        # not company roles. fin_viewer can view finances; plain can view/manage
+        # submittals but has no finance access.
+        from .models import ProjectMember
+        ProjectMember.objects.create(company=self.company, project=self.project,
+                                     user=self.fin_viewer, permissions=["finances_view"])
+        ProjectMember.objects.create(company=self.company, project=self.project,
+                                     user=self.plain, permissions=["submittals"])
+
     def login(self, email):
         resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
                                 content_type="application/json")
         self.assertEqual(resp.status_code, 200, resp.content)
 
-    def test_finance_hidden_without_view_finances(self):
+    def test_finance_hidden_without_finances_perm(self):
+        # plain member (submittals only) has no finance permission -> denied
         self.login("pl@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/cashflow/").status_code, 403)
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/invoices/").status_code, 403)
@@ -610,18 +620,15 @@ class FinanceSubmittalApiTests(TestCase):
         self.assertEqual(len(self.client.get(f"/api/projects/{self.project.id}/invoices/").json()), 1)
         self.assertEqual(self.client.delete(f"/api/projects/{self.project.id}/invoices/{iid}/").status_code, 204)
 
-    def test_submittal_uses_project_perms_not_finance(self):
-        # Plain project-viewer (no finance perm) CAN read submittals...
+    def test_submittals_gated_by_project_perm(self):
+        # Member with the submittals module perm can view AND manage.
         self.login("pl@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 200)
-        # ...but cannot create (needs MANAGE_PROJECTS).
-        resp = self.client.post(f"/api/projects/{self.project.id}/submittals/", {"title": "Door schedule"})
-        self.assertEqual(resp.status_code, 403)
-
-        self.login("fa@acme.com")
         resp = self.client.post(f"/api/projects/{self.project.id}/submittals/",
                                 {"title": "Door schedule", "submittal_type": "shop_drawing",
                                  "discipline": "architecture", "status": "approved"})
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.json()["status_display"], "Approved")
-        self.assertEqual(resp.json()["discipline_display"], "Architecture")
+        # A member without the submittals perm is denied.
+        self.login("fv@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 403)

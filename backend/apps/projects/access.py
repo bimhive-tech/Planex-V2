@@ -29,6 +29,13 @@ def has_project_permission(project, user, perm):
     return perm in project_permissions(project, user)
 
 
+def require_project_permission(project, user, perm):
+    """Raise 403 unless the user holds `perm` on this project (admins bypass)."""
+    from rest_framework.exceptions import PermissionDenied
+    if perm not in project_permissions(project, user):
+        raise PermissionDenied("You don't have access to this project module.")
+
+
 def accessible_zone_ids(project, user):
     """Return None for full access, or the set of zone scope ids the user is limited to."""
     if user.is_platform_admin or Permission.MANAGE_PROJECTS.value in user.effective_permissions():

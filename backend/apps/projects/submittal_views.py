@@ -11,9 +11,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.constants import Permission
-
+from .access import require_project_permission
 from .models import Project, Submittal
+from .permissions_catalog import ProjectPermission
 
 
 def _project(request, project_id):
@@ -23,15 +23,9 @@ def _project(request, project_id):
         raise NotFound("Project not found.")
 
 
-def _require(request, perm):
-    if perm not in request.user.effective_permissions():
-        raise PermissionDenied("You don't have permission to do that.")
-
-
-def _require_view(request):
-    perms = request.user.effective_permissions()
-    if Permission.VIEW_PROJECTS.value not in perms and Permission.MANAGE_PROJECTS.value not in perms:
-        raise PermissionDenied("You don't have permission to view this.")
+def _require_submittals(project, request):
+    """The Submittals/Documents module gates both viewing and managing here."""
+    require_project_permission(project, request.user, ProjectPermission.SUBMITTALS)
 
 
 class SubmittalSerializer(serializers.ModelSerializer):
@@ -61,12 +55,12 @@ class SubmittalListView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_view(request)
+        _require_submittals(project, request)
         return Response(SubmittalSerializer(project.submittals.all(), many=True).data)
 
     def post(self, request, project_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_submittals(project, request)
         serializer = SubmittalWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         submittal = serializer.save(company=project.company, project=project, created_by=request.user)
@@ -85,7 +79,7 @@ class SubmittalDetailView(APIView):
 
     def patch(self, request, project_id, submittal_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_submittals(project, request)
         submittal = self._get(project, submittal_id)
         serializer = SubmittalWriteSerializer(submittal, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -94,7 +88,7 @@ class SubmittalDetailView(APIView):
 
     def delete(self, request, project_id, submittal_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_submittals(project, request)
         submittal = self._get(project, submittal_id)
         if submittal.attachment:
             submittal.attachment.delete(save=False)
@@ -110,7 +104,7 @@ class SubmittalFileView(APIView):
 
     def get(self, request, project_id, submittal_id):
         project = _project(request, project_id)
-        _require_view(request)
+        _require_submittals(project, request)
         submittal = get_object_or_404(Submittal, pk=submittal_id, project=project)
         if not submittal.attachment:
             raise Http404

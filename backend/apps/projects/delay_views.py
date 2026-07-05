@@ -6,9 +6,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.constants import Permission
-
+from .access import require_project_permission
 from .models import Project, ProjectDelay
+from .permissions_catalog import ProjectPermission
 
 
 class DelaySerializer(serializers.ModelSerializer):
@@ -32,15 +32,9 @@ def _project(request, project_id):
         raise NotFound("Project not found.")
 
 
-def _require(request, perm):
-    if perm not in request.user.effective_permissions():
-        raise PermissionDenied("You don't have permission to do that.")
-
-
-def _require_view(request):
-    perms = request.user.effective_permissions()
-    if Permission.VIEW_PROJECTS.value not in perms and Permission.MANAGE_PROJECTS.value not in perms:
-        raise PermissionDenied("You don't have permission to view this.")
+def _require_areas(project, request):
+    """The Areas of Concern module gates both viewing and managing here."""
+    require_project_permission(project, request.user, ProjectPermission.AREAS_OF_CONCERN)
 
 
 class DelayListView(APIView):
@@ -48,12 +42,12 @@ class DelayListView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_view(request)
+        _require_areas(project, request)
         return Response(DelaySerializer(project.delays.all(), many=True).data)
 
     def post(self, request, project_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_areas(project, request)
         serializer = DelayWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         delay = serializer.save(company=project.company, project=project)
@@ -71,7 +65,7 @@ class DelayDetailView(APIView):
 
     def patch(self, request, project_id, delay_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_areas(project, request)
         delay = self._get(project, delay_id)
         serializer = DelayWriteSerializer(delay, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -80,6 +74,6 @@ class DelayDetailView(APIView):
 
     def delete(self, request, project_id, delay_id):
         project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
+        _require_areas(project, request)
         self._get(project, delay_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
