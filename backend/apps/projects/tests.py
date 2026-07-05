@@ -244,9 +244,11 @@ class ProjectApiTests(TestCase):
         self.login("admin@acme.com")
         resp = self.client.post(
             f"/api/projects/{p.id}/members/",
-            {"user_id": str(self.viewer.id), "role": "manager"}, content_type="application/json")
+            {"user_ids": [str(self.viewer.id)], "role": "manager", "permissions": ["overview", "schedule"]},
+            content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()["role_display"], "Project Manager")
+        self.assertEqual(resp.json()[0]["role_display"], "Project Manager")
+        self.assertEqual(resp.json()[0]["permissions"], ["overview", "schedule"])
         detail = self.client.get(f"/api/projects/{p.id}/").json()
         self.assertEqual(detail["manager_name"], self.viewer.full_name)
         self.assertEqual(detail["team_count"], 1)
@@ -255,7 +257,7 @@ class ProjectApiTests(TestCase):
         p = Project.objects.create(company=self.company_a, name="Bridge2", project_type="infrastructure")
         self.login("admin@acme.com")
         resp = self.client.post(
-            f"/api/projects/{p.id}/members/", {"user_id": str(self.user_b.id), "role": "member"},
+            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.user_b.id)], "role": "member"},
             content_type="application/json")
         self.assertEqual(resp.status_code, 400)
 
@@ -263,7 +265,7 @@ class ProjectApiTests(TestCase):
         p = Project.objects.create(company=self.company_a, name="Depot3", project_type="industrial")
         self.login("viewer@acme.com")
         resp = self.client.post(
-            f"/api/projects/{p.id}/members/", {"user_id": str(self.admin.id), "role": "member"},
+            f"/api/projects/{p.id}/members/", {"user_ids": [str(self.admin.id)], "role": "member"},
             content_type="application/json")
         self.assertEqual(resp.status_code, 403)
 
@@ -295,14 +297,40 @@ class ProjectApiTests(TestCase):
         z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
         self.login("admin@acme.com")
         m = self.client.post(f"/api/projects/{p.id}/members/",
-                             {"user_id": str(self.viewer.id), "role": "engineer"},
-                             content_type="application/json").json()
+                             {"user_ids": [str(self.viewer.id)], "role": "engineer"},
+                             content_type="application/json").json()[0]
         put = self.client.put(f"/api/projects/{p.id}/members/{m['id']}/scope-access/",
-                              {"zone_ids": [str(z1.id)]}, content_type="application/json")
+                              {"scope_ids": [str(z1.id)]}, content_type="application/json")
         self.assertEqual(put.status_code, 200, put.content)
-        self.assertEqual(put.json()["zone_ids"], [str(z1.id)])
+        self.assertEqual(put.json()["scope_ids"], [str(z1.id)])
         got = self.client.get(f"/api/projects/{p.id}/members/{m['id']}/scope-access/").json()
-        self.assertEqual(got["zone_ids"], [str(z1.id)])
+        self.assertEqual(got["scope_ids"], [str(z1.id)])
+
+    def test_add_members_batch_with_permissions_and_scope(self):
+        from .models import ProjectScope, ProjectScopeAccess
+        p = Project.objects.create(company=self.company_a, name="Batch1", project_type="commercial")
+        z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
+        self.login("admin@acme.com")
+        resp = self.client.post(f"/api/projects/{p.id}/members/", {
+            "user_ids": [str(self.viewer.id)], "role": "member",
+            "permissions": ["overview", "finances_view", "bogus"], "scope_ids": [str(z1.id)],
+        }, content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        # unknown perm keys are dropped
+        self.assertEqual(set(resp.json()[0]["permissions"]), {"overview", "finances_view"})
+        self.assertTrue(ProjectScopeAccess.objects.filter(project=p, user=self.viewer, scope=z1).exists())
+
+    def test_my_project_permissions_on_detail(self):
+        p = Project.objects.create(company=self.company_a, name="Perms1", project_type="commercial")
+        # admin (MANAGE_PROJECTS) sees all project permissions
+        self.login("admin@acme.com")
+        self.assertIn("finances_manage", self.client.get(f"/api/projects/{p.id}/").json()["my_project_permissions"])
+        # a plain member sees only what they were granted
+        self.client.post(f"/api/projects/{p.id}/members/",
+                         {"user_ids": [str(self.viewer.id)], "role": "member", "permissions": ["overview"]},
+                         content_type="application/json")
+        self.login("viewer@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{p.id}/").json()["my_project_permissions"], ["overview"])
 
     # ── Approval chain ────────────────────────────────────────────────────
     def _activity(self):

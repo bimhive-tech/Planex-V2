@@ -9,11 +9,34 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.db import transaction
 from apps.accounts.constants import Permission
 from apps.accounts.models import User
 
 from .models import Project, ProjectMember, ProjectScope, ProjectScopeAccess
-from .serializers import ProjectMemberSerializer, ProjectMemberWriteSerializer
+from .permissions_catalog import ALL_PROJECT_PERMISSIONS, project_permission_catalog
+from .serializers import (
+    ProjectMemberSerializer,
+    ProjectMemberUpdateSerializer,
+    ProjectMemberWriteSerializer,
+)
+
+
+def _clean_perms(raw):
+    """Keep only known permission keys (ignore anything unexpected)."""
+    valid = set(ALL_PROJECT_PERMISSIONS)
+    return [p for p in (raw or []) if p in valid]
+
+
+def _set_scope(project, user, scope_ids):
+    """Replace a user's scope grants for the project (any scope level)."""
+    scopes = list(project.scopes.filter(id__in=scope_ids)) if scope_ids else []
+    ProjectScopeAccess.objects.filter(project=project, user=user).delete()
+    ProjectScopeAccess.objects.bulk_create([
+        ProjectScopeAccess(company=project.company, project=project, user=user, scope=s)
+        for s in scopes
+    ])
+    return [str(s.id) for s in scopes]
 
 
 def _project(request, project_id):
@@ -43,25 +66,36 @@ class ProjectMemberListView(APIView):
         members = project.members.select_related("user").all()
         return Response(ProjectMemberSerializer(members, many=True).data)
 
+    @transaction.atomic
     def post(self, request, project_id):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
-        serializer = ProjectMemberWriteSerializer(data=request.data)
+        # Backward compat: accept a single `user_id` from the old add-member form.
+        payload = request.data
+        if not payload.get("user_ids") and payload.get("user_id"):
+            payload = {**payload, "user_ids": [payload["user_id"]]}
+        serializer = ProjectMemberWriteSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # The user must belong to the same company.
-        try:
-            user = User.objects.get(pk=data["user_id"], company=project.company)
-        except (User.DoesNotExist, ValueError, TypeError):
-            raise ValidationError({"user_id": "User not found in this company."})
-        if project.members.filter(user=user).exists():
-            raise ValidationError({"user_id": "Already a member of this project."})
+        # All requested users must belong to the company and not already be members.
+        users = list(User.objects.filter(id__in=data["user_ids"], company=project.company))
+        if len(users) != len(set(data["user_ids"])):
+            raise ValidationError({"user_ids": "One or more users were not found in this company."})
+        already = set(project.members.filter(user__in=users).values_list("user_id", flat=True))
 
-        member = ProjectMember.objects.create(
-            company=project.company, project=project, user=user, role=data["role"])
-        member = ProjectMember.objects.select_related("user").get(pk=member.pk)
-        return Response(ProjectMemberSerializer(member).data, status=status.HTTP_201_CREATED)
+        perms = _clean_perms(data["permissions"])
+        created = []
+        for user in users:
+            if user.id in already:
+                continue
+            member = ProjectMember.objects.create(
+                company=project.company, project=project, user=user, role=data["role"], permissions=perms)
+            _set_scope(project, user, data["scope_ids"])
+            created.append(member)
+
+        members = ProjectMember.objects.select_related("user").filter(pk__in=[m.pk for m in created])
+        return Response(ProjectMemberSerializer(members, many=True).data, status=status.HTTP_201_CREATED)
 
 
 class ProjectMemberDetailView(APIView):
@@ -77,11 +111,18 @@ class ProjectMemberDetailView(APIView):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
         member = self._get(project, member_id)
-        role = request.data.get("role")
-        if role not in dict(ProjectMember.ProjectRole.choices):
-            raise ValidationError({"role": "Invalid role."})
-        member.role = role
-        member.save(update_fields=["role", "updated_at"])
+        serializer = ProjectMemberUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        fields = ["updated_at"]
+        if "role" in data:
+            member.role = data["role"]
+            fields.append("role")
+        if "permissions" in data:
+            member.permissions = _clean_perms(data["permissions"])
+            fields.append("permissions")
+        member.save(update_fields=fields)
         return Response(ProjectMemberSerializer(member).data)
 
     def delete(self, request, project_id, member_id):
@@ -118,22 +159,28 @@ class MemberScopeAccessView(APIView):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
         member = self._member(project, member_id)
-        zone_ids = list(ProjectScopeAccess.objects.filter(project=project, user=member.user)
-                        .values_list("scope_id", flat=True))
-        return Response({"zone_ids": [str(z) for z in zone_ids]})
+        scope_ids = list(ProjectScopeAccess.objects.filter(project=project, user=member.user)
+                         .values_list("scope_id", flat=True))
+        # `zone_ids` kept for backward compat with existing callers.
+        return Response({"scope_ids": [str(s) for s in scope_ids], "zone_ids": [str(s) for s in scope_ids]})
 
     def put(self, request, project_id, member_id):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
         member = self._member(project, member_id)
-        ids = request.data.get("zone_ids", [])
-        zones = list(project.scopes.filter(id__in=ids, scope_type=ProjectScope.ScopeType.ZONE))
-        ProjectScopeAccess.objects.filter(project=project, user=member.user).delete()
-        ProjectScopeAccess.objects.bulk_create([
-            ProjectScopeAccess(company=project.company, project=project, user=member.user, scope=z)
-            for z in zones
-        ])
-        return Response({"zone_ids": [str(z.id) for z in zones]})
+        # Accept scope_ids (any level: zone/area/phase/activity); fall back to zone_ids.
+        ids = request.data.get("scope_ids", request.data.get("zone_ids", []))
+        saved = _set_scope(project, member.user, ids)
+        return Response({"scope_ids": saved, "zone_ids": saved})
+
+
+class ProjectPermissionCatalogView(APIView):
+    """The available per-project module permissions, grouped for the matrix UI."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(project_permission_catalog())
 
 
 class AssignableUsersView(APIView):

@@ -46,6 +46,7 @@ from .team_views import (
     MemberScopeAccessView,
     ProjectMemberDetailView,
     ProjectMemberListView,
+    ProjectPermissionCatalogView,
     ProjectZonesView,
 )
 from .views import ProjectViewSet
@@ -82,6 +83,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/images/", ProjectImageListCreateView.as_view(), name="project-images"),
     path("projects/<uuid:project_id>/images/<uuid:pk>/", ProjectImageDetailView.as_view(), name="project-image"),
     path("projects/<uuid:project_id>/images/<uuid:pk>/file/", ProjectImageFileView.as_view(), name="project-image-file"),
+    path("project-permissions/catalog/", ProjectPermissionCatalogView.as_view(), name="project-permission-catalog"),
     path("projects/<uuid:project_id>/members/", ProjectMemberListView.as_view(), name="project-members"),
     path("projects/<uuid:project_id>/members/<uuid:member_id>/", ProjectMemberDetailView.as_view(), name="project-member"),
     path("projects/<uuid:project_id>/assignable-users/", AssignableUsersView.as_view(), name="project-assignable-users"),
