@@ -1,14 +1,15 @@
-"""Project delays / obstacles API (the report's «المعوقات» section).
-Reads need VIEW_PROJECTS; writes need MANAGE_PROJECTS."""
+"""Areas of Concern API (obstacles/delays log, the report's «المعوقات» section).
+Reads need VIEW_AREAS_OF_CONCERN (or MANAGE_AREAS_OF_CONCERN), writes need
+MANAGE_AREAS_OF_CONCERN."""
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .access import require_project_permission
+from apps.accounts.constants import Permission
+
 from .models import Project, ProjectDelay
-from .permissions_catalog import ProjectPermission
 
 
 class DelaySerializer(serializers.ModelSerializer):
@@ -32,9 +33,15 @@ def _project(request, project_id):
         raise NotFound("Project not found.")
 
 
-def _require_areas(project, request):
-    """The Areas of Concern module gates both viewing and managing here."""
-    require_project_permission(project, request.user, ProjectPermission.AREAS_OF_CONCERN)
+def _require_view_areas(request):
+    perms = request.user.effective_permissions()
+    if Permission.VIEW_AREAS_OF_CONCERN.value not in perms and Permission.MANAGE_AREAS_OF_CONCERN.value not in perms:
+        raise PermissionDenied("You don't have permission to view areas of concern.")
+
+
+def _require_manage_areas(request):
+    if Permission.MANAGE_AREAS_OF_CONCERN.value not in request.user.effective_permissions():
+        raise PermissionDenied("You don't have permission to manage areas of concern.")
 
 
 class DelayListView(APIView):
@@ -42,12 +49,12 @@ class DelayListView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_areas(project, request)
+        _require_view_areas(request)
         return Response(DelaySerializer(project.delays.all(), many=True).data)
 
     def post(self, request, project_id):
         project = _project(request, project_id)
-        _require_areas(project, request)
+        _require_manage_areas(request)
         serializer = DelayWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         delay = serializer.save(company=project.company, project=project)
@@ -65,7 +72,7 @@ class DelayDetailView(APIView):
 
     def patch(self, request, project_id, delay_id):
         project = _project(request, project_id)
-        _require_areas(project, request)
+        _require_manage_areas(request)
         delay = self._get(project, delay_id)
         serializer = DelayWriteSerializer(delay, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -74,6 +81,6 @@ class DelayDetailView(APIView):
 
     def delete(self, request, project_id, delay_id):
         project = _project(request, project_id)
-        _require_areas(project, request)
+        _require_manage_areas(request)
         self._get(project, delay_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

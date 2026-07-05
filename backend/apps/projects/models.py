@@ -259,9 +259,6 @@ class ProjectMember(TimestampedModel):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="members")
     user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="project_memberships")
     role = models.CharField(max_length=20, choices=ProjectRole.choices, default=ProjectRole.MEMBER)
-    # Per-project module permissions (see permissions_catalog). Which tabs/actions
-    # this member can access on THIS project. Admins bypass; see access.py.
-    permissions = models.JSONField(default=list, blank=True)
 
     class Meta:
         constraints = [

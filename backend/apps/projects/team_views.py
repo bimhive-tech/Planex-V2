@@ -1,7 +1,10 @@
 """Project team API: list/add/update/remove members, and list assignable users.
 
 Reads need VIEW_PROJECTS; writes need MANAGE_PROJECTS. Members must be users of
-the same company as the project (tenant isolation).
+the same company as the project (tenant isolation). Module access itself comes
+from each user's company role permissions (not stored per membership) — a
+membership only carries a display role label and, optionally, scope grants
+(which parts of the project the member can see).
 """
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -14,18 +17,7 @@ from apps.accounts.constants import Permission
 from apps.accounts.models import User
 
 from .models import Project, ProjectMember, ProjectScope, ProjectScopeAccess
-from .permissions_catalog import ALL_PROJECT_PERMISSIONS, project_permission_catalog
-from .serializers import (
-    ProjectMemberSerializer,
-    ProjectMemberUpdateSerializer,
-    ProjectMemberWriteSerializer,
-)
-
-
-def _clean_perms(raw):
-    """Keep only known permission keys (ignore anything unexpected)."""
-    valid = set(ALL_PROJECT_PERMISSIONS)
-    return [p for p in (raw or []) if p in valid]
+from .serializers import ProjectMemberSerializer, ProjectMemberWriteSerializer
 
 
 def _set_scope(project, user, scope_ids):
@@ -84,13 +76,12 @@ class ProjectMemberListView(APIView):
             raise ValidationError({"user_ids": "One or more users were not found in this company."})
         already = set(project.members.filter(user__in=users).values_list("user_id", flat=True))
 
-        perms = _clean_perms(data["permissions"])
         created = []
         for user in users:
             if user.id in already:
                 continue
             member = ProjectMember.objects.create(
-                company=project.company, project=project, user=user, role=data["role"], permissions=perms)
+                company=project.company, project=project, user=user, role=data["role"])
             _set_scope(project, user, data["scope_ids"])
             created.append(member)
 
@@ -111,18 +102,11 @@ class ProjectMemberDetailView(APIView):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
         member = self._get(project, member_id)
-        serializer = ProjectMemberUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
-        fields = ["updated_at"]
-        if "role" in data:
-            member.role = data["role"]
-            fields.append("role")
-        if "permissions" in data:
-            member.permissions = _clean_perms(data["permissions"])
-            fields.append("permissions")
-        member.save(update_fields=fields)
+        role = request.data.get("role")
+        if role not in dict(ProjectMember.ProjectRole.choices):
+            raise ValidationError({"role": "Invalid role."})
+        member.role = role
+        member.save(update_fields=["role", "updated_at"])
         return Response(ProjectMemberSerializer(member).data)
 
     def delete(self, request, project_id, member_id):
@@ -145,7 +129,7 @@ class ProjectZonesView(APIView):
 
 
 class MemberScopeAccessView(APIView):
-    """GET the zones a member is restricted to (empty = full access); PUT to set them."""
+    """GET the scopes a member is restricted to (empty = full access); PUT to set them."""
 
     permission_classes = [IsAuthenticated]
 
@@ -172,15 +156,6 @@ class MemberScopeAccessView(APIView):
         ids = request.data.get("scope_ids", request.data.get("zone_ids", []))
         saved = _set_scope(project, member.user, ids)
         return Response({"scope_ids": saved, "zone_ids": saved})
-
-
-class ProjectPermissionCatalogView(APIView):
-    """The available per-project module permissions, grouped for the matrix UI."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        return Response(project_permission_catalog())
 
 
 class AssignableUsersView(APIView):

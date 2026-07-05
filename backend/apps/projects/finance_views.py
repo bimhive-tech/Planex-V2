@@ -14,9 +14,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .access import require_project_permission
+from apps.accounts.constants import Permission
+
 from .models import CashFlowEntry, Invoice, Project
-from .permissions_catalog import ProjectPermission
 
 
 def _project(request, project_id):
@@ -26,12 +26,15 @@ def _project(request, project_id):
         raise NotFound("Project not found.")
 
 
-def _require_view_finances(project, request):
-    require_project_permission(project, request.user, ProjectPermission.FINANCES_VIEW)
+def _require_view_finances(request):
+    perms = request.user.effective_permissions()
+    if Permission.VIEW_FINANCES.value not in perms and Permission.MANAGE_FINANCES.value not in perms:
+        raise PermissionDenied("You don't have permission to view finances.")
 
 
-def _require_manage_finances(project, request):
-    require_project_permission(project, request.user, ProjectPermission.FINANCES_MANAGE)
+def _require_manage_finances(request):
+    if Permission.MANAGE_FINANCES.value not in request.user.effective_permissions():
+        raise PermissionDenied("You don't have permission to manage finances.")
 
 
 # --- Cash flow -------------------------------------------------------------
@@ -56,12 +59,12 @@ class CashFlowView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_view_finances(project, request)
+        _require_view_finances(request)
         return Response(self._payload(project))
 
     def put(self, request, project_id):
         project = _project(request, project_id)
-        _require_manage_finances(project, request)
+        _require_manage_finances(request)
         rows = request.data if isinstance(request.data, list) else request.data.get("entries", [])
         serializer = CashFlowEntrySerializer(data=rows, many=True)
         serializer.is_valid(raise_exception=True)
@@ -105,12 +108,12 @@ class InvoiceListView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_view_finances(project, request)
+        _require_view_finances(request)
         return Response(InvoiceSerializer(project.invoices.all(), many=True).data)
 
     def post(self, request, project_id):
         project = _project(request, project_id)
-        _require_manage_finances(project, request)
+        _require_manage_finances(request)
         serializer = InvoiceWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         invoice = serializer.save(company=project.company, project=project, created_by=request.user)
@@ -129,7 +132,7 @@ class InvoiceDetailView(APIView):
 
     def patch(self, request, project_id, invoice_id):
         project = _project(request, project_id)
-        _require_manage_finances(project, request)
+        _require_manage_finances(request)
         invoice = self._get(project, invoice_id)
         serializer = InvoiceWriteSerializer(invoice, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -138,7 +141,7 @@ class InvoiceDetailView(APIView):
 
     def delete(self, request, project_id, invoice_id):
         project = _project(request, project_id)
-        _require_manage_finances(project, request)
+        _require_manage_finances(request)
         invoice = self._get(project, invoice_id)
         if invoice.image:
             invoice.image.delete(save=False)
@@ -154,7 +157,7 @@ class InvoiceImageView(APIView):
 
     def get(self, request, project_id, invoice_id):
         project = _project(request, project_id)
-        _require_view_finances(project, request)
+        _require_view_finances(request)
         invoice = get_object_or_404(Invoice, pk=invoice_id, project=project)
         if not invoice.image:
             raise Http404

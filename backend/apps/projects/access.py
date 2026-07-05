@@ -1,44 +1,26 @@
-"""Scope-based access: a member restricted to specific zones only sees those.
+"""Scope-based access: a member restricted to specific scopes only sees those.
 
 Rule (mirrors Planex): no grants -> full access; one or more grants -> limited to
-those zones and everything under them. Platform admins and MANAGE_PROJECTS bypass.
+those scopes and everything under them. Platform admins and MANAGE_PROJECTS bypass.
+
+Module access itself (which tabs/endpoints a user may use at all) is governed by
+company role permissions (apps.accounts.constants.Permission) — the same system
+used everywhere else in the app. Scope only narrows the DATA visible within a
+module the user already has access to.
 """
 from apps.accounts.constants import Permission
 
 from .models import ProjectScopeAccess
-from .permissions_catalog import ALL_PROJECT_PERMISSIONS
 
 
 def is_project_admin(user):
-    """Platform admins and company MANAGE_PROJECTS holders bypass project perms."""
+    """Platform admins and company MANAGE_PROJECTS holders see the whole project."""
     return user.is_platform_admin or Permission.MANAGE_PROJECTS.value in user.effective_permissions()
-
-
-def project_permissions(project, user):
-    """The set of per-project module permission keys this user holds on `project`.
-
-    Admins implicitly hold all of them; otherwise it's the member's stored set
-    (empty if they aren't a member of this project)."""
-    if is_project_admin(user):
-        return set(ALL_PROJECT_PERMISSIONS)
-    member = project.members.filter(user=user).only("permissions", "project", "user").first()
-    return set(member.permissions or []) if member else set()
-
-
-def has_project_permission(project, user, perm):
-    return perm in project_permissions(project, user)
-
-
-def require_project_permission(project, user, perm):
-    """Raise 403 unless the user holds `perm` on this project (admins bypass)."""
-    from rest_framework.exceptions import PermissionDenied
-    if perm not in project_permissions(project, user):
-        raise PermissionDenied("You don't have access to this project module.")
 
 
 def accessible_zone_ids(project, user):
     """Return None for full access, or the set of zone scope ids the user is limited to."""
-    if user.is_platform_admin or Permission.MANAGE_PROJECTS.value in user.effective_permissions():
+    if is_project_admin(user):
         return None
     grants = set(ProjectScopeAccess.objects.filter(project=project, user=user)
                  .values_list("scope_id", flat=True))

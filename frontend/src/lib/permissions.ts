@@ -8,6 +8,7 @@ export const Permission = {
   MANAGE_DEPARTMENTS: "manage_departments",
   MANAGE_PROJECTS: "manage_projects",
   VIEW_PROJECTS: "view_projects",
+  VIEW_SCHEDULE: "view_schedule",
   SUBMIT_PROGRESS: "submit_progress",
   REVIEW_PROGRESS: "review_progress",
   APPROVE_PROGRESS: "approve_progress",
@@ -15,6 +16,10 @@ export const Permission = {
   EXPORT_REPORTS: "export_reports",
   VIEW_FINANCES: "view_finances",
   MANAGE_FINANCES: "manage_finances",
+  VIEW_AREAS_OF_CONCERN: "view_areas_of_concern",
+  MANAGE_AREAS_OF_CONCERN: "manage_areas_of_concern",
+  VIEW_SUBMITTALS: "view_submittals",
+  MANAGE_SUBMITTALS: "manage_submittals",
 } as const;
 
 export type PermissionKey = (typeof Permission)[keyof typeof Permission];

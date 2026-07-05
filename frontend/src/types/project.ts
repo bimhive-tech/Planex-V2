@@ -47,7 +47,6 @@ export interface ProjectDetail {
   manager_name: string;
   team_count: number;
   open_submission_count: number;
-  my_project_permissions: string[];
   created_at: string;
   updated_at: string;
 }
@@ -72,19 +71,20 @@ export interface ProjectSubmission {
   updated_at: string;
 }
 
+// Module access comes from the user's COMPANY role permissions (consistent
+// everywhere in the app); scope (which data within a module) is the only thing
+// configured per-project-member. See ProjectMember below.
 export interface ProjectPerms {
-  manage: boolean; // company MANAGE_PROJECTS — admin actions (edit project, manage team)
-  // Per-project module access (from project.my_project_permissions).
-  overview: boolean;
-  schedule: boolean;
-  team: boolean;
-  areasOfConcern: boolean;
-  submittals: boolean;
-  reports: boolean;
+  manage: boolean; // MANAGE_PROJECTS — admin actions (edit project, manage team, structural edits)
+  viewSchedule: boolean;
   submit: boolean;
   review: boolean;
   approve: boolean;
   deletePhotos: boolean;
+  viewAreasOfConcern: boolean;
+  manageAreasOfConcern: boolean;
+  viewSubmittals: boolean;
+  manageSubmittals: boolean;
   viewFinances: boolean;
   manageFinances: boolean;
   exportReports: boolean;
@@ -135,13 +135,6 @@ export interface ProjectMember {
   full_name: string;
   role: string;
   role_display: string;
-  permissions: string[];
-}
-
-// One group in the project-permission matrix (mirrors the backend catalog).
-export interface ProjectPermGroup {
-  group: string;
-  permissions: { key: string; label: string }[];
 }
 
 export const PROJECT_ROLES = [

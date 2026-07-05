@@ -22,6 +22,7 @@ class Permission(models.TextChoices):
     # Project domain (used by later modules; defined now so roles are stable).
     MANAGE_PROJECTS = "manage_projects", "Manage projects"
     VIEW_PROJECTS = "view_projects", "View projects"
+    VIEW_SCHEDULE = "view_schedule", "View schedule"
     SUBMIT_PROGRESS = "submit_progress", "Submit progress"
     REVIEW_PROGRESS = "review_progress", "Review progress"
     APPROVE_PROGRESS = "approve_progress", "Approve progress"
@@ -31,6 +32,14 @@ class Permission(models.TextChoices):
     # Finances (money is sensitive — gated separately from general project access).
     VIEW_FINANCES = "view_finances", "View finances"
     MANAGE_FINANCES = "manage_finances", "Manage finances"
+
+    # Areas of concern (obstacles/delays log).
+    VIEW_AREAS_OF_CONCERN = "view_areas_of_concern", "View areas of concern"
+    MANAGE_AREAS_OF_CONCERN = "manage_areas_of_concern", "Manage areas of concern"
+
+    # Submittals (shop drawings / material approvals).
+    VIEW_SUBMITTALS = "view_submittals", "View submittals"
+    MANAGE_SUBMITTALS = "manage_submittals", "Manage submittals"
 
 
 # Convenience groupings.
@@ -66,6 +75,7 @@ PERMISSION_GROUPS = [
     ("Projects", [
         Permission.MANAGE_PROJECTS.value,
         Permission.VIEW_PROJECTS.value,
+        Permission.VIEW_SCHEDULE.value,
         Permission.SUBMIT_PROGRESS.value,
         Permission.REVIEW_PROGRESS.value,
         Permission.APPROVE_PROGRESS.value,
@@ -75,6 +85,14 @@ PERMISSION_GROUPS = [
     ("Finances", [
         Permission.VIEW_FINANCES.value,
         Permission.MANAGE_FINANCES.value,
+    ]),
+    ("Areas of Concern", [
+        Permission.VIEW_AREAS_OF_CONCERN.value,
+        Permission.MANAGE_AREAS_OF_CONCERN.value,
+    ]),
+    ("Submittals", [
+        Permission.VIEW_SUBMITTALS.value,
+        Permission.MANAGE_SUBMITTALS.value,
     ]),
     ("Platform", PLATFORM_PERMISSIONS),
 ]

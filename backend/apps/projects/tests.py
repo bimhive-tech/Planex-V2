@@ -105,7 +105,8 @@ class ProjectApiTests(TestCase):
         Membership.objects.create(company=self.company_a, user=self.admin, role=self.admin_role)
 
         self.viewer_role = Role.objects.create(
-            company=self.company_a, name="Viewer", permissions=[Permission.VIEW_PROJECTS.value])
+            company=self.company_a, name="Viewer",
+            permissions=[Permission.VIEW_PROJECTS.value, Permission.VIEW_SCHEDULE.value])
         self.viewer = User.objects.create_user(
             email="viewer@acme.com", password=STRONG_PW, company=self.company_a)
         Membership.objects.create(company=self.company_a, user=self.viewer, role=self.viewer_role)
@@ -244,11 +245,10 @@ class ProjectApiTests(TestCase):
         self.login("admin@acme.com")
         resp = self.client.post(
             f"/api/projects/{p.id}/members/",
-            {"user_ids": [str(self.viewer.id)], "role": "manager", "permissions": ["overview", "schedule"]},
+            {"user_ids": [str(self.viewer.id)], "role": "manager"},
             content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.json()[0]["role_display"], "Project Manager")
-        self.assertEqual(resp.json()[0]["permissions"], ["overview", "schedule"])
         detail = self.client.get(f"/api/projects/{p.id}/").json()
         self.assertEqual(detail["manager_name"], self.viewer.full_name)
         self.assertEqual(detail["team_count"], 1)
@@ -306,31 +306,17 @@ class ProjectApiTests(TestCase):
         got = self.client.get(f"/api/projects/{p.id}/members/{m['id']}/scope-access/").json()
         self.assertEqual(got["scope_ids"], [str(z1.id)])
 
-    def test_add_members_batch_with_permissions_and_scope(self):
+    def test_add_members_batch_with_scope(self):
+        # Adding a member accepts a scope grant in the same call.
         from .models import ProjectScope, ProjectScopeAccess
         p = Project.objects.create(company=self.company_a, name="Batch1", project_type="commercial")
         z1 = ProjectScope.objects.create(company=self.company_a, project=p, scope_type="zone", name="Z1")
         self.login("admin@acme.com")
         resp = self.client.post(f"/api/projects/{p.id}/members/", {
-            "user_ids": [str(self.viewer.id)], "role": "member",
-            "permissions": ["overview", "finances_view", "bogus"], "scope_ids": [str(z1.id)],
+            "user_ids": [str(self.viewer.id)], "role": "member", "scope_ids": [str(z1.id)],
         }, content_type="application/json")
         self.assertEqual(resp.status_code, 201, resp.content)
-        # unknown perm keys are dropped
-        self.assertEqual(set(resp.json()[0]["permissions"]), {"overview", "finances_view"})
         self.assertTrue(ProjectScopeAccess.objects.filter(project=p, user=self.viewer, scope=z1).exists())
-
-    def test_my_project_permissions_on_detail(self):
-        p = Project.objects.create(company=self.company_a, name="Perms1", project_type="commercial")
-        # admin (MANAGE_PROJECTS) sees all project permissions
-        self.login("admin@acme.com")
-        self.assertIn("finances_manage", self.client.get(f"/api/projects/{p.id}/").json()["my_project_permissions"])
-        # a plain member sees only what they were granted
-        self.client.post(f"/api/projects/{p.id}/members/",
-                         {"user_ids": [str(self.viewer.id)], "role": "member", "permissions": ["overview"]},
-                         content_type="application/json")
-        self.login("viewer@acme.com")
-        self.assertEqual(self.client.get(f"/api/projects/{p.id}/").json()["my_project_permissions"], ["overview"])
 
     # ── Approval chain ────────────────────────────────────────────────────
     def _activity(self):
@@ -542,7 +528,7 @@ class ProjectApiTests(TestCase):
 
 class FinanceSubmittalApiTests(TestCase):
     """Cash flow + invoices are gated by the dedicated finance permissions;
-    submittals follow the normal view/manage-projects gates."""
+    submittals by the dedicated submittal permissions — both company-role-based."""
 
     def setUp(self):
         self.company = Company.objects.create(name="Acme")
@@ -558,22 +544,15 @@ class FinanceSubmittalApiTests(TestCase):
         self.fin_viewer = User.objects.create_user(email="fv@acme.com", password=STRONG_PW, company=self.company)
         Membership.objects.create(company=self.company, user=self.fin_viewer, role=fin_role)
 
-        # Project access only — no finance permission at all.
+        # Can view/manage submittals, but has no finance permission at all.
         plain_role = Role.objects.create(
-            company=self.company, name="Plain", permissions=[Permission.VIEW_PROJECTS.value])
+            company=self.company, name="Plain",
+            permissions=[Permission.VIEW_PROJECTS.value, Permission.VIEW_SUBMITTALS.value,
+                         Permission.MANAGE_SUBMITTALS.value])
         self.plain = User.objects.create_user(email="pl@acme.com", password=STRONG_PW, company=self.company)
         Membership.objects.create(company=self.company, user=self.plain, role=plain_role)
 
         self.project = Project.objects.create(company=self.company, name="Tower", project_type="commercial")
-
-        # New model: module access comes from per-project membership permissions,
-        # not company roles. fin_viewer can view finances; plain can view/manage
-        # submittals but has no finance access.
-        from .models import ProjectMember
-        ProjectMember.objects.create(company=self.company, project=self.project,
-                                     user=self.fin_viewer, permissions=["finances_view"])
-        ProjectMember.objects.create(company=self.company, project=self.project,
-                                     user=self.plain, permissions=["submittals"])
 
     def login(self, email):
         resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
@@ -620,8 +599,8 @@ class FinanceSubmittalApiTests(TestCase):
         self.assertEqual(len(self.client.get(f"/api/projects/{self.project.id}/invoices/").json()), 1)
         self.assertEqual(self.client.delete(f"/api/projects/{self.project.id}/invoices/{iid}/").status_code, 204)
 
-    def test_submittals_gated_by_project_perm(self):
-        # Member with the submittals module perm can view AND manage.
+    def test_submittals_gated_by_company_perm(self):
+        # A user with the submittals company permission can view AND manage.
         self.login("pl@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 200)
         resp = self.client.post(f"/api/projects/{self.project.id}/submittals/",

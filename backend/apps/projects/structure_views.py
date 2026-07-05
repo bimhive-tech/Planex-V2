@@ -44,9 +44,18 @@ def _require(request, perm):
 
 
 def _require_view(request):
+    """Base project access — gates the scope/activity NAME tree (used broadly by
+    the Report Builder's and Team's scope pickers, not just the Schedule tab)."""
     perms = request.user.effective_permissions()
     if Permission.VIEW_PROJECTS.value not in perms and Permission.MANAGE_PROJECTS.value not in perms:
         raise PermissionDenied("You don't have permission to view this.")
+
+
+def _require_view_schedule(request):
+    """Gates the Schedule tab's actual progress data (structure/grid/snapshots)."""
+    perms = request.user.effective_permissions()
+    if Permission.VIEW_SCHEDULE.value not in perms and Permission.MANAGE_PROJECTS.value not in perms:
+        raise PermissionDenied("You don't have permission to view the schedule.")
 
 
 def _validate_parent(project, parent):
@@ -66,7 +75,7 @@ class ProjectStructureView(APIView):
 
     def get(self, request, project_id):
         project = _project(request, project_id)
-        _require_view(request)
+        _require_view_schedule(request)
         accessible = accessible_scope_ids(project, request.user)
         scopes_qs = project.scopes.all()
         if accessible is not None:
@@ -145,7 +154,7 @@ class ProjectZoneGridView(APIView):
 
     def get(self, request, project_id, zone_id):
         project = _project(request, project_id)
-        _require_view(request)
+        _require_view_schedule(request)
         try:
             zone = ProjectScope.objects.get(pk=zone_id, project=project)
         except (ProjectScope.DoesNotExist, ValueError, TypeError):

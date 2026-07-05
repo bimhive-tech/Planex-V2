@@ -36,7 +36,6 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     manager_name = serializers.SerializerMethodField()
     team_count = serializers.SerializerMethodField()
     open_submission_count = serializers.SerializerMethodField()
-    my_project_permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -45,17 +44,8 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             "priority", "priority_display", "location", "description",
             "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
-            "manager_name", "team_count", "open_submission_count",
-            "my_project_permissions", "created_at", "updated_at",
+            "manager_name", "team_count", "open_submission_count", "created_at", "updated_at",
         ]
-
-    def get_my_project_permissions(self, obj):
-        """The current user's per-project module permissions (drives tab visibility)."""
-        request = self.context.get("request")
-        if not request:
-            return []
-        from .access import project_permissions
-        return sorted(project_permissions(obj, request.user))
 
     def get_open_submission_count(self, obj):
         from .models import ProgressSubmission
@@ -209,21 +199,14 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProjectMember
-        fields = ["id", "user_id", "email", "full_name", "role", "role_display", "permissions"]
+        fields = ["id", "user_id", "email", "full_name", "role", "role_display"]
 
 
 class ProjectMemberWriteSerializer(serializers.Serializer):
-    """Add one or more members with the same project permissions + scope."""
+    """Add one or more members with the same project role + scope. Module access
+    comes from each user's company role permissions, not from this assignment."""
 
     user_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
     role = serializers.ChoiceField(choices=ProjectMember.ProjectRole.choices,
                                    default=ProjectMember.ProjectRole.MEMBER)
-    permissions = serializers.ListField(child=serializers.CharField(), allow_empty=True, default=list)
     scope_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=True, default=list)
-
-
-class ProjectMemberUpdateSerializer(serializers.Serializer):
-    """Edit a single member's role and/or project permissions."""
-
-    role = serializers.ChoiceField(choices=ProjectMember.ProjectRole.choices, required=False)
-    permissions = serializers.ListField(child=serializers.CharField(), required=False)

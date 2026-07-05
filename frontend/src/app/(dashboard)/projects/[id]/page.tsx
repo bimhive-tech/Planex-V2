@@ -17,25 +17,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const has = (perm: string) => user.is_platform_admin || user.permissions.includes(perm);
-  // Tab/module visibility comes from the user's PER-PROJECT permissions (admins
-  // get all of them from the backend); company MANAGE_PROJECTS still gates admin
-  // actions such as editing the project.
-  const P = new Set(project.my_project_permissions);
+  // Module access comes from the user's COMPANY role permissions — consistent
+  // with everywhere else in the app. Scope (which data within a module) is
+  // configured per-project-member instead (see the Team tab).
   const perms = {
     manage: has(Permission.MANAGE_PROJECTS),
-    overview: P.has("overview"),
-    schedule: P.has("schedule"),
-    team: P.has("team"),
-    areasOfConcern: P.has("areas_of_concern"),
-    submittals: P.has("submittals"),
-    reports: P.has("reports"),
-    submit: P.has("submit_progress"),
-    review: P.has("review"),
-    approve: P.has("approve"),
+    viewSchedule: has(Permission.VIEW_SCHEDULE),
+    submit: has(Permission.SUBMIT_PROGRESS),
+    review: has(Permission.REVIEW_PROGRESS),
+    approve: has(Permission.APPROVE_PROGRESS),
     deletePhotos: has(Permission.MANAGE_PROJECTS) || has(Permission.DELETE_PROGRESS_IMAGES),
-    viewFinances: P.has("finances_view"),
-    manageFinances: P.has("finances_manage"),
-    exportReports: P.has("reports"),
+    viewAreasOfConcern: has(Permission.VIEW_AREAS_OF_CONCERN) || has(Permission.MANAGE_AREAS_OF_CONCERN),
+    manageAreasOfConcern: has(Permission.MANAGE_AREAS_OF_CONCERN),
+    viewSubmittals: has(Permission.VIEW_SUBMITTALS) || has(Permission.MANAGE_SUBMITTALS),
+    manageSubmittals: has(Permission.MANAGE_SUBMITTALS),
+    viewFinances: has(Permission.VIEW_FINANCES) || has(Permission.MANAGE_FINANCES),
+    manageFinances: has(Permission.MANAGE_FINANCES),
+    exportReports: has(Permission.EXPORT_REPORTS),
   };
   return <ProjectWorkspace project={project} canManage={perms.manage} perms={perms} />;
 }

@@ -43,17 +43,20 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
 
 export function ProjectWorkspace({ project, canManage, perms }: { project: ProjectDetail; canManage: boolean; perms: ProjectPerms }) {
   const router = useRouter();
-  // Each tab shows only if the user holds that module permission on this project
-  // (admins hold all of them). Least privilege: members see only their modules.
+  // Overview/Team are always visible (opening the project at all already implies
+  // base view access); every other tab shows only if the user's COMPANY role
+  // grants that module. Least privilege: members without a module's permission
+  // never see its tab.
+  const showApprovals = perms.review || perms.approve || perms.submit;
   const tabs: Tab[] = [
-    ...(perms.overview ? (["Overview"] as Tab[]) : []),
-    ...(perms.schedule ? (["Schedule"] as Tab[]) : []),
-    ...(perms.team ? (["Team"] as Tab[]) : []),
-    ...(perms.areasOfConcern ? (["Areas of Concern"] as Tab[]) : []),
+    "Overview",
+    ...(perms.viewSchedule ? (["Schedule"] as Tab[]) : []),
+    "Team",
+    ...(perms.viewAreasOfConcern ? (["Areas of Concern"] as Tab[]) : []),
     ...(perms.viewFinances ? (["Finances"] as Tab[]) : []),
-    ...(perms.submittals ? (["Submittals"] as Tab[]) : []),
-    ...(perms.reports ? (["Reports"] as Tab[]) : []),
-    ...(perms.review || perms.approve ? (["Approvals"] as Tab[]) : []),
+    ...(perms.viewSubmittals ? (["Submittals"] as Tab[]) : []),
+    ...(perms.exportReports ? (["Reports"] as Tab[]) : []),
+    ...(showApprovals ? (["Approvals"] as Tab[]) : []),
   ];
   const [tab, setTab] = useState<Tab>(tabs[0] ?? "Overview");
   const [editOpen, setEditOpen] = useState(false);
@@ -114,9 +117,9 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
         )}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
-        {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={canManage} />}
+        {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={perms.manageAreasOfConcern} />}
         {tab === "Finances" && <ProjectFinances projectId={project.id} canManage={perms.manageFinances} />}
-        {tab === "Submittals" && <ProjectSubmittals projectId={project.id} canManage={canManage} />}
+        {tab === "Submittals" && <ProjectSubmittals projectId={project.id} canManage={perms.manageSubmittals} />}
         {tab === "Reports" && <ProjectReports projectId={project.id} canManage={perms.exportReports} />}
         {tab === "Approvals" && (
           <ProjectApprovals projectId={project.id} perms={perms} onChanged={() => router.refresh()} />
