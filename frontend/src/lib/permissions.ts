@@ -20,6 +20,8 @@ export const Permission = {
   MANAGE_AREAS_OF_CONCERN: "manage_areas_of_concern",
   VIEW_SUBMITTALS: "view_submittals",
   MANAGE_SUBMITTALS: "manage_submittals",
+  VIEW_VARIATIONS: "view_variations",
+  MANAGE_VARIATIONS: "manage_variations",
 } as const;
 
 export type PermissionKey = (typeof Permission)[keyof typeof Permission];

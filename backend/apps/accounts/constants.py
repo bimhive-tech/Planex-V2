@@ -41,6 +41,10 @@ class Permission(models.TextChoices):
     VIEW_SUBMITTALS = "view_submittals", "View submittals"
     MANAGE_SUBMITTALS = "manage_submittals", "Manage submittals"
 
+    # Variations (schedule / cost change orders — the baseline-adjustment log).
+    VIEW_VARIATIONS = "view_variations", "View variations"
+    MANAGE_VARIATIONS = "manage_variations", "Manage variations"
+
 
 # Convenience groupings.
 ALL_PERMISSIONS = [p.value for p in Permission]
@@ -93,6 +97,10 @@ PERMISSION_GROUPS = [
     ("Submittals", [
         Permission.VIEW_SUBMITTALS.value,
         Permission.MANAGE_SUBMITTALS.value,
+    ]),
+    ("Variations", [
+        Permission.VIEW_VARIATIONS.value,
+        Permission.MANAGE_VARIATIONS.value,
     ]),
     ("Platform", PLATFORM_PERMISSIONS),
 ]

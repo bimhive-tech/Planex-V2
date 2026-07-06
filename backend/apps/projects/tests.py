@@ -843,3 +843,85 @@ class FinanceSubmittalApiTests(TestCase):
         # A member without the submittals perm is denied.
         self.login("fv@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 403)
+
+
+class VariationApiTests(TestCase):
+    """Variations log — schedule variations move the project's revised finish;
+    both kinds are gated by the dedicated variation permissions."""
+
+    def setUp(self):
+        import datetime
+        self.company = Company.objects.create(name="Acme")
+        admin_role = Role.objects.create(
+            company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.admin = User.objects.create_user(email="va@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.admin, role=admin_role)
+
+        view_role = Role.objects.create(
+            company=self.company, name="VarViewer",
+            permissions=[Permission.VIEW_PROJECTS.value, Permission.VIEW_VARIATIONS.value])
+        self.viewer = User.objects.create_user(email="vv@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.viewer, role=view_role)
+
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial",
+            planned_finish=datetime.date(2026, 1, 1))
+
+    def login(self, email):
+        resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_schedule_variation_moves_revised_finish(self):
+        self.login("va@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
+                                {"kind": "schedule", "title": "EOT - payment delay",
+                                 "new_finish": "2026-04-01", "date": "2026-01-15"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["previous_finish"], "2026-01-01")  # snapshot
+        self.assertEqual(resp.json()["impact_days"], 90)
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-04-01")
+
+    def test_delete_schedule_variation_resyncs_finish(self):
+        self.login("va@acme.com")
+        first = self.client.post(f"/api/projects/{self.project.id}/variations/",
+                                 {"kind": "schedule", "title": "v1", "new_finish": "2026-03-01", "date": "2026-01-10"},
+                                 content_type="application/json").json()
+        self.client.post(f"/api/projects/{self.project.id}/variations/",
+                         {"kind": "schedule", "title": "v2", "new_finish": "2026-05-01", "date": "2026-02-10"},
+                         content_type="application/json")
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-05-01")  # latest wins
+        # Delete the latest -> reverts to the earlier variation's finish.
+        latest_id = self.client.get(f"/api/projects/{self.project.id}/variations/?kind=schedule").json()[0]["id"]
+        self.client.delete(f"/api/projects/{self.project.id}/variations/{latest_id}/")
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-03-01")
+
+    def test_cost_variation_logged(self):
+        self.login("va@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
+                                {"kind": "cost", "title": "Added marble", "amount": "150000.00", "date": "2026-02-01"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.json()["amount"], "150000.00")
+        self.assertIsNone(resp.json()["impact_days"])
+        cost = self.client.get(f"/api/projects/{self.project.id}/variations/?kind=cost").json()
+        self.assertEqual(len(cost), 1)
+
+    def test_viewer_cannot_manage(self):
+        self.login("vv@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/variations/").status_code, 200)
+        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
+                                {"kind": "cost", "title": "x", "amount": "1"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_schedule_variation_requires_new_finish(self):
+        self.login("va@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
+                                {"kind": "schedule", "title": "no date"},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 400)

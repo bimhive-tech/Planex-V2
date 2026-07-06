@@ -33,6 +33,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     manageSubmittals: has(Permission.MANAGE_SUBMITTALS),
     viewFinances: has(Permission.VIEW_FINANCES) || has(Permission.MANAGE_FINANCES),
     manageFinances: has(Permission.MANAGE_FINANCES),
+    viewVariations: has(Permission.VIEW_VARIATIONS) || has(Permission.MANAGE_VARIATIONS),
+    manageVariations: has(Permission.MANAGE_VARIATIONS),
     exportReports: has(Permission.EXPORT_REPORTS),
   };
   return <ProjectWorkspace project={project} canManage={perms.manage} perms={perms} />;

@@ -87,6 +87,8 @@ export interface ProjectPerms {
   manageSubmittals: boolean;
   viewFinances: boolean;
   manageFinances: boolean;
+  viewVariations: boolean;
+  manageVariations: boolean;
   exportReports: boolean;
 }
 

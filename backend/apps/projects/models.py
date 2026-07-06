@@ -555,6 +555,44 @@ class Submittal(TimestampedModel):
         return self.title
 
 
+class Variation(TimestampedModel):
+    """A logged adjustment to the project baseline — a Variation Order. A SCHEDULE
+    variation moves the finish date (e.g. an extension of time from a payment
+    delay); a COST variation changes the contract value (added/omitted work).
+    Every row is kept as an auditable history of what changed and why."""
+
+    class Kind(models.TextChoices):
+        SCHEDULE = "schedule", "Schedule"
+        COST = "cost", "Cost"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="variations")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="variations")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    title = models.CharField(max_length=200)
+    reason = models.TextField(blank=True)
+    reference = models.CharField(max_length=80, blank=True)  # VO / change-order no.
+    date = models.DateField(null=True, blank=True)  # when it took effect / was approved
+
+    # SCHEDULE: the finish date this variation moved the project to, plus a snapshot
+    # of the finish before it (so the log reads "from X to Y"). Day impact derived.
+    previous_finish = models.DateField(null=True, blank=True)
+    new_finish = models.DateField(null=True, blank=True)
+
+    # COST: signed change to the contract value (+ added work, − omitted work).
+    amount = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_variations")
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "kind", "-date"])]
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return self.title
+
+
 class Notification(TimestampedModel):
     """A per-user, in-app notification raised by the approval workflow.
 
