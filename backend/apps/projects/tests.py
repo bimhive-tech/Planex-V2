@@ -91,6 +91,40 @@ class ScheduleImportTests(TestCase):
         self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
         self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
 
+    def test_finds_schedule_in_later_sheet_with_offset_header(self):
+        # Mirrors the real tracker: sheet 1 is a progress matrix (no dates),
+        # the schedule lives in a later 'FOR (P6)' sheet whose header isn't row 1.
+        import datetime
+        import io
+
+        import openpyxl
+
+        from apps.accounts.models import Company
+        from .models import ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        zone = ProjectScope.objects.create(company=company, project=project, scope_type="zone", name="ZONE (A)")
+
+        wb = openpyxl.Workbook()
+        matrix = wb.active
+        matrix.title = "ZONE (A)"
+        matrix.append(["Task", "Subzone 1", "Subzone 2"])  # a matrix, no Start/Finish
+        matrix.append(["Plaster", 0.5, 0.8])
+        p6 = wb.create_sheet("FOR (P6)")
+        p6.append(["Some title row"])                       # header not at row 1
+        p6.append(["Activity ID", "Activity Name", "Start", "Finish"])
+        p6.append(["A1", "ZONE (A)", datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        result = import_schedule(project, buf)
+        self.assertEqual(result["matched"], 1)
+        zone.refresh_from_db()
+        self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
+        self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
+
 STRONG_PW = "Str0ngPassw0rd!"
 
 

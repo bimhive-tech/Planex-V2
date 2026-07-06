@@ -270,32 +270,42 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
     }
 
 
-def parse_schedule_workbook(file_obj) -> list:
-    """Parse a flat schedule export — Activity Name + Start + Finish columns,
-    the same shape Primavera P6 exports to Excel — into [{name, start, finish}].
-    Extra columns (duration, float, % complete...) are ignored; rows missing a
-    name or both dates are skipped."""
-    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
-    try:
-        rows = list(wb.worksheets[0].iter_rows(values_only=True))
-    finally:
-        wb.close()
-    if not rows:
+SCHEDULE_HEADER_SCAN_ROWS = 15  # how deep to look for the header row in a sheet
+
+
+def _find_col(header, *names):
+    for n in names:
+        if n in header:
+            return header.index(n)
+    return None
+
+
+def _locate_schedule_header(rows):
+    """Find the (index, name_col, id_col, start_col, finish_col) of the header row
+    within a sheet's first rows, or None. Requires a name column plus a start or
+    finish column so a progress matrix (no Start/Finish) can't be mistaken for a
+    schedule. id_col is a fallback: Primavera often puts the activity/WBS name in
+    the 'Activity ID' column and leaves 'Activity Name' blank."""
+    for idx in range(min(len(rows), SCHEDULE_HEADER_SCAN_ROWS)):
+        header = [str(h or "").strip().lower() for h in rows[idx]]
+        name_col = _find_col(header, "activity name", "name", "zone", "phase")
+        id_col = _find_col(header, "activity id", "id")
+        start_col = _find_col(header, "start", "planned start", "start date", "early start")
+        finish_col = _find_col(header, "finish", "planned finish", "finish date", "end", "early finish")
+        if name_col is not None and (start_col is not None or finish_col is not None):
+            return idx, name_col, id_col, start_col, finish_col
+    return None
+
+
+def _cell(row, col):
+    return row[col] if col is not None and col < len(row) else None
+
+
+def _parse_schedule_sheet(rows):
+    located = _locate_schedule_header(rows)
+    if not located:
         return []
-
-    header = [str(h or "").strip().lower() for h in rows[0]]
-
-    def find_col(*names):
-        for n in names:
-            if n in header:
-                return header.index(n)
-        return None
-
-    name_col = find_col("activity name", "name", "zone", "phase")
-    start_col = find_col("start", "planned start", "start date")
-    finish_col = find_col("finish", "planned finish", "finish date", "end")
-    if name_col is None or (start_col is None and finish_col is None):
-        return []
+    header_idx, name_col, id_col, start_col, finish_col = located
 
     def as_date(v):
         if isinstance(v, datetime.datetime):
@@ -303,16 +313,38 @@ def parse_schedule_workbook(file_obj) -> list:
         return v if isinstance(v, datetime.date) else None
 
     out = []
-    for row in rows[1:]:
-        name = row[name_col] if name_col < len(row) else None
+    for row in rows[header_idx + 1:]:
+        name = _cell(row, name_col)
+        if not isinstance(name, str) or not name.strip():
+            name = _cell(row, id_col)  # fall back to the Activity ID column
         if not isinstance(name, str) or not name.strip():
             continue
-        start = as_date(row[start_col]) if start_col is not None and start_col < len(row) else None
-        finish = as_date(row[finish_col]) if finish_col is not None and finish_col < len(row) else None
+        start = as_date(_cell(row, start_col))
+        finish = as_date(_cell(row, finish_col))
         if not start and not finish:
             continue
         out.append({"name": name.strip(), "start": start, "finish": finish})
     return out
+
+
+def parse_schedule_workbook(file_obj) -> list:
+    """Parse a flat schedule export — Activity Name + Start + Finish columns,
+    the same shape Primavera P6 exports to Excel — into [{name, start, finish}].
+
+    Scans every sheet (and the first rows of each) for the header, so a schedule
+    tab like 'FOR (P6)' is found even when it isn't the first sheet. The first
+    sheet that yields any dated rows wins. Extra columns (duration, float,
+    % complete...) are ignored; rows missing a name or both dates are skipped."""
+    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
+    try:
+        for ws in wb.worksheets:
+            rows = list(ws.iter_rows(values_only=True))
+            parsed = _parse_schedule_sheet(rows)
+            if parsed:
+                return parsed
+    finally:
+        wb.close()
+    return []
 
 
 @transaction.atomic
