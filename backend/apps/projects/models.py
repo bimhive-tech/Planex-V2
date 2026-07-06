@@ -581,7 +581,6 @@ class Variation(TimestampedModel):
     number = models.CharField(max_length=20, blank=True)  # auto: SVO-003 / CVO-002
     title = models.CharField(max_length=200)
     reason = models.TextField(blank=True)
-    date = models.DateField(null=True, blank=True)  # date the VO was raised
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     decided_at = models.DateTimeField(null=True, blank=True)  # when approved/rejected
@@ -600,11 +599,8 @@ class Variation(TimestampedModel):
         "accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_variations")
 
     class Meta:
-        indexes = [
-            models.Index(fields=["project", "kind", "status"]),
-            models.Index(fields=["project", "kind", "-date"]),
-        ]
-        ordering = ["-date", "-created_at"]
+        indexes = [models.Index(fields=["project", "kind", "status"])]
+        ordering = ["-created_at"]
 
     def __str__(self):
         return self.number or self.title

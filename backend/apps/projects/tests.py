@@ -883,8 +883,7 @@ class VariationApiTests(TestCase):
 
     def test_pending_schedule_variation_has_no_effect_until_approved(self):
         self.login("va@acme.com")
-        resp = self._create(kind="schedule", title="EOT - payment delay",
-                            new_finish="2026-04-01", date="2026-01-15")
+        resp = self._create(kind="schedule", title="EOT - payment delay", new_finish="2026-04-01")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.json()["status"], "pending")
         self.assertEqual(resp.json()["number"], "SVO-001")  # auto-numbered
@@ -921,19 +920,19 @@ class VariationApiTests(TestCase):
 
     def test_latest_approved_schedule_wins(self):
         self.login("va@acme.com")
-        v1 = self._create(kind="schedule", title="v1", new_finish="2026-03-01", date="2026-01-10").json()["id"]
-        v2 = self._create(kind="schedule", title="v2", new_finish="2026-06-01", date="2026-02-10").json()["id"]
+        v1 = self._create(kind="schedule", title="v1", new_finish="2026-03-01").json()["id"]
+        v2 = self._create(kind="schedule", title="v2", new_finish="2026-06-01").json()["id"]
         self._decide(v1, "approve")
         self._decide(v2, "approve")
         self.project.refresh_from_db()
-        self.assertEqual(str(self.project.revised_finish), "2026-06-01")  # latest date wins
+        self.assertEqual(str(self.project.revised_finish), "2026-06-01")  # most recent wins
         self.client.delete(f"/api/projects/{self.project.id}/variations/{v2}/")
         self.project.refresh_from_db()
         self.assertEqual(str(self.project.revised_finish), "2026-03-01")  # back to v1
 
     def test_cost_variation_logged_and_numbered(self):
         self.login("va@acme.com")
-        resp = self._create(kind="cost", title="Added marble", amount="150000.00", date="2026-02-01")
+        resp = self._create(kind="cost", title="Added marble", amount="150000.00")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.json()["amount"], "150000.00")
         self.assertEqual(resp.json()["number"], "CVO-001")

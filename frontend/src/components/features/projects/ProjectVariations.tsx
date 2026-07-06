@@ -26,7 +26,6 @@ interface Variation {
   number: string;
   title: string;
   reason: string;
-  date: string | null;
   status: Status;
   status_display: string;
   decided_at: string | null;
@@ -145,7 +144,6 @@ export function ProjectVariations({ projectId, canManage }: { projectId: string;
                     : <span className={Number(x.amount) < 0 ? v.neg : v.pos}>
                         {Number(x.amount) < 0 ? "" : "+"}{Number(x.amount).toLocaleString()}
                       </span>}
-                  {x.date ? ` · raised ${formatDate(x.date)}` : ""}
                   {x.decided_at ? ` · ${x.status_display.toLowerCase()} ${formatDate(x.decided_at)}` : ""}
                 </span>
                 {x.reason && <span className={v.reason}>{x.reason}</span>}
@@ -186,7 +184,6 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
   const isEdit = !!variation;
   const kind = variation?.kind ?? defaultKind;
   const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const [newFinish, setNewFinish] = useState("");
   const [amount, setAmount] = useState("0");
@@ -195,7 +192,6 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
 
   useEffect(() => {
     setTitle(variation?.title ?? "");
-    setDate(variation?.date ?? "");
     setReason(variation?.reason ?? "");
     setNewFinish(variation?.new_finish ?? "");
     setAmount(variation?.amount ?? "0");
@@ -206,8 +202,8 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
     setSubmitting(true);
     setError(null);
     const body = kind === "schedule"
-      ? { kind, title, date: date || null, reason, new_finish: newFinish || null }
-      : { kind, title, date: date || null, reason, amount: Number(amount) || 0 };
+      ? { kind, title, reason, new_finish: newFinish || null }
+      : { kind, title, reason, amount: Number(amount) || 0 };
     try {
       if (isEdit && variation) await api.patch(`/projects/${projectId}/variations/${variation.id}/`, body);
       else await api.post(`/projects/${projectId}/variations/`, body);
@@ -233,7 +229,6 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
         {kind === "schedule"
           ? <Input label="New finish date" name="new_finish" type="date" required value={newFinish} onChange={(e) => setNewFinish(e.target.value)} />
           : <Input label="Amount (− to omit)" name="amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />}
-        <Input label="Date raised (optional)" name="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <label className={v.reasonField}>
           <span>Reason (optional)</span>
           <textarea className={v.reasonInput} rows={3} value={reason} onChange={(e) => setReason(e.target.value)}

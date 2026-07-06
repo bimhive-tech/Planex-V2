@@ -28,7 +28,7 @@ class VariationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Variation
-        fields = ["id", "kind", "kind_display", "number", "title", "reason", "date",
+        fields = ["id", "kind", "kind_display", "number", "title", "reason",
                   "status", "status_display", "decided_at", "decided_by_name",
                   "previous_finish", "new_finish", "impact_days", "amount", "created_at"]
 
@@ -42,7 +42,7 @@ class VariationSerializer(serializers.ModelSerializer):
 class VariationWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Variation
-        fields = ["kind", "title", "reason", "date", "new_finish", "amount"]
+        fields = ["kind", "title", "reason", "new_finish", "amount"]
 
     def validate(self, attrs):
         kind = attrs.get("kind", getattr(self.instance, "kind", None))
@@ -93,7 +93,7 @@ def _resync_revised_finish(project):
     effect. Left untouched when there are no approved schedule VOs."""
     latest = (project.variations
               .filter(kind=Variation.Kind.SCHEDULE, status=Variation.Status.APPROVED, new_finish__isnull=False)
-              .order_by("-date", "-created_at").first())
+              .order_by("-created_at").first())
     if latest and project.revised_finish != latest.new_finish:
         project.revised_finish = latest.new_finish
         project.save(update_fields=["revised_finish", "updated_at"])
