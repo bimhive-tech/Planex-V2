@@ -8,7 +8,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -16,7 +16,10 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
+from .finance_imports import import_cashflow
 from .models import CashFlowEntry, Invoice, Project
+
+MAX_IMPORT_BYTES = 40 * 1024 * 1024
 
 
 def _project(request, project_id):
@@ -81,6 +84,33 @@ class CashFlowView(APIView):
             project.cashflow_entries.all().delete()
             CashFlowEntry.objects.bulk_create(by_month.values())
         return Response(self._payload(project))
+
+
+class CashFlowImportView(APIView):
+    """Import a project's monthly cash flow from an Excel workbook, replacing the
+    current rows. Accepts the wide site-office layout (months across a row) or a
+    simple Month/Planned/Actual table."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, project_id):
+        project = _project(request, project_id)
+        _require_manage_finances(request)
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "No file uploaded."})
+        if not upload.name.lower().endswith((".xlsx", ".xlsm")):
+            raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
+        if upload.size > MAX_IMPORT_BYTES:
+            raise ValidationError({"file": "File is too large (max 40 MB)."})
+        try:
+            result = import_cashflow(project, upload)
+        except ValueError as exc:
+            raise ValidationError({"file": str(exc)})
+        except Exception as exc:  # a corrupt workbook shouldn't 500
+            raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
+        return Response(result)
 
 
 # --- Invoices --------------------------------------------------------------

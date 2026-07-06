@@ -18,6 +18,7 @@ from .structure_views import (
 from .milestone_views import MilestoneDetailView, MilestoneListView
 from .delay_views import DelayDetailView, DelayListView
 from .finance_views import (
+    CashFlowImportView,
     CashFlowView,
     InvoiceDetailView,
     InvoiceImageView,
@@ -78,6 +79,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/delays/", DelayListView.as_view(), name="project-delays"),
     path("projects/<uuid:project_id>/delays/<uuid:delay_id>/", DelayDetailView.as_view(), name="project-delay"),
     path("projects/<uuid:project_id>/cashflow/", CashFlowView.as_view(), name="project-cashflow"),
+    path("projects/<uuid:project_id>/cashflow/import/", CashFlowImportView.as_view(), name="project-cashflow-import"),
     path("projects/<uuid:project_id>/invoices/", InvoiceListView.as_view(), name="project-invoices"),
     path("projects/<uuid:project_id>/invoices/<uuid:invoice_id>/", InvoiceDetailView.as_view(), name="project-invoice"),
     path("projects/<uuid:project_id>/invoices/<uuid:invoice_id>/image/", InvoiceImageView.as_view(), name="project-invoice-image"),

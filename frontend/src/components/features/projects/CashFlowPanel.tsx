@@ -3,7 +3,7 @@
 // Monthly cash-flow grid: the user types a planned and an actual amount per
 // month; we store them as-is (no calculation) and the report charts them. Save
 // does an atomic bulk-replace of the whole table.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -27,7 +27,10 @@ export function CashFlowPanel({ projectId, canManage }: { projectId: string; can
   const [newMonth, setNewMonth] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (data) {
@@ -73,15 +76,49 @@ export function CashFlowPanel({ projectId, canManage }: { projectId: string; can
     }
   }
 
+  // Import replaces the whole table from an Excel sheet (months across a row with
+  // planned/actual rows, or a Month/Planned/Actual table) — hence the confirm.
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    if (rows.length && !window.confirm("Importing replaces the current cash-flow table. Continue?")) return;
+    setImporting(true);
+    setActionError(null);
+    setImportMsg(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await api.uploadApi<{ months: number; first_month: string; last_month: string }>(
+        `/projects/${projectId}/cashflow/import/`, form);
+      setImportMsg(`Imported ${r.months} months (${monthLabel(r.first_month)} – ${monthLabel(r.last_month)}).`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Cash-flow import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <section className={styles.card}>
       <header className={styles.head}>
         <h2 className={styles.title}>Cash Flow {currency && <span className={styles.muted}>({currency})</span>}</h2>
-        {canManage && dirty && (
-          <Button size="sm" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save changes"}</Button>
+        {canManage && (
+          <div className={styles.headActions}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
+            <Button size="sm" variant="secondary" disabled={importing}
+              onClick={() => fileRef.current?.click()}>
+              {importing ? "Importing…" : "Import Excel"}
+            </Button>
+            {dirty && (
+              <Button size="sm" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save changes"}</Button>
+            )}
+          </div>
         )}
       </header>
 
+      {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
       <StateView

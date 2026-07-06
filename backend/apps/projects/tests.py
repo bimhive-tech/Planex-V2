@@ -706,6 +706,87 @@ class FinanceSubmittalApiTests(TestCase):
                                content_type="application/json")
         self.assertEqual(len(resp.json()["entries"]), 1)
 
+    # ── Cash-flow import ──────────────────────────────────────────────────
+    def _xlsx_upload(self, build, name="cashflow.xlsx"):
+        """Build an in-memory workbook via `build(ws)` and wrap it for upload."""
+        import io
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        build(wb.active)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return SimpleUploadedFile(
+            name, buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_cashflow_import_wide_layout(self):
+        import datetime
+        months = [datetime.date(2026, 1, 1), datetime.date(2026, 2, 1), datetime.date(2026, 3, 1)]
+
+        def build(ws):
+            ws["A1"] = "Description"
+            for i, m in enumerate(months):
+                ws.cell(row=1, column=2 + i, value=datetime.datetime(m.year, m.month, 1))
+            ws["A2"] = "Planned Cash In /Month"
+            for i, v in enumerate([100, 200, 300]):
+                ws.cell(row=2, column=2 + i, value=v)
+            ws["A3"] = "Planned Monthly %"          # distractor: must be ignored (%)
+            ws["A4"] = "Cumulative Planned Cash In"  # distractor: must be ignored
+            ws["A5"] = "Actual cash in/Month"
+            for i, v in enumerate([90, 150, 0]):
+                ws.cell(row=5, column=2 + i, value=v)
+
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/cashflow/import/",
+                                {"file": self._xlsx_upload(build)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["months"], 3)
+
+        entries = self.client.get(f"/api/projects/{self.project.id}/cashflow/").json()["entries"]
+        self.assertEqual([e["month"] for e in entries],
+                         ["2026-01-01", "2026-02-01", "2026-03-01"])
+        self.assertEqual(entries[0]["planned"], "100.00")
+        self.assertEqual(entries[0]["actual"], "90.00")
+        self.assertEqual(entries[2]["planned"], "300.00")
+
+    def test_cashflow_import_tall_layout_replaces_existing(self):
+        # Seed an existing row that the import must wipe.
+        self.login("fa@acme.com")
+        self.client.put(f"/api/projects/{self.project.id}/cashflow/",
+                        [{"month": "2020-01-01", "planned": 5, "actual": 5}],
+                        content_type="application/json")
+
+        def build(ws):
+            ws["A1"], ws["B1"], ws["C1"] = "Month", "Planned", "Actual"
+            ws["A2"], ws["B2"], ws["C2"] = "2026-06-01", 400, 350
+            ws["A3"], ws["B3"], ws["C3"] = "2026-07-01", 500, 450
+
+        resp = self.client.post(f"/api/projects/{self.project.id}/cashflow/import/",
+                                {"file": self._xlsx_upload(build)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        entries = self.client.get(f"/api/projects/{self.project.id}/cashflow/").json()["entries"]
+        self.assertEqual(len(entries), 2)  # old 2020 row gone
+        self.assertEqual(entries[0]["month"], "2026-06-01")
+
+    def test_cashflow_import_requires_manage_finances(self):
+        def build(ws):
+            ws["A1"], ws["B1"], ws["C1"] = "Month", "Planned", "Actual"
+            ws["A2"], ws["B2"], ws["C2"] = "2026-06-01", 1, 1
+        self.login("fv@acme.com")  # VIEW_FINANCES only
+        resp = self.client.post(f"/api/projects/{self.project.id}/cashflow/import/",
+                                {"file": self._xlsx_upload(build)})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cashflow_import_unreadable_layout(self):
+        def build(ws):
+            ws["A1"], ws["B1"] = "Some", "Sheet"
+            ws["A2"], ws["B2"] = "with no", "cashflow"
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/cashflow/import/",
+                                {"file": self._xlsx_upload(build)})
+        self.assertEqual(resp.status_code, 400)
+
     def test_invoice_crud(self):
         self.login("fa@acme.com")
         resp = self.client.post(f"/api/projects/{self.project.id}/invoices/",
