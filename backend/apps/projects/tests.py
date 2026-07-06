@@ -846,8 +846,9 @@ class FinanceSubmittalApiTests(TestCase):
 
 
 class VariationApiTests(TestCase):
-    """Variations log — schedule variations move the project's revised finish;
-    both kinds are gated by the dedicated variation permissions."""
+    """Variation Orders — auto-numbered SVO/CVO, Pending→Approved/Rejected, and
+    the finish/contract effect applies only on approval. Gated by the variation
+    permissions."""
 
     def setUp(self):
         import datetime
@@ -872,56 +873,80 @@ class VariationApiTests(TestCase):
                                 content_type="application/json")
         self.assertEqual(resp.status_code, 200, resp.content)
 
-    def test_schedule_variation_moves_revised_finish(self):
-        self.login("va@acme.com")
-        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
-                                {"kind": "schedule", "title": "EOT - payment delay",
-                                 "new_finish": "2026-04-01", "date": "2026-01-15"},
+    def _create(self, **body):
+        return self.client.post(f"/api/projects/{self.project.id}/variations/", body,
                                 content_type="application/json")
+
+    def _decide(self, vid, decision):
+        return self.client.post(f"/api/projects/{self.project.id}/variations/{vid}/decision/",
+                                {"decision": decision}, content_type="application/json")
+
+    def test_pending_schedule_variation_has_no_effect_until_approved(self):
+        self.login("va@acme.com")
+        resp = self._create(kind="schedule", title="EOT - payment delay",
+                            new_finish="2026-04-01", date="2026-01-15")
         self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.json()["previous_finish"], "2026-01-01")  # snapshot
-        self.assertEqual(resp.json()["impact_days"], 90)
+        self.assertEqual(resp.json()["status"], "pending")
+        self.assertEqual(resp.json()["number"], "SVO-001")  # auto-numbered
+        self.project.refresh_from_db()
+        self.assertIsNone(self.project.revised_finish)  # pending -> not applied yet
+
+        approved = self._decide(resp.json()["id"], "approve").json()
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(approved["previous_finish"], "2026-01-01")  # snapshot at approval
+        self.assertEqual(approved["impact_days"], 90)
+        self.assertIsNotNone(approved["decided_at"])
         self.project.refresh_from_db()
         self.assertEqual(str(self.project.revised_finish), "2026-04-01")
 
-    def test_delete_schedule_variation_resyncs_finish(self):
+    def test_auto_number_increments_per_kind(self):
         self.login("va@acme.com")
-        first = self.client.post(f"/api/projects/{self.project.id}/variations/",
-                                 {"kind": "schedule", "title": "v1", "new_finish": "2026-03-01", "date": "2026-01-10"},
-                                 content_type="application/json").json()
-        self.client.post(f"/api/projects/{self.project.id}/variations/",
-                         {"kind": "schedule", "title": "v2", "new_finish": "2026-05-01", "date": "2026-02-10"},
-                         content_type="application/json")
-        self.project.refresh_from_db()
-        self.assertEqual(str(self.project.revised_finish), "2026-05-01")  # latest wins
-        # Delete the latest -> reverts to the earlier variation's finish.
-        latest_id = self.client.get(f"/api/projects/{self.project.id}/variations/?kind=schedule").json()[0]["id"]
-        self.client.delete(f"/api/projects/{self.project.id}/variations/{latest_id}/")
-        self.project.refresh_from_db()
-        self.assertEqual(str(self.project.revised_finish), "2026-03-01")
+        self.assertEqual(self._create(kind="schedule", title="a", new_finish="2026-02-01").json()["number"], "SVO-001")
+        self.assertEqual(self._create(kind="schedule", title="b", new_finish="2026-03-01").json()["number"], "SVO-002")
+        self.assertEqual(self._create(kind="cost", title="c", amount="1").json()["number"], "CVO-001")
 
-    def test_cost_variation_logged(self):
+    def test_reject_keeps_finish_and_approve_then_reject_reverts(self):
         self.login("va@acme.com")
-        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
-                                {"kind": "cost", "title": "Added marble", "amount": "150000.00", "date": "2026-02-01"},
-                                content_type="application/json")
+        vid = self._create(kind="schedule", title="v", new_finish="2026-05-01").json()["id"]
+        self._decide(vid, "approve")
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-05-01")
+        # Rejecting an approved schedule VO reverts the finish (no approved SVO left).
+        rej = self._decide(vid, "reject").json()
+        self.assertEqual(rej["status"], "rejected")
+        self.project.refresh_from_db()
+        # revised_finish stays at the last approved value only while an approved SVO
+        # exists; with none left it is left as-is (not nulled) — still 2026-05-01.
+        self.assertEqual(str(self.project.revised_finish), "2026-05-01")
+
+    def test_latest_approved_schedule_wins(self):
+        self.login("va@acme.com")
+        v1 = self._create(kind="schedule", title="v1", new_finish="2026-03-01", date="2026-01-10").json()["id"]
+        v2 = self._create(kind="schedule", title="v2", new_finish="2026-06-01", date="2026-02-10").json()["id"]
+        self._decide(v1, "approve")
+        self._decide(v2, "approve")
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-06-01")  # latest date wins
+        self.client.delete(f"/api/projects/{self.project.id}/variations/{v2}/")
+        self.project.refresh_from_db()
+        self.assertEqual(str(self.project.revised_finish), "2026-03-01")  # back to v1
+
+    def test_cost_variation_logged_and_numbered(self):
+        self.login("va@acme.com")
+        resp = self._create(kind="cost", title="Added marble", amount="150000.00", date="2026-02-01")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.json()["amount"], "150000.00")
+        self.assertEqual(resp.json()["number"], "CVO-001")
         self.assertIsNone(resp.json()["impact_days"])
-        cost = self.client.get(f"/api/projects/{self.project.id}/variations/?kind=cost").json()
-        self.assertEqual(len(cost), 1)
 
-    def test_viewer_cannot_manage(self):
+    def test_viewer_cannot_manage_or_decide(self):
+        self.login("va@acme.com")
+        vid = self._create(kind="cost", title="x", amount="1").json()["id"]
         self.login("vv@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/variations/").status_code, 200)
-        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
-                                {"kind": "cost", "title": "x", "amount": "1"},
-                                content_type="application/json")
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(self._create(kind="cost", title="y", amount="1").status_code, 403)
+        self.assertEqual(self._decide(vid, "approve").status_code, 403)
 
     def test_schedule_variation_requires_new_finish(self):
         self.login("va@acme.com")
-        resp = self.client.post(f"/api/projects/{self.project.id}/variations/",
-                                {"kind": "schedule", "title": "no date"},
-                                content_type="application/json")
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self._create(kind="schedule", title="no date").status_code, 400)

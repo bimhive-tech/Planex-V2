@@ -1,11 +1,12 @@
 "use client";
 
-// Variations tab — the logged baseline-adjustment history. Two sub-tabs:
-// Schedule (extensions of time that move the finish date) and Cost (contract
-// value changes). Every entry is kept as an audit trail.
+// Variations tab — Variation Orders. Two sub-tabs: Schedule (SVO, moves the
+// finish date) and Cost (CVO, changes the contract value). Each is auto-numbered
+// and goes Pending → Approved/Rejected; the effect applies only once approved.
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
@@ -17,21 +18,28 @@ import styles from "./milestones.module.css";
 import v from "./variations.module.css";
 
 type Kind = "schedule" | "cost";
+type Status = "pending" | "approved" | "rejected";
 
 interface Variation {
   id: string;
   kind: Kind;
-  kind_display: string;
+  number: string;
   title: string;
   reason: string;
-  reference: string;
   date: string | null;
+  status: Status;
+  status_display: string;
+  decided_at: string | null;
+  decided_by_name: string;
   previous_finish: string | null;
   new_finish: string | null;
   impact_days: number | null;
   amount: string;
-  created_at: string;
 }
+
+const STATUS_TONE: Record<Status, "warning" | "success" | "danger"> = {
+  pending: "warning", approved: "success", rejected: "danger",
+};
 
 export function ProjectVariations({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const [kind, setKind] = useState<Kind>("schedule");
@@ -43,18 +51,31 @@ export function ProjectVariations({ projectId, canManage }: { projectId: string;
   const [actionError, setActionError] = useState<string | null>(null);
   const items = data ?? [];
 
+  // Only APPROVED variations count toward the headline figures.
   const summary = useMemo(() => {
+    const approved = items.filter((x) => x.status === "approved");
+    const pending = items.filter((x) => x.status === "pending").length;
     if (kind === "schedule") {
-      const days = items.reduce((a, x) => a + (x.impact_days ?? 0), 0);
-      const finish = items.find((x) => x.new_finish)?.new_finish ?? null; // list is date-desc
-      return { days, finish };
+      const finish = approved.find((x) => x.new_finish)?.new_finish ?? null; // list is date-desc
+      const days = approved.reduce((a, x) => a + (x.impact_days ?? 0), 0);
+      return { finish, days, pending };
     }
-    const total = items.reduce((a, x) => a + (Number(x.amount) || 0), 0);
-    return { total };
+    const total = approved.reduce((a, x) => a + (Number(x.amount) || 0), 0);
+    return { total, pending };
   }, [items, kind]);
 
+  async function decide(x: Variation, decision: "approve" | "reject") {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/variations/${x.id}/decision/`, { decision });
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't update.");
+    }
+  }
+
   async function remove(x: Variation) {
-    if (!window.confirm(`Delete “${x.title}”?`)) return;
+    if (!window.confirm(`Delete ${x.number}?`)) return;
     setActionError(null);
     try {
       await api.del(`/projects/${projectId}/variations/${x.id}/`);
@@ -71,30 +92,31 @@ export function ProjectVariations({ projectId, canManage }: { projectId: string;
         {canManage && (
           <Button size="sm" variant="secondary" leadingIcon={<Icon name="plus" size={15} />}
             onClick={() => setModal({ variation: null })}>
-            Add {kind === "schedule" ? "schedule" : "cost"} variation
+            New {kind === "schedule" ? "SVO" : "CVO"}
           </Button>
         )}
       </header>
 
       <div className={v.subtabs}>
         <button className={`${v.subtab} ${kind === "schedule" ? v.active : ""}`} onClick={() => setKind("schedule")}>
-          Schedule
+          Schedule (SVO)
         </button>
         <button className={`${v.subtab} ${kind === "cost" ? v.active : ""}`} onClick={() => setKind("cost")}>
-          Cost
+          Cost (CVO)
         </button>
       </div>
 
-      {kind === "schedule" ? (
-        <div className={v.banner}>
-          <span>Current revised finish: <strong>{summary.finish ? formatDate(summary.finish) : "—"}</strong></span>
-          <span>Total impact: <strong>{summary.days} day{summary.days === 1 ? "" : "s"}</strong></span>
-        </div>
-      ) : (
-        <div className={v.banner}>
-          <span>Total cost impact: <strong>{(summary.total ?? 0).toLocaleString()}</strong></span>
-        </div>
-      )}
+      <div className={v.banner}>
+        {kind === "schedule" ? (
+          <>
+            <span>Current revised finish: <strong>{summary.finish ? formatDate(summary.finish) : "—"}</strong></span>
+            <span>Approved impact: <strong>{summary.days} day{summary.days === 1 ? "" : "s"}</strong></span>
+          </>
+        ) : (
+          <span>Approved cost impact: <strong>{(summary.total ?? 0).toLocaleString()}</strong></span>
+        )}
+        {summary.pending > 0 && <span className={v.pendingNote}>{summary.pending} pending</span>}
+      </div>
 
       {actionError && <p className="formError">{actionError}</p>}
 
@@ -103,18 +125,18 @@ export function ProjectVariations({ projectId, canManage }: { projectId: string;
         emptyTitle={kind === "schedule" ? "No schedule variations" : "No cost variations"}
         emptyText={canManage
           ? (kind === "schedule"
-            ? "Log an extension of time — it moves the project's revised finish date."
-            : "Log an added or omitted cost — it adjusts the contract value.")
+            ? "Raise an SVO to extend the finish date — it applies once approved."
+            : "Raise a CVO to add or omit cost — it counts once approved.")
           : undefined}
         onRetry={reload}
       >
         <ul className={styles.list}>
           {items.map((x) => (
             <li key={x.id} className={styles.item}>
-              <span className={`${styles.dot} ${styles.s_upcoming}`} aria-hidden="true" />
               <div className={styles.itemBody}>
                 <span className={styles.itemTitle}>
-                  {x.title}{x.reference ? ` · ${x.reference}` : ""}
+                  <span className={v.num}>{x.number}</span> {x.title}{" "}
+                  <Badge tone={STATUS_TONE[x.status]}>{x.status_display}</Badge>
                 </span>
                 <span className={styles.itemMeta}>
                   {x.kind === "schedule"
@@ -123,12 +145,19 @@ export function ProjectVariations({ projectId, canManage }: { projectId: string;
                     : <span className={Number(x.amount) < 0 ? v.neg : v.pos}>
                         {Number(x.amount) < 0 ? "" : "+"}{Number(x.amount).toLocaleString()}
                       </span>}
-                  {x.date ? ` · ${formatDate(x.date)}` : ""}
+                  {x.date ? ` · raised ${formatDate(x.date)}` : ""}
+                  {x.decided_at ? ` · ${x.status_display.toLowerCase()} ${formatDate(x.decided_at)}` : ""}
                 </span>
                 {x.reason && <span className={v.reason}>{x.reason}</span>}
               </div>
               {canManage && (
                 <div className={styles.itemActions}>
+                  {x.status === "pending" && (
+                    <>
+                      <Button size="sm" onClick={() => decide(x, "approve")}>Approve</Button>
+                      <Button size="sm" variant="secondary" onClick={() => decide(x, "reject")}>Reject</Button>
+                    </>
+                  )}
                   <button className={styles.iconBtn} aria-label="Edit" onClick={() => setModal({ variation: x })}>
                     <Icon name="edit" size={14} />
                   </button>
@@ -157,7 +186,6 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
   const isEdit = !!variation;
   const kind = variation?.kind ?? defaultKind;
   const [title, setTitle] = useState("");
-  const [reference, setReference] = useState("");
   const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const [newFinish, setNewFinish] = useState("");
@@ -167,7 +195,6 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
 
   useEffect(() => {
     setTitle(variation?.title ?? "");
-    setReference(variation?.reference ?? "");
     setDate(variation?.date ?? "");
     setReason(variation?.reason ?? "");
     setNewFinish(variation?.new_finish ?? "");
@@ -179,8 +206,8 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
     setSubmitting(true);
     setError(null);
     const body = kind === "schedule"
-      ? { kind, title, reference, date: date || null, reason, new_finish: newFinish || null }
-      : { kind, title, reference, date: date || null, reason, amount: Number(amount) || 0 };
+      ? { kind, title, date: date || null, reason, new_finish: newFinish || null }
+      : { kind, title, date: date || null, reason, amount: Number(amount) || 0 };
     try {
       if (isEdit && variation) await api.patch(`/projects/${projectId}/variations/${variation.id}/`, body);
       else await api.post(`/projects/${projectId}/variations/`, body);
@@ -192,9 +219,9 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
     }
   }
 
-  const label = kind === "schedule" ? "schedule" : "cost";
+  const label = kind === "schedule" ? "schedule variation (SVO)" : "cost variation (CVO)";
   return (
-    <Modal open title={`${isEdit ? "Edit" : "Add"} ${label} variation`} onClose={onClose}
+    <Modal open title={`${isEdit ? "Edit" : "New"} ${label}`} onClose={onClose}
       footer={
         <>
           <Button variant="secondary" type="button" onClick={onClose}>Cancel</Button>
@@ -206,13 +233,13 @@ function VariationModal({ projectId, variation, defaultKind, onClose, onSaved }:
         {kind === "schedule"
           ? <Input label="New finish date" name="new_finish" type="date" required value={newFinish} onChange={(e) => setNewFinish(e.target.value)} />
           : <Input label="Amount (− to omit)" name="amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />}
-        <Input label="Reference / VO no. (optional)" name="reference" value={reference} onChange={(e) => setReference(e.target.value)} />
-        <Input label="Date (optional)" name="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Date raised (optional)" name="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <label className={v.reasonField}>
           <span>Reason (optional)</span>
           <textarea className={v.reasonInput} rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. payment delay, added scope…" />
         </label>
+        <p className={v.hint}>The VO number is assigned automatically. It stays Pending until you approve or reject it.</p>
         {error && <p className="formError">{error}</p>}
       </form>
     </Modal>
