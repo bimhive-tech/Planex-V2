@@ -379,6 +379,58 @@ class ReportsApiTests(TestCase):
         self.assertEqual(pdf["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(pdf.streaming_content if hasattr(pdf, "streaming_content") else [pdf.content]).startswith(b"%PDF"))
 
+    def _progress_image(self, caption, when):
+        import datetime as _dt
+
+        from apps.projects.models import Activity, ProgressEntry, ProgressImage, ProjectScope
+        zone = ProjectScope.objects.create(company=self.company, project=self.project, scope_type="zone", name="Z")
+        act = Activity.objects.create(company=self.company, project=self.project, scope=zone, name="Pour", weight=1)
+        entry = ProgressEntry.objects.create(
+            company=self.company, project=self.project, activity=act,
+            date=_dt.date.fromisoformat(when), progress_percent=50)
+        return ProgressImage.objects.create(company=self.company, entry=entry, caption=caption)
+
+    def test_progress_image_picker_select_and_orders_by_date(self):
+        # Two schedule photos on different dates; the report should render them
+        # earliest-first once selected.
+        later = self._progress_image("Later", "2026-03-01")
+        earlier = self._progress_image("Earlier", "2026-01-01")
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+
+        self.client.force_authenticate(self.admin)
+        listing = self.client.get(f"/api/reports/{report.id}/progress-images/")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([p["caption"] for p in listing.data], ["Earlier", "Later"])  # date asc
+        self.assertFalse(any(p["selected"] for p in listing.data))
+
+        # Select both (in reverse order) — persisted, then re-sorted by date in PDF.
+        put = self.client.put(f"/api/reports/{report.id}/progress-images/",
+                              {"selected_ids": [str(later.id), str(earlier.id)]}, format="json")
+        self.assertEqual(put.status_code, 200)
+        report.refresh_from_db()
+        self.assertEqual(set(report.progress_image_ids), {str(later.id), str(earlier.id)})
+
+        from .services import build_report_context
+        photos = build_report_context(report)["photos"]
+        self.assertEqual([p["caption"] for p in photos], ["Earlier", "Later"])  # earliest first
+
+    def test_progress_image_picker_write_needs_export_perm(self):
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+        self.client.force_authenticate(self.viewer)  # VIEW_PROJECTS only
+        self.assertEqual(self.client.get(f"/api/reports/{report.id}/progress-images/").status_code, 200)
+        put = self.client.put(f"/api/reports/{report.id}/progress-images/",
+                              {"selected_ids": []}, format="json")
+        self.assertEqual(put.status_code, 403)
+
+    def test_progress_image_picker_rejects_foreign_ids(self):
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+        self.client.force_authenticate(self.admin)
+        put = self.client.put(f"/api/reports/{report.id}/progress-images/",
+                              {"selected_ids": ["not-a-uuid", str(self.project.id)]}, format="json")
+        self.assertEqual(put.status_code, 200)
+        report.refresh_from_db()
+        self.assertEqual(report.progress_image_ids, [])  # junk + non-progress IDs dropped
+
     def test_tenant_isolation_on_reports(self):
         other = Company.objects.create(name="Other")
         other_user = User.objects.create_user(email="o@other.com", password=STRONG_PW, company=other)

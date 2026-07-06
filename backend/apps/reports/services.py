@@ -370,6 +370,21 @@ def _gantt_rows(project, scope_ids=None, progress=None):
     return rows
 
 
+def _selected_progress_photos(report, project):
+    """Progress photos hand-picked in the builder (report.progress_image_ids),
+    returned as {image, caption} dicts ordered by date — earliest first, so the
+    report's first photo page is the oldest — like the user asked."""
+    ids = report.progress_image_ids or []
+    if not ids:
+        return []
+    from apps.projects.models import ProgressImage
+
+    rows = ProgressImage.objects.filter(entry__project=project, id__in=ids).values(
+        "id", "image", "caption", "entry__date", "created_at")
+    ordered = sorted(rows, key=lambda p: (p["entry__date"] or datetime.date.min, p["created_at"]))
+    return [{"image": p["image"], "caption": p["caption"]} for p in ordered]
+
+
 def _area_dashboards(project, hierarchy, as_of):
     """Per-zone dashboard data: its own duration/time-performance (falls back
     to the project's when it has none of its own) and a handful of recent
@@ -567,6 +582,9 @@ def build_report_context(report):
     rep_cover = rep(ReportImage.Kind.COVER)
     rep_photos = rep(ReportImage.Kind.PROGRESS)
     attachments = rep(ReportImage.Kind.ATTACHMENT)
+    # Progress photos hand-picked in the builder from the schedule tab's
+    # submissions — rendered earliest date first, before any manual uploads.
+    selected_photos = _selected_progress_photos(report, project)
 
     return {
         "report": {
@@ -624,6 +642,7 @@ def build_report_context(report):
             "right": proj(ProjectImage.ImageType.LOGO_RIGHT),
             "cover": (rep_cover[0] if rep_cover else proj(ProjectImage.ImageType.COVER)),
         },
-        "photos": rep_photos or [i for i in proj_images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],
+        "photos": (selected_photos + rep_photos)
+        or [i for i in proj_images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],
         "attachments": attachments,
     }

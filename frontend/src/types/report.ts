@@ -60,3 +60,13 @@ export interface ReportImage {
   url: string;
   created_at: string;
 }
+
+// A progress photo (from the schedule tab) offered for inclusion in the report.
+export interface ReportProgressPhoto {
+  id: string;
+  url: string;
+  caption: string;
+  date: string | null;
+  activity_name: string;
+  selected: boolean;
+}

@@ -54,6 +54,9 @@ class Report(TimestampedModel):
     description_html = models.TextField(blank=True)
     # Zone scope IDs to include (empty = the whole project).
     scope_ids = models.JSONField(default=list, blank=True)
+    # Progress-photo IDs (from the schedule tab's submissions) chosen for the
+    # report's Progress Images section. Rendered ordered by date, earliest first.
+    progress_image_ids = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_reports")
 

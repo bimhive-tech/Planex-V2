@@ -20,6 +20,7 @@ import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
 import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
+import { ProgressImagePicker } from "./ProgressImagePicker";
 import { ProjectReportAssets } from "@/components/features/projects/ProjectReportAssets";
 import { ScopeTree } from "./ScopeTree";
 import styles from "./reports.module.css";
@@ -330,7 +331,11 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                 )}
 
                 {tab === "photos" && (
-                  <ReportAssets reportId={reportId} canManage={canManage} only="progress" onChanged={bump} />
+                  <section className={styles.tabPanel}>
+                    <ProgressImagePicker reportId={reportId} canManage={canManage} onChanged={bump} />
+                    <hr className={styles.divider} />
+                    <ReportAssets reportId={reportId} canManage={canManage} only="progress" onChanged={bump} />
+                  </section>
                 )}
                 {tab === "attachments" && (
                   <ReportAssets reportId={reportId} canManage={canManage} only="attachment" onChanged={bump} />
