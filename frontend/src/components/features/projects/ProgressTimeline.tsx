@@ -96,27 +96,18 @@ export function ProgressTimeline({ projectId }: { projectId: string }) {
             </div>
           )}
         </div>
-        <ul className={styles.list}>
-          {[...points].reverse().map((s) => {
-            const behind = s.planned != null && s.overall_progress < s.planned;
-            return (
-              <li key={s.date} className={styles.row}>
-                <span className={styles.date}>{formatDate(s.date)}</span>
-                <div className={styles.bar}>
-                  <span className={styles.barFill} style={{ ["--pct" as string]: `${s.overall_progress}%` }} />
-                  {s.planned != null && (
-                    <span className={styles.plannedTick} style={{ ["--pct" as string]: `${s.planned}%` }}
-                      title={`Planned ${s.planned}%`} />
-                  )}
-                </div>
-                <span className={`${styles.pct} tnum ${behind ? styles.behind : ""}`}>
-                  {s.overall_progress}%
-                  {s.planned != null && <span className={styles.vsPlanned}> / {s.planned}%</span>}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        {(() => {
+          const last = points[points.length - 1];
+          if (!last) return null;
+          const behind = last.planned != null && last.overall_progress < last.planned;
+          return (
+            <p className={styles.latest}>
+              Latest {formatDate(last.date)}:{" "}
+              <strong className={behind ? styles.behind : ""}>{last.overall_progress}%</strong> actual
+              {last.planned != null && <> vs <strong>{last.planned}%</strong> planned</>}
+            </p>
+          );
+        })()}
       </StateView>
     </section>
   );

@@ -129,66 +129,12 @@
   color: var(--text-muted);
 }
 
-.list {
-  display: flex;
-  flex-direction: column;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 130px 1fr 48px;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border);
-}
-.row:last-child {
-  border-bottom: none;
-}
-
-.date {
+.latest {
+  margin-top: var(--space-2);
   font-size: 13px;
-  color: var(--text-primary);
-}
-
-.bar {
-  position: relative;
-  height: 8px;
-  background: var(--border);
-  border-radius: var(--radius-pill);
-}
-
-.barFill {
-  display: block;
-  height: 100%;
-  width: var(--pct, 0%);
-  background: var(--primary);
-  border-radius: var(--radius-pill);
-}
-
-/* Vertical marker for where the plan says we should be on this date. */
-.plannedTick {
-  position: absolute;
-  top: -2px;
-  left: var(--pct, 0%);
-  width: 2px;
-  height: 12px;
-  background: var(--text-muted);
-  transform: translateX(-1px);
-}
-
-.pct {
-  font-size: 13px;
-  font-weight: 600;
   color: var(--text-secondary);
-  text-align: right;
 }
 
 .behind {
   color: var(--danger-text);
-}
-
-.vsPlanned {
-  color: var(--text-muted);
-  font-weight: 400;
 }
