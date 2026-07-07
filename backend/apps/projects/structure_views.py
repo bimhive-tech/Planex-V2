@@ -27,7 +27,7 @@ from .serializers import (
     ScopeSerializer,
     ScopeWriteSerializer,
 )
-from .services import project_overall_progress, scope_progress_map
+from .services import progress_series, project_overall_progress, scope_progress_map
 
 
 def _project(request, project_id):
@@ -354,29 +354,13 @@ class ProjectScheduleImportView(APIView):
 
 
 class ProjectSnapshotsView(APIView):
-    """GET the project's dated progress readings for the timeline: the actual
-    overall % on each date, plus the time-based planned % for that date so the
-    chart can show actual-vs-planned."""
+    """GET the project's actual-vs-planned progress over time — computed live
+    from current data (dated Update readings + import baselines + a live today
+    point), so it reflects any progress or date change, not just imports."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view(request)
-        snaps = project.snapshots.order_by("date").values(
-            "date", "overall_progress", "breakdown", "zones", "source")
-        start, finish = project.planned_start, project.planned_finish
-
-        def planned(on):
-            # Linear time-based baseline: 0% at planned start → 100% at finish.
-            if not (start and finish and on and finish > start):
-                return None
-            frac = (on - start).days / (finish - start).days
-            return round(max(0.0, min(1.0, frac)) * 100, 1)
-
-        return Response([
-            {"date": s["date"], "overall_progress": float(s["overall_progress"]),
-             "planned": planned(s["date"]),
-             "breakdown": s["breakdown"], "zones": s["zones"], "source": s["source"]}
-            for s in snaps
-        ])
+        return Response(progress_series(project))

@@ -50,6 +50,55 @@ def project_overall_progress(project, progress=None) -> float:
     return round(psum / wsum, 1)
 
 
+def _planned_at(project, on):
+    """Time-based planned % (0–100) for a date: 0 at the planned start rising
+    straight to 100 at the planned finish. None when the project has no dates."""
+    s, f = project.planned_start, project.planned_finish
+    if not (s and f and on and f > s):
+        return None
+    frac = (on - s).days / (f - s).days
+    return round(max(0.0, min(1.0, frac)) * 100, 1)
+
+
+def progress_series(project, max_points=60) -> list:
+    """Actual-vs-planned overall progress over time, computed *live* from the
+    project's current data — not a static per-import capture. Points come from:
+      • each dated Update reading (ProgressEntry) — reflects manual progress edits,
+      • each import snapshot (ProgressSnapshot) — reflects imported baselines,
+      • a live "today" point from the current overall,
+    so the chart moves whenever progress or the planned dates change. Planned is
+    derived from the project's dates, so editing them updates the baseline too."""
+    from django.utils import timezone
+
+    from .models import ProgressEntry
+
+    actual = {}  # date -> overall %
+
+    # Import baselines (their captured overall on that date).
+    for s in project.snapshots.values("date", "overall_progress"):
+        if s["date"]:
+            actual[s["date"]] = float(s["overall_progress"])
+
+    # Manual Update history: overall as-of each distinct reading date (most recent
+    # dates win if capped). Overrides a same-date snapshot with the live rollup.
+    entry_dates = sorted(set(
+        ProgressEntry.objects.filter(project=project)
+        .values_list("date", flat=True).distinct()
+    ))
+    for d in entry_dates[-max_points:]:
+        actual[d] = project_overall_progress(project, activity_progress_as_of(project, d))
+
+    # Always include a live "today" point so the latest state is current.
+    today = timezone.now().date()
+    actual[today] = project_overall_progress(project, activity_progress_as_of(project, today))
+
+    dates = sorted(actual)[-max_points:]
+    return [
+        {"date": d, "overall_progress": round(actual[d], 1), "planned": _planned_at(project, d)}
+        for d in dates
+    ]
+
+
 def scope_progress_map(project, progress=None) -> dict:
     """Map of scope_id -> weighted progress rolled up over the scope's *whole
     subtree*. Computed on the backend so the tree shows real progress without

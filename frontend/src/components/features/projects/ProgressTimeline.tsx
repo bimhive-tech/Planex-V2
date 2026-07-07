@@ -19,7 +19,7 @@ interface Snapshot {
 }
 
 const PERIODS = [
-  { value: "all", label: "All snapshots" },
+  { value: "all", label: "All readings" },
   { value: "month", label: "By month" },
   { value: "quarter", label: "By quarter" },
   { value: "year", label: "By year" },
