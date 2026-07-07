@@ -10,14 +10,10 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
   const user = await getCurrentUser();
   if (!user) redirect(ROUTES.login);
 
-  const canView =
-    user.is_platform_admin ||
-    user.permissions.includes(Permission.VIEW_PROJECTS) ||
-    user.permissions.includes(Permission.EXPORT_REPORTS);
-  if (!canView) redirect(ROUTES.dashboard);
+  // EXPORT_REPORTS gates all report access (view, edit, download).
+  const canManage = user.is_platform_admin || user.permissions.includes(Permission.EXPORT_REPORTS);
+  if (!canManage) redirect(ROUTES.dashboard);
 
-  // Managing report assets (logos/cover/photos) uses the project manage right.
-  const canManage = user.is_platform_admin || user.permissions.includes(Permission.MANAGE_PROJECTS);
   const { id } = await params;
   return <ReportDetail reportId={id} canManage={canManage} />;
 }

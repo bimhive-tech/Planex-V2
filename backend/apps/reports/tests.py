@@ -433,10 +433,14 @@ class ReportsApiTests(TestCase):
         photos = build_report_context(report)["photos"]
         self.assertEqual([p["caption"] for p in photos], ["Earlier", "Later"])  # earliest first
 
-    def test_progress_image_picker_write_needs_export_perm(self):
+    def test_reports_need_export_permission(self):
+        # A VIEW_PROJECTS-only user can't even read reports — EXPORT_REPORTS gates
+        # all report access now (view + download + edit).
         report = Report.objects.create(company=self.company, project=self.project, title="R")
         self.client.force_authenticate(self.viewer)  # VIEW_PROJECTS only
-        self.assertEqual(self.client.get(f"/api/reports/{report.id}/progress-images/").status_code, 200)
+        self.assertEqual(self.client.get("/api/reports/").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/reports/{report.id}/pdf/").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/reports/{report.id}/progress-images/").status_code, 403)
         put = self.client.put(f"/api/reports/{report.id}/progress-images/",
                               {"selected_ids": []}, format="json")
         self.assertEqual(put.status_code, 403)

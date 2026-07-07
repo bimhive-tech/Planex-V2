@@ -27,7 +27,7 @@ class Permission(models.TextChoices):
     REVIEW_PROGRESS = "review_progress", "Review progress"
     APPROVE_PROGRESS = "approve_progress", "Approve progress"
     DELETE_PROGRESS_IMAGES = "delete_progress_images", "Delete progress images"
-    EXPORT_REPORTS = "export_reports", "Export reports"
+    EXPORT_REPORTS = "export_reports", "View & export reports"
 
     # Finances (money is sensitive — gated separately from general project access).
     VIEW_FINANCES = "view_finances", "View finances"

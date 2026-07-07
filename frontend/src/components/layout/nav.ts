@@ -16,7 +16,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: ROUTES.dashboard, icon: "dashboard" },
   { label: "Projects", href: "/projects", icon: "projects", permission: Permission.VIEW_PROJECTS },
   { label: "Notifications", href: ROUTES.notifications, icon: "bell" },
-  { label: "Reports", href: "/reports", icon: "reports", permission: Permission.VIEW_PROJECTS },
+  { label: "Reports", href: "/reports", icon: "reports", permission: Permission.EXPORT_REPORTS },
   // Settings is always shown (the Info subtab is available to every user);
   // its subtabs self-filter by permission.
   { label: "Settings", href: ROUTES.settings, icon: "settings" },

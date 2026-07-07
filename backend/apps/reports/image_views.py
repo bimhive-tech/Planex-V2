@@ -1,6 +1,6 @@
 """Per-report image endpoints (cover, progress photos, attachments).
 
-Reads need VIEW_PROJECTS/EXPORT_REPORTS; writes need EXPORT_REPORTS. Bytes
+All access needs EXPORT_REPORTS (report content is part of the report). Bytes
 stream through an authed endpoint so private assets never get a public URL."""
 import mimetypes
 
@@ -25,8 +25,7 @@ class ReportImageAccessMixin:
         return get_object_or_404(Report, id=self.kwargs["report_id"], company=self.request.user.company)
 
     def check_read(self):
-        perms = self.request.user.effective_permissions()
-        if not ({Permission.VIEW_PROJECTS, Permission.EXPORT_REPORTS} & perms):
+        if Permission.EXPORT_REPORTS not in self.request.user.effective_permissions():
             self.permission_denied(self.request)
 
     def check_manage(self):

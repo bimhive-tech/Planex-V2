@@ -1,4 +1,4 @@
-// Reports Hub route. View needs project access; EXPORT_REPORTS unlocks create/edit.
+// Reports Hub route. EXPORT_REPORTS gates all report access (view + export).
 import { redirect } from "next/navigation";
 
 import { ReportsHub } from "@/components/features/reports/ReportsHub";
@@ -10,12 +10,8 @@ export default async function ReportsPage() {
   const user = await getCurrentUser();
   if (!user) redirect(ROUTES.login);
 
-  const canView =
-    user.is_platform_admin ||
-    user.permissions.includes(Permission.VIEW_PROJECTS) ||
-    user.permissions.includes(Permission.EXPORT_REPORTS);
-  if (!canView) redirect(ROUTES.dashboard);
-
   const canManage = user.is_platform_admin || user.permissions.includes(Permission.EXPORT_REPORTS);
+  if (!canManage) redirect(ROUTES.dashboard);
+
   return <ReportsHub canManage={canManage} />;
 }

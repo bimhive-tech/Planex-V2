@@ -1,6 +1,8 @@
 """Reports API. Company-scoped CRUD for templates + reports, plus PDF download.
 
-Access: VIEW_PROJECTS to read, EXPORT_REPORTS to create/edit/generate.
+Access: EXPORT_REPORTS gates everything — viewing, downloading, and editing.
+Reports are sensitive deliverables, so a role without it (e.g. a site engineer)
+sees no reports at all, not just a hidden download button.
 """
 import json
 
@@ -21,20 +23,14 @@ from .serializers import (
 )
 from .services import build_report_context
 
-READ_ACTIONS = {"list", "retrieve", "pdf", "data"}
-
-
 class ReportsAccess(BasePermission):
-    """VIEW_PROJECTS for reads; EXPORT_REPORTS for writes/generation."""
+    """EXPORT_REPORTS gates all report/template access — read, download, edit."""
 
     def has_permission(self, request, view):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        perms = user.effective_permissions()
-        if view.action in READ_ACTIONS:
-            return bool({Permission.VIEW_PROJECTS, Permission.EXPORT_REPORTS} & perms)
-        return Permission.EXPORT_REPORTS in perms
+        return Permission.EXPORT_REPORTS in user.effective_permissions()
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):

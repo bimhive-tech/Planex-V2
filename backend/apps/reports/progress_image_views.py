@@ -1,6 +1,6 @@
 """Report builder: pick progress photos (uploaded in the schedule tab via
 progress updates / accepted submissions) for the report's Progress Images
-section. Reads need VIEW_PROJECTS/EXPORT_REPORTS; writes need EXPORT_REPORTS."""
+section. All access needs EXPORT_REPORTS (it's part of the report builder)."""
 import uuid
 
 from django.shortcuts import get_object_or_404
@@ -36,8 +36,7 @@ class ReportProgressImagesView(APIView):
         return get_object_or_404(Report, id=self.kwargs["report_id"], company=self.request.user.company)
 
     def _require_read(self):
-        perms = self.request.user.effective_permissions()
-        if not ({Permission.VIEW_PROJECTS, Permission.EXPORT_REPORTS} & perms):
+        if Permission.EXPORT_REPORTS not in self.request.user.effective_permissions():
             self.permission_denied(self.request)
 
     def _require_manage(self):
