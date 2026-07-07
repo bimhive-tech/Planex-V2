@@ -19,11 +19,12 @@ interface Props {
   canManage: boolean;
   canSubmit: boolean;
   onlyName?: string; // active Task filter — render just the matching row(s)
+  viewQuery?: string; // as-of / month view mode (?mode=…&as_of=…), "" for current
   onEdit: (activity: Activity) => void;
   onChanged: () => void; // refresh roll-ups (progress bars) upstream
 }
 
-export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmit, onlyName, onEdit, onChanged }: Props) {
+export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmit, onlyName, viewQuery = "", onEdit, onChanged }: Props) {
   const [acts, setActs] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitFor, setSubmitFor] = useState<Activity | null>(null);
@@ -31,7 +32,7 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
 
   async function load() {
     try {
-      setActs(await api.get<Activity[]>(`/projects/${projectId}/scopes/${scopeId}/activities/`));
+      setActs(await api.get<Activity[]>(`/projects/${projectId}/scopes/${scopeId}/activities/${viewQuery}`));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't load tasks.");
     }
@@ -40,7 +41,7 @@ export function ScopeActivities({ projectId, scopeId, depth, canManage, canSubmi
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, scopeId]);
+  }, [projectId, scopeId, viewQuery]);
 
   async function remove(a: Activity) {
     if (!window.confirm(`Delete task “${a.name}”?`)) return;

@@ -3,6 +3,7 @@
 Routes are nested under a project. Reads need VIEW_PROJECTS; writes need
 MANAGE_PROJECTS. Everything is company- and project-scoped (tenant isolation).
 """
+import datetime
 import logging
 from io import BytesIO
 
@@ -27,7 +28,29 @@ from .serializers import (
     ScopeSerializer,
     ScopeWriteSerializer,
 )
-from .services import progress_series, project_overall_progress, scope_progress_map
+from .services import (
+    breakdown_from_map,
+    progress_series,
+    project_overall_progress,
+    scope_progress_map,
+    view_progress_map,
+)
+
+
+def _view_map(request, project):
+    """Build the Schedule view-mode override map from ?mode & ?as_of query params.
+    Returns None for the default 'current' view (callers use live values)."""
+    mode = request.query_params.get("mode", "current")
+    raw = request.query_params.get("as_of")
+    as_of = None
+    if raw:
+        try:
+            as_of = datetime.date.fromisoformat(raw)
+        except (ValueError, TypeError):
+            as_of = None
+    if mode in ("asof", "month") and as_of:
+        return view_progress_map(project, mode, as_of)
+    return None
 
 
 def _project(request, project_id):
@@ -85,23 +108,30 @@ class ProjectStructureView(APIView):
             for r in project.activities.values("scope_id").annotate(n=Count("id"))
             if accessible is None or r["scope_id"] in accessible
         }
-        from django.db.models import Q
-        agg = project.activities.aggregate(
-            total=Count("id"),
-            completed=Count("id", filter=Q(progress_percent__gte=100)),
-            not_started=Count("id", filter=Q(progress_percent__lte=0)),
-        )
-        total = agg["total"]
+        # Optional as-of / month-delta view (?mode=asof|month&as_of=YYYY-MM-DD).
+        value_map = _view_map(request, project)
+        if value_map is None:
+            from django.db.models import Q
+            agg = project.activities.aggregate(
+                total=Count("id"),
+                completed=Count("id", filter=Q(progress_percent__gte=100)),
+                not_started=Count("id", filter=Q(progress_percent__lte=0)),
+            )
+            total = agg["total"]
+            breakdown = {
+                "total": total, "completed": agg["completed"], "not_started": agg["not_started"],
+                "in_progress": total - agg["completed"] - agg["not_started"],
+            }
+        else:
+            breakdown = breakdown_from_map(project, value_map)
+            total = breakdown["total"]
         return Response({
-            "overall_progress": project_overall_progress(project),
-            "scope_progress": scope_progress_map(project),
+            "overall_progress": project_overall_progress(project, value_map),
+            "scope_progress": scope_progress_map(project, value_map),
             "scopes": ScopeSerializer(scopes_qs, many=True).data,
             "scope_activity_counts": counts,
             "activity_count": total,
-            "progress_breakdown": {
-                "total": total, "completed": agg["completed"], "not_started": agg["not_started"],
-                "in_progress": total - agg["completed"] - agg["not_started"],
-            },
+            "progress_breakdown": breakdown,
         })
 
 
@@ -143,7 +173,14 @@ class ScopeActivitiesView(APIView):
         if accessible is not None and scope.id not in accessible:
             raise PermissionDenied("You don't have access to this part of the project.")
         acts = scope.activities.order_by("row_index", "name")
-        return Response(ActivitySerializer(acts, many=True).data)
+        data = ActivitySerializer(acts, many=True).data
+        value_map = _view_map(request, project)
+        if value_map is not None:
+            for d in data:
+                v = value_map.get(str(d["id"]))
+                if v is not None:  # asof: sparse (missing → keep current); month: complete
+                    d["progress_percent"] = str(round(v, 2))
+        return Response(data)
 
 
 class ProjectZoneGridView(APIView):
@@ -173,6 +210,7 @@ class ProjectZoneGridView(APIView):
         acts = list(Activity.objects.filter(scope_id__in=phase_ids).values(
             "id", "name", "phase_name", "weight", "progress_percent",
             "row_index", "subzone_index", "subzone_code"))
+        value_map = _view_map(request, project)  # as-of / month-delta override
 
         index_name = {}
         for a in acts:
@@ -192,7 +230,12 @@ class ProjectZoneGridView(APIView):
                 order.append(ri)
             ci = col_pos.get(a["subzone_index"])
             if ci is not None:
-                row["cells"][ci] = {"id": str(a["id"]), "progress": str(a["progress_percent"])}
+                prog = a["progress_percent"]
+                if value_map is not None:
+                    v = value_map.get(str(a["id"]))
+                    if v is not None:
+                        prog = round(v, 2)
+                row["cells"][ci] = {"id": str(a["id"]), "progress": str(prog)}
 
         return Response({
             "zone": {"id": str(zone.id), "name": zone.name},

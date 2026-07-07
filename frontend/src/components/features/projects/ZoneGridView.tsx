@@ -23,16 +23,19 @@ interface Props {
   subzoneName?: string;
   phaseName?: string;
   taskName?: string;
+  viewQuery?: string; // as-of / month view mode (?mode=…&as_of=…), "" for current
+  readOnly?: boolean; // as-of / month views are historical — no cell editing
   onBack: () => void;
   onChanged: () => void;
 }
 
 export function ZoneGridView({
-  projectId, zoneId, zoneName, canManage, subzoneName, phaseName, taskName, onBack, onChanged,
+  projectId, zoneId, zoneName, canManage, subzoneName, phaseName, taskName,
+  viewQuery = "", readOnly = false, onBack, onChanged,
 }: Props) {
   const { data, loading, error, reload } = useFetch(
-    () => api.get<ZoneGrid>(`/projects/${projectId}/zones/${zoneId}/grid/`),
-    [projectId, zoneId],
+    () => api.get<ZoneGrid>(`/projects/${projectId}/zones/${zoneId}/grid/${viewQuery}`),
+    [projectId, zoneId, viewQuery],
   );
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -93,7 +96,7 @@ export function ZoneGridView({
                 </tr>
               </thead>
               <tbody>
-                {renderRows(rows, columns, canManage, saveCell)}
+                {renderRows(rows, columns, canManage && !readOnly, saveCell)}
               </tbody>
             </table>
           </div>

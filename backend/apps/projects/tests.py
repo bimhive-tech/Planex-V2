@@ -325,6 +325,32 @@ class ProjectApiTests(TestCase):
         names = {s["name"] for s in self.client.get(f"/api/projects/{p.id}/structure/").json()["scopes"]}
         self.assertEqual(names, {"Z1", "Z2", "Z1-A"})
 
+    def test_schedule_asof_and_month_views(self):
+        import datetime
+
+        from .models import ProgressEntry
+        p, act = self._activity()
+        ProgressEntry.objects.create(company=self.company_a, project=p, activity=act,
+                                     date=datetime.date(2026, 2, 28), progress_percent=45)
+        ProgressEntry.objects.create(company=self.company_a, project=p, activity=act,
+                                     date=datetime.date(2026, 3, 20), progress_percent=60)
+        act.progress_percent = 60
+        act.save(update_fields=["progress_percent"])
+
+        self.login("admin@acme.com")
+        base = f"/api/projects/{p.id}/structure/"
+        # Cumulative "as of" a date.
+        self.assertEqual(round(self.client.get(f"{base}?mode=asof&as_of=2026-02-28").json()["overall_progress"]), 45)
+        self.assertEqual(round(self.client.get(f"{base}?mode=asof&as_of=2026-03-31").json()["overall_progress"]), 60)
+        # "Month only" = end − start of that month (60 − 45 = 15).
+        self.assertEqual(round(self.client.get(f"{base}?mode=month&as_of=2026-03-15").json()["overall_progress"]), 15)
+        # Current view (no params) is unchanged.
+        self.assertEqual(round(self.client.get(base).json()["overall_progress"]), 60)
+        # The per-scope activities reflect the mode too.
+        acts = self.client.get(
+            f"/api/projects/{p.id}/scopes/{act.scope_id}/activities/?mode=month&as_of=2026-03-15").json()
+        self.assertEqual(round(float(acts[0]["progress_percent"])), 15)
+
     def test_manage_member_scope_access(self):
         from .models import ProjectScope
         p = Project.objects.create(company=self.company_a, name="Mall3", project_type="commercial")

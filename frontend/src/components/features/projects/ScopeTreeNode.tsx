@@ -26,6 +26,8 @@ export interface ScopeNodeProps {
   visibleIds: Set<string> | null;
   // Active Task filter (by name) — passed through to ScopeActivities.
   onlyTaskName: string;
+  // As-of / month view mode query (?mode=…&as_of=…), "" for the current view.
+  viewQuery: string;
   onAddScope: (parentId: string, type: string) => void;
   onEditScope: (scope: Scope) => void;
   onDeleteScope: (scope: Scope) => void;
@@ -100,7 +102,7 @@ export function ScopeNode(props: ScopeNodeProps) {
             <ScopeActivities
               projectId={props.projectId} scopeId={scope.id} depth={depth + 1}
               canManage={canManage} canSubmit={props.canSubmit}
-              onlyName={props.onlyTaskName}
+              onlyName={props.onlyTaskName} viewQuery={props.viewQuery}
               onEdit={props.onEditActivity} onChanged={props.onChanged}
             />
           )}

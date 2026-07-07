@@ -30,16 +30,36 @@ interface Props {
 }
 
 export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhotos, onStatsChange }: Props) {
+  // As-of / month view mode. "current" = live; "asof" = cumulative up to the end
+  // of a month; "month" = only the progress that moved during that month.
+  const [viewMode, setViewMode] = useState<"current" | "asof" | "month">("current");
+  const [viewMonth, setViewMonth] = useState(""); // "YYYY-MM"
+  const viewQuery = useMemo(() => {
+    if (viewMode === "current" || !viewMonth) return "";
+    const [y, m] = viewMonth.split("-").map(Number);
+    if (viewMode === "asof") {
+      const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); // last day of the month
+      return `?mode=asof&as_of=${end}`;
+    }
+    return `?mode=month&as_of=${viewMonth}-01`;
+  }, [viewMode, viewMonth]);
+
+  function pickMode(mode: "current" | "asof" | "month") {
+    setViewMode(mode);
+    if (mode !== "current" && !viewMonth) setViewMonth(new Date().toISOString().slice(0, 7));
+  }
+
   const { data, loading, error, reload } = useFetch(
-    () => api.get<ProjectStructure>(`/projects/${projectId}/structure/`),
-    [projectId],
+    () => api.get<ProjectStructure>(`/projects/${projectId}/structure/${viewQuery}`),
+    [projectId, viewQuery],
   );
 
-  // Bubble live stats (overall + status breakdown) up to the Overview tab.
+  // Bubble live stats up to the Overview — only in the current view; the as-of /
+  // month views are historical and shouldn't change the Overview's headline.
   useEffect(() => {
-    if (!data) return;
+    if (!data || viewMode !== "current") return;
     onStatsChange({ overall: data.overall_progress, breakdown: data.progress_breakdown });
-  }, [data, onStatsChange]);
+  }, [data, viewMode, onStatsChange]);
 
   const [scopeModal, setScopeModal] = useState<{ parentId: string | null; scope: Scope | null; type: string } | null>(null);
   const [activityModal, setActivityModal] = useState<{ scopeId: string; activity: Activity | null } | null>(null);
@@ -178,9 +198,35 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     />
   );
 
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const viewControls = (
+    <div className={styles.viewBar}>
+      <div className={styles.segmented}>
+        <button type="button" className={`${styles.seg} ${viewMode === "current" ? styles.segOn : ""}`}
+          onClick={() => pickMode("current")}>Current</button>
+        <button type="button" className={`${styles.seg} ${viewMode === "asof" ? styles.segOn : ""}`}
+          onClick={() => pickMode("asof")}>Up to month</button>
+        <button type="button" className={`${styles.seg} ${viewMode === "month" ? styles.segOn : ""}`}
+          onClick={() => pickMode("month")}>During month</button>
+      </div>
+      {viewMode !== "current" && (
+        <input className={styles.monthInput} type="month" max={thisMonth} value={viewMonth}
+          onChange={(e) => setViewMonth(e.target.value)} aria-label="Select month" />
+      )}
+      {viewMode !== "current" && viewMonth && (
+        <span className={styles.viewNote}>
+          {viewMode === "asof"
+            ? "Cumulative progress up to the end of this month (read-only)."
+            : "Only the progress recorded during this month (read-only)."}
+        </span>
+      )}
+    </div>
+  );
+
   if (gridZone) {
     return (
       <div>
+        {viewControls}
         {filterBar}
         <ZoneGridView
           projectId={projectId}
@@ -190,6 +236,8 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
           subzoneName={subzoneFilter}
           phaseName={phaseFilter}
           taskName={taskFilter}
+          viewQuery={viewQuery}
+          readOnly={viewMode !== "current"}
           onBack={() => setGridZone(null)}
           onChanged={reload}
         />
@@ -226,6 +274,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
       {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
+      {viewControls}
       {filterBar}
 
       <div className={styles.surface}>
@@ -249,7 +298,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
                 childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
                 canManage={canManage} canSubmit={canSubmit}
                 visibleIds={visibleIds}
-                onlyTaskName={taskFilter}
+                onlyTaskName={taskFilter} viewQuery={viewQuery}
                 onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
                 onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
                 onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,

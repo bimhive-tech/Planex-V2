@@ -99,6 +99,56 @@ def progress_series(project, max_points=60) -> list:
     ]
 
 
+def _month_bounds(any_date):
+    """(day before the month starts, last day of that month) for a given date."""
+    import datetime as _dt
+
+    first = any_date.replace(day=1)
+    day_before = first - _dt.timedelta(days=1)
+    nxt = (first.replace(year=first.year + 1, month=1)
+           if first.month == 12 else first.replace(month=first.month + 1))
+    return day_before, nxt - _dt.timedelta(days=1)
+
+
+def view_progress_map(project, mode, as_of):
+    """Per-activity {id(str) -> %} override for a Schedule view mode, or None for
+    'current' (live values):
+      • 'asof'  — cumulative % on/before as_of. Sparse: only activities with dated
+        readings; others fall back to their current % (imports carry no per-activity
+        history, so they read as current).
+      • 'month' — % gained during as_of's month (end − start). A complete map with
+        0 where nothing moved / no reading exists.
+    """
+    if mode == "asof" and as_of:
+        return activity_progress_as_of(project, as_of)
+    if mode == "month" and as_of:
+        day_before, last = _month_bounds(as_of)
+        start = activity_progress_as_of(project, day_before)
+        end = activity_progress_as_of(project, last)
+        out = {}
+        for aid, cur in project.activities.values_list("id", "progress_percent"):
+            s = str(aid)
+            c = float(cur)
+            out[s] = round(end.get(s, c) - start.get(s, c), 2)
+        return out
+    return None
+
+
+def breakdown_from_map(project, value_map) -> dict:
+    """Activity counts by state (completed/in-progress/not-started) using an
+    override map; activities missing from the map use their current %."""
+    total = completed = not_started = 0
+    for aid, cur in project.activities.values_list("id", "progress_percent"):
+        v = value_map.get(str(aid), float(cur))
+        total += 1
+        if v >= 100:
+            completed += 1
+        elif v <= 0:
+            not_started += 1
+    return {"total": total, "completed": completed, "not_started": not_started,
+            "in_progress": total - completed - not_started}
+
+
 def scope_progress_map(project, progress=None) -> dict:
     """Map of scope_id -> weighted progress rolled up over the scope's *whole
     subtree*. Computed on the backend so the tree shows real progress without
