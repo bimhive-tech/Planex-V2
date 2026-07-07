@@ -243,6 +243,25 @@ class AreaDashboardsTests(TestCase):
         self.assertIsNone(areas["Zone B"]["duration"])      # dateless -> no pie
         self.assertIsNotNone(areas["Zone A"]["duration"])   # has own dates -> kept
 
+    def test_context_areas_and_area_chart(self):
+        # A subzone under a zone is exposed as an "area" and drives the chart.
+        from apps.projects.models import Activity, ProjectScope
+        from .constants import default_config
+        from .pdf_charts import area_progress_chart
+        from .services import build_report_context
+
+        unit = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="area", name="Bldg 1", parent=self.zone)
+        Activity.objects.create(company=self.company, project=self.project, scope=unit,
+                                name="W", weight=1, progress_percent=40)
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+
+        ctx = build_report_context(report)
+        names = [a["name"] for a in ctx["areas"]]
+        self.assertIn("Bldg 1", names)
+        # The chart renders (returns a Drawing, not None) when areas exist.
+        self.assertIsNotNone(area_progress_chart(default_config(), ctx, 400, default_config()["labels"]))
+
 
 class GanttRowsTests(TestCase):
     """`_gantt_rows` builds zone+child Gantt bars from each scope's OWN dates

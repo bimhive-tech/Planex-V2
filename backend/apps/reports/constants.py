@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
         "progress_overview": True,
         "dashboard": True,
         "progress_chart": True,
+        "area_progress_chart": False,  # optional: planned/actual bars one level below zones
         "duration": True,
         "scurve": True,
         "progress_compare": True,
@@ -100,6 +101,7 @@ DEFAULT_CONFIG = {
         "description": "Project Description",
         "progress_overview": "Overall Progress",
         "progress_chart": "Planned vs Actual",
+        "area_progress_chart": "Planned vs Actual by Area",
         "zone_progress": "Progress by Zone",
         "hierarchy_progress": "تفصيل نسب الإنجاز",
         "discipline_progress": "الإنجاز حسب التخصص",

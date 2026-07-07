@@ -35,6 +35,7 @@ from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_ara
 from .pdf_charts import (
     area_units_chart,
     cashflow_chart,
+    area_progress_chart,
     cashflow_curve,
     duration_pie,
     gantt_chart,
@@ -668,7 +669,8 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
 
     # Project Progress Report — one TOC entry; the charts are sub-headings.
     progress_on = any(sections.get(k) for k in
-                      ("progress_overview", "progress_chart", "duration", "scurve", "progress_compare"))
+                      ("progress_overview", "progress_chart", "area_progress_chart",
+                       "duration", "scurve", "progress_compare"))
     if progress_on:
         story += major(labels.get("progress_report", "Project Progress Report"),
                        anchor=None if progress_anchored else "tab_progress")
@@ -683,6 +685,14 @@ def build_report_pdf(report, ctx, out_pages=None) -> bytes:
             if chart:
                 story.append(KeepTogether(_sub_heading(styles, labels["progress_chart"]) +
                                           _captioned(cfg, styles, chart, labels["progress_chart"], fig) + [Spacer(1, 10)]))
+        # Optional area-level bars — one level below zones. Shown even under the
+        # dashboard (which only carries zone bars), since it's a distinct chart.
+        if sections.get("area_progress_chart"):
+            area_chart = area_progress_chart(cfg, ctx, fw, labels)
+            if area_chart:
+                heading = labels.get("area_progress_chart", "Planned vs Actual by Area")
+                story.append(KeepTogether(_sub_heading(styles, heading) +
+                                          _captioned(cfg, styles, area_chart, heading, fig) + [Spacer(1, 10)]))
         if sections.get("duration") and ctx.get("duration"):
             dur = ctx["duration"]
             pie = None if dash_on else duration_pie(cfg, ctx, fw, labels)

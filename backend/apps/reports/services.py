@@ -506,6 +506,10 @@ def build_report_context(report):
 
     # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
+    # Flat list of areas (the subzones under every zone) for the optional
+    # area-level planned/actual bar chart.
+    areas = [{"name": c["name"], "planned": c["planned"], "actual": c["actual"]}
+             for z in hierarchy for c in z["children"]]
     discipline = _discipline_rows(project, report.scope_ids, progress)
     area_dashboards = _area_dashboards(project, hierarchy, as_of)
     gantt = _gantt_rows(project, report.scope_ids, progress)
@@ -620,6 +624,7 @@ def build_report_context(report):
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
+        "areas": areas,
         "hierarchy": hierarchy,
         "discipline": discipline,
         "area_dashboards": area_dashboards,

@@ -141,6 +141,18 @@ def _unit_bars(cfg, units, width, labels):
     return d
 
 
+AREA_CHART_MAX = 15  # a grouped bar chart stops being readable past ~15 bars
+
+
+def area_progress_chart(cfg, ctx, width, labels):
+    """Planned-vs-actual bars one level below zones (the areas / subzones). Same
+    look as the zone chart; capped so it stays legible with many areas."""
+    areas = ctx.get("areas") or []
+    if not areas:
+        return None
+    return _unit_bars(cfg, areas[:AREA_CHART_MAX], width, labels)
+
+
 def _completion_histogram(cfg, children, width, labels):
     """How a zone's sub-units are spread across completion bands — readable at
     any unit count (a per-unit bar chart isn't, past ~15 units). Bar height is
