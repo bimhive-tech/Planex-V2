@@ -11,6 +11,21 @@
   align-items: start;
 }
 
+/* Two-column overview: visuals on the left, reference details on the right. */
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.main,
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -391,5 +406,12 @@
   /* Progress Summary leads as a hero spanning two columns. */
   .wide {
     grid-column: span 2;
+  }
+
+  /* Visuals get the wide left column; details/contacts sit in a narrow rail. */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
   }
 }

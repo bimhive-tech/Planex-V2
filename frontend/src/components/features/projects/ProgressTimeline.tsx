@@ -65,7 +65,18 @@ export function ProgressTimeline({ projectId }: { projectId: string }) {
         emptyText="Import a dated tracker (the date is read from the file name) to start the timeline."
         onRetry={reload}
       >
-        <TrendChart points={points} />
+        <div className={styles.chartCard}>
+          <div className={styles.chartRow}>
+            <div className={styles.yAxis}><span>100</span><span>50</span><span>0</span></div>
+            <TrendChart points={points} />
+          </div>
+          {points.length > 0 && (
+            <div className={styles.xAxis}>
+              <span>{formatDate(points[0].date)}</span>
+              {points.length > 1 && <span>{formatDate(points[points.length - 1].date)}</span>}
+            </div>
+          )}
+        </div>
         <ul className={styles.list}>
           {[...points].reverse().map((s) => (
             <li key={s.date} className={styles.row}>
@@ -82,28 +93,36 @@ export function ProgressTimeline({ projectId }: { projectId: string }) {
   );
 }
 
+// Area + line trend. preserveAspectRatio="none" fills the width; the line and
+// gridlines use non-scaling-stroke so they stay crisp (no stretched, blobby
+// dots — that's what made the old chart look bad). Axis labels are HTML, so
+// they never distort.
 function TrendChart({ points }: { points: Snapshot[] }) {
-  const W = 640;
-  const H = 160;
-  const pad = 28;
+  const W = 800;
+  const H = 220;
+  const padY = 14;
   const xs = points.length;
-  const x = (i: number) => (xs <= 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (xs - 1));
-  const y = (v: number) => H - pad - (v / 100) * (H - 2 * pad);
-  const line = points.map((s, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(s.overall_progress)}`).join(" ");
+  const x = (i: number) => (xs <= 1 ? W / 2 : (i * W) / (xs - 1));
+  const y = (v: number) => H - padY - (v / 100) * (H - 2 * padY);
+
+  let line: string;
+  if (xs === 1) {
+    const yy = y(points[0].overall_progress);
+    line = `M 0 ${yy} L ${W} ${yy}`;
+  } else {
+    line = points.map((s, i) => `${i === 0 ? "M" : "L"} ${x(i)} ${y(s.overall_progress)}`).join(" ");
+  }
+  const area = `${line} L ${W} ${H} L 0 ${H} Z`;
 
   return (
     <div className={styles.chartWrap}>
-      <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart} preserveAspectRatio="none"
+        role="img" aria-label="Progress over time">
         {[0, 50, 100].map((g) => (
-          <g key={g}>
-            <line x1={pad} x2={W - pad} y1={y(g)} y2={y(g)} className={styles.grid} />
-            <text x={2} y={y(g) + 3} className={styles.axis}>{g}</text>
-          </g>
+          <line key={g} x1={0} x2={W} y1={y(g)} y2={y(g)} className={styles.grid} vectorEffect="non-scaling-stroke" />
         ))}
-        {points.length > 1 && <path d={line} className={styles.trend} />}
-        {points.map((s, i) => (
-          <circle key={s.date} cx={x(i)} cy={y(s.overall_progress)} r={4} className={styles.point} />
-        ))}
+        <path d={area} className={styles.area} />
+        <path d={line} className={styles.trend} vectorEffect="non-scaling-stroke" />
       </svg>
     </div>
   );

@@ -1,0 +1,134 @@
+/* Visual schedule health: compare bars + a start/finish/today track. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.verdict {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+}
+.ahead { color: var(--success-text); background: var(--success-fill); }
+.ontrack { color: var(--info-text); background: var(--info-fill); }
+.behind { color: var(--danger-text); background: var(--danger-fill); }
+
+.compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 92px 1fr 44px;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.barLabel {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  width: var(--pct, 0%);
+  border-radius: var(--radius-pill);
+  transition: width 0.4s ease;
+}
+.fill_time { background: var(--border-strong); }
+.fill_work { background: var(--primary); }
+
+.barPct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* Timeline track with markers. */
+.track {
+  position: relative;
+  height: 8px;
+  margin: var(--space-4) 0 var(--space-2);
+  background: var(--border);
+  border-radius: var(--radius-pill);
+}
+
+.elapsed {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: var(--x, 0%);
+  background: var(--primary-soft);
+  border-radius: var(--radius-pill);
+}
+
+.today {
+  position: absolute;
+  left: var(--x, 0%);
+  top: -5px;
+  width: 2px;
+  height: 18px;
+  background: var(--primary);
+  transform: translateX(-1px);
+}
+
+.marker {
+  position: absolute;
+  left: var(--x, 0%);
+  top: -3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translateX(-6px);
+  border: 2px solid var(--bg-surface);
+}
+.mk_planned { background: var(--warning-text); }
+.mk_revised { background: var(--danger-text); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.legItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot_start { background: var(--text-muted); }
+.dot_planned { background: var(--warning-text); }
+.dot_revised { background: var(--danger-text); }
+.dot_ontrack { background: var(--info-text); }
+.dot_behind { background: var(--danger-text); }
+
+.legLabel { color: var(--text-secondary); }
+.legValue { font-weight: 600; color: var(--text-primary); }
