@@ -25,6 +25,19 @@ const PERIODS = [
   { value: "year", label: "By year" },
 ];
 
+// Y axis in steps of 10 (100 at the top → 0 at the bottom).
+const Y_TICKS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
+
+const monthYear = (iso: string) =>
+  new Date(iso).toLocaleDateString("en", { month: "short", year: "2-digit" });
+
+// Up to `max` evenly-spaced points, so the x-axis stays readable with many months.
+function pickLabels<T>(points: T[], max = 8): T[] {
+  if (points.length <= max) return points;
+  const step = (points.length - 1) / (max - 1);
+  return Array.from({ length: max }, (_, i) => points[Math.round(i * step)]);
+}
+
 function periodKey(iso: string, period: string): string {
   const d = new Date(iso);
   const y = d.getFullYear();
@@ -72,13 +85,14 @@ export function ProgressTimeline({ projectId }: { projectId: string }) {
         </div>
         <div className={styles.chartCard}>
           <div className={styles.chartRow}>
-            <div className={styles.yAxis}><span>100</span><span>50</span><span>0</span></div>
+            <div className={styles.yAxis}>
+              {Y_TICKS.map((g) => <span key={g}>{g}</span>)}
+            </div>
             <TrendChart points={points} />
           </div>
           {points.length > 0 && (
             <div className={styles.xAxis}>
-              <span>{formatDate(points[0].date)}</span>
-              {points.length > 1 && <span>{formatDate(points[points.length - 1].date)}</span>}
+              {pickLabels(points).map((s, i) => <span key={i}>{monthYear(s.date)}</span>)}
             </div>
           )}
         </div>
@@ -136,7 +150,7 @@ function TrendChart({ points }: { points: Snapshot[] }) {
     <div className={styles.chartWrap}>
       <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart} preserveAspectRatio="none"
         role="img" aria-label="Actual vs planned progress over time">
-        {[0, 50, 100].map((g) => (
+        {Y_TICKS.map((g) => (
           <line key={g} x1={0} x2={W} y1={y(g)} y2={y(g)} className={styles.grid} vectorEffect="non-scaling-stroke" />
         ))}
         <path d={area} className={styles.area} />
