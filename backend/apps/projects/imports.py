@@ -105,9 +105,14 @@ def _detect_label_row(rows):
     return best
 
 
-def parse_sheet(rows):
+def parse_sheet(rows, is_header=None):
     """Return {subzones: [labels], tasks: [{name, weight, phase, row_index, cells}]}
-    where cells is a list aligned to subzones (None for blanks)."""
+    where cells is a list aligned to subzones (None for blanks).
+
+    `is_header(row_idx, name_col)` (optional) flags a styled section/phase header
+    row — the trackers only mark the FIRST discipline with a col-A "W", styling
+    the rest (bold + fill) instead, so without this every later discipline's
+    tasks would collapse into the first phase."""
     det = _detect_label_row(rows)
     if not det:
         return None
@@ -122,14 +127,19 @@ def parse_sheet(rows):
 
     tasks, phase, ri = [], "", 0
     skip_first_summary = weight_col is None  # no "W" marker -> first row is the summary
-    for row in rows[label_row + 1:]:
+    for offset, row in enumerate(rows[label_row + 1:]):
+        idx = label_row + 1 + offset  # absolute 0-based row index (for style lookups)
         if len(tasks) >= MAX_TASKS_PER_ZONE:
             break
         wcell = row[weight_col] if (weight_col is not None and weight_col < len(row)) else None
         name = row[name_col] if name_col < len(row) else None
 
-        # Phase / summary header row (col-A "W").
-        if isinstance(wcell, str) and wcell.strip().upper() == "W":
+        # Phase / section header row — col-A "W", or a styled (bold + filled) name
+        # cell for the disciplines that carry no "W".
+        is_phase = isinstance(wcell, str) and wcell.strip().upper() == "W"
+        if not is_phase and is_header is not None and isinstance(name, str) and name.strip():
+            is_phase = is_header(idx, name_col)
+        if is_phase:
             if isinstance(name, str) and name.strip():
                 phase = name.strip()[:180]
             continue
@@ -159,15 +169,32 @@ def parse_sheet(rows):
     return {"subzones": subzones, "tasks": tasks}
 
 
+def _header_checker(ws):
+    """Callable is_header(row_idx0, name_col0) → True when that name cell is a
+    styled section header (bold + a solid fill) — how the trackers mark the
+    disciplines that carry no col-A "W"."""
+    def is_header(row_idx0, name_col0):
+        cell = ws.cell(row=row_idx0 + 1, column=name_col0 + 1)
+        try:
+            bold = bool(cell.font and cell.font.bold)
+            filled = bool(cell.fill and cell.fill.patternType)
+        except (AttributeError, ValueError):
+            return False
+        return bold and filled
+    return is_header
+
+
 def parse_workbook(file_obj) -> dict:
-    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
+    # Not read_only: we need cell styles to detect styled (bold+fill) phase headers.
+    wb = openpyxl.load_workbook(file_obj, data_only=True)
     result = {}
     try:
         for name in wb.sheetnames:
             if name.strip().lower() in SKIP_SHEETS:
                 continue
-            rows = list(wb[name].iter_rows(values_only=True))
-            sheet = parse_sheet(rows)
+            ws = wb[name]
+            rows = list(ws.iter_rows(values_only=True))
+            sheet = parse_sheet(rows, _header_checker(ws))
             if sheet and sheet["tasks"] and sheet["subzones"]:
                 result[name.strip()] = sheet
     finally:

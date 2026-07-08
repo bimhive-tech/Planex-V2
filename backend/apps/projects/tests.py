@@ -42,6 +42,22 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(sheet["tasks"][0]["weight"], 1.0)
         self.assertEqual(sheet["tasks"][0]["cells"], [100.0, 0.0])
 
+    def test_detects_styled_phase_headers_without_w(self):
+        # Only the first discipline carries a col-A "W"; the second is a styled
+        # header (bold+fill) with no "W". Both must start a new phase.
+        rows = [
+            (None, None, 1, 2),
+            (None, None, "(A1)", "(A2)"),
+            ("W", "Finishing", 0.5, 0.5),   # phase 1 via "W"
+            (2.0, "Task A", 1, 1),
+            (None, "Staircase", 0.5, 0.5),  # phase 2 via style (row index 4)
+            (1.0, "Task B", 1, 0),
+        ]
+        sheet = parse_sheet(rows, is_header=lambda idx, ncol: idx == 4)
+        by_task = {t["name"]: t["phase"] for t in sheet["tasks"]}
+        self.assertEqual(by_task["Task A"], "Finishing")
+        self.assertEqual(by_task["Task B"], "Staircase")  # not lumped under "Finishing"
+
     def test_guesses_discipline_from_phase_name(self):
         self.assertEqual(_guess_discipline("الاعمال الكهربائية"), "electrical")
         self.assertEqual(_guess_discipline("اعمال الخرسانة"), "concrete")
