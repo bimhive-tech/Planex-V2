@@ -138,12 +138,13 @@ class P6ImportTests(TestCase):
         ws.title = "FOR (P6)"
         rows = [
             (0, "Activity ID", "Activity Name", "Activity Complete %"),
-            (0, "Execution", None, None),                 # root group → Zone
+            (0, "Execution", None, None),                 # wrapper above zones → dropped
             (1, "Milestones", None, None),                # empty branch → pruned
-            (1, "Zone A", None, None),                    # → Area
-            (2, "Finishing", None, None),                 # leaf group → Phase
-            (3, "MN-1", "Plaster", 0.5),                  # activity 50%
-            (3, "MN-2", "Tiling", 1.0),                   # activity 100%
+            (1, "Zone A", None, None),                    # "zone" → top-level Zone
+            (2, "(A6) building", None, None),             # between zone & phase → Area
+            (3, "Finishing", None, None),                 # holds activities → Phase
+            (4, "MN-1", "Plaster", 0.5),                  # activity 50%
+            (4, "MN-2", "Tiling", 1.0),                   # activity 100%
         ]
         for i, (lvl, a, b, c) in enumerate(rows, start=1):
             ws.cell(row=i, column=1, value=a)
@@ -167,11 +168,14 @@ class P6ImportTests(TestCase):
         self.assertEqual(result.get("source_kind"), "p6")
         self.assertEqual(result["activities"], 2)
 
-        # Empty "Milestones" branch was pruned; the WBS became scopes.
+        # "Execution" wrapper dropped, "Milestones" pruned; the Zone is on top.
         names = set(ProjectScope.objects.filter(project=project).values_list("name", flat=True))
-        self.assertEqual(names, {"Execution", "Zone A", "Finishing"})
+        self.assertEqual(names, {"Zone A", "(A6) building", "Finishing"})
+        zone = ProjectScope.objects.get(project=project, name="Zone A")
+        self.assertEqual(zone.scope_type, "zone")
+        self.assertIsNone(zone.parent_id)  # zones are top-level
         self.assertEqual(
-            ProjectScope.objects.get(project=project, name="Execution").scope_type, "zone")
+            ProjectScope.objects.get(project=project, name="(A6) building").scope_type, "area")
         self.assertEqual(
             ProjectScope.objects.get(project=project, name="Finishing").scope_type, "phase")
 

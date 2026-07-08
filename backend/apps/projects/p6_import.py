@@ -5,8 +5,12 @@ WBS export where Excel ROW OUTLINE LEVELS encode the tree depth:
   • group row  — a name in col A, no Activity Name / %  → a WBS node (scope)
   • activity   — Activity ID in col A, name in col B, Complete % (0–1) in col C
 There is no weight column, so every activity imports with weight 1 (equal weight).
-Scope types are inferred: roots → Zone, leaf groups (those holding activities) →
-Phase, anything in between → Area.
+
+To match a zone-sheet import (Zone → Area → Phase → Activity, zones on top), we
+anchor on the "Zone …" WBS nodes — the same thing the zone sheets are named
+after. Those become the top-level Zones (any project-title / execution / stage
+wrappers above them are dropped). Within a zone: a node that holds activities is
+a Phase, and anything between the zone and a phase is an Area.
 """
 from collections import defaultdict
 
@@ -78,8 +82,28 @@ def _prune_empty(roots):
     roots[:] = [r for r in roots if _has_activities(r)]
 
 
+def _zone_nodes(roots):
+    """The top-most WBS nodes that name a zone ('Zone …'). Descent stops at a
+    zone (a zone can't contain another zone). Falls back to the given roots when
+    the WBS has no explicit zones, so a zone-less P6 still imports."""
+    zones = []
+
+    def walk(n):
+        if "zone" in n["name"].lower():
+            zones.append(n)
+            return
+        for c in n["children"]:
+            walk(c)
+
+    for r in roots:
+        walk(r)
+    return zones or roots
+
+
 def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""):
-    """Create scopes + activities from a parsed P6 tree and snapshot progress."""
+    """Create scopes + activities from a parsed P6 tree and snapshot progress.
+    Zones (the 'Zone …' WBS nodes) become the top-level scopes; below them a node
+    holding activities is a Phase and anything in between is an Area."""
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
@@ -92,18 +116,17 @@ def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""
 
     scopes_by_depth = defaultdict(list)
     activities = []
-    counts = {"zone": 0, "area": 0, "phase": 0}
+    counts = defaultdict(int)
     row_counter = [0]
 
-    def walk(node, parent, depth, is_root):
-        is_leaf_group = bool(node["activities"])
-        if is_leaf_group:
-            stype = Scope.ScopeType.PHASE
-        elif is_root:
+    def walk(node, parent, depth, is_zone):
+        if is_zone:
             stype = Scope.ScopeType.ZONE
+        elif node["activities"]:
+            stype = Scope.ScopeType.PHASE  # holds tasks → a work package / phase
         else:
-            stype = Scope.ScopeType.AREA
-        counts[stype] = counts.get(stype, 0) + 1
+            stype = Scope.ScopeType.AREA   # a grouping between zone and phase
+        counts[stype] += 1
         scope = Scope(company=company, project=project, parent=parent, scope_type=stype,
                       name=node["name"], sort_order=len(scopes_by_depth[depth]),
                       discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
@@ -119,8 +142,8 @@ def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""
         for child in node["children"]:
             walk(child, scope, depth + 1, False)
 
-    for root in roots:
-        walk(root, None, 0, True)
+    for zone in _zone_nodes(roots):
+        walk(zone, None, 0, True)
 
     # Parents before children (UUID PKs are generated in Python, so we only need
     # insert order to satisfy the FK).
