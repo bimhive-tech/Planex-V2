@@ -147,7 +147,7 @@ export interface ProgressBreakdown {
   not_started: number;
 }
 
-export type ScopeType = "phase" | "zone" | "building" | "area";
+export type ScopeType = "stage" | "phase" | "zone" | "building" | "area";
 
 export type ScopeDiscipline = "concrete" | "architecture" | "electrical" | "mechanical" | "other" | "";
 

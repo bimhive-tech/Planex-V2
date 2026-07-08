@@ -12,6 +12,7 @@ import type { Scope } from "@/types/project";
 import styles from "./projectForm.module.css";
 
 const SCOPE_TYPES = [
+  { value: "stage", label: "Stage" },
   { value: "phase", label: "Phase" },
   { value: "zone", label: "Zone" },
   { value: "building", label: "Building" },

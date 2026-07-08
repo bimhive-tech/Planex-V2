@@ -10,7 +10,7 @@ import type { Activity, Scope } from "@/types/project";
 import { ScopeActivities } from "./ScopeActivities";
 import styles from "./scheduleTree.module.css";
 
-const NEXT_TYPE: Record<string, string> = { phase: "zone", zone: "building", building: "area", area: "area" };
+const NEXT_TYPE: Record<string, string> = { stage: "zone", phase: "zone", zone: "building", building: "area", area: "area" };
 
 export interface ScopeNodeProps {
   scope: Scope;

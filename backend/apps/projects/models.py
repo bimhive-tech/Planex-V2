@@ -290,6 +290,7 @@ class ProjectScope(TimestampedModel):
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""
 
     class ScopeType(models.TextChoices):
+        STAGE = "stage", "Stage"      # a top-level grouping above zones (e.g. a P6 project stage)
         PHASE = "phase", "Phase"
         ZONE = "zone", "Zone"
         BUILDING = "building", "Building"

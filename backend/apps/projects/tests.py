@@ -154,13 +154,14 @@ class P6ImportTests(TestCase):
         ws.title = "FOR (P6)"
         rows = [
             (0, "Activity ID", "Activity Name", "Activity Complete %"),
-            (0, "Execution", None, None),                 # wrapper above zones → dropped
+            (0, "Project", None, None),                   # title above the stage → dropped
             (1, "Milestones", None, None),                # empty branch → pruned
-            (1, "Zone A", None, None),                    # "zone" → top-level Zone
-            (2, "(A6) building", None, None),             # between zone & phase → Area
-            (3, "Finishing", None, None),                 # holds activities → Phase
-            (4, "MN-1", "Plaster", 0.5),                  # activity 50%
-            (4, "MN-2", "Tiling", 1.0),                   # activity 100%
+            (1, "Stage 1", None, None),                   # parent of a zone → Stage (top)
+            (2, "Zone A", None, None),                    # "zone" → Zone
+            (3, "(A6) building", None, None),             # between zone & phase → Area
+            (4, "Finishing", None, None),                 # holds activities → Phase
+            (5, "MN-1", "Plaster", 0.5),                  # activity 50%
+            (5, "MN-2", "Tiling", 1.0),                   # activity 100%
         ]
         for i, (lvl, a, b, c) in enumerate(rows, start=1):
             ws.cell(row=i, column=1, value=a)
@@ -184,12 +185,15 @@ class P6ImportTests(TestCase):
         self.assertEqual(result.get("source_kind"), "p6")
         self.assertEqual(result["activities"], 2)
 
-        # "Execution" wrapper dropped, "Milestones" pruned; the Zone is on top.
+        # "Project" title dropped, "Milestones" pruned; the Stage is on top.
         names = set(ProjectScope.objects.filter(project=project).values_list("name", flat=True))
-        self.assertEqual(names, {"Zone A", "(A6) building", "Finishing"})
+        self.assertEqual(names, {"Stage 1", "Zone A", "(A6) building", "Finishing"})
+        stage = ProjectScope.objects.get(project=project, name="Stage 1")
+        self.assertEqual(stage.scope_type, "stage")
+        self.assertIsNone(stage.parent_id)  # stages are top-level
         zone = ProjectScope.objects.get(project=project, name="Zone A")
         self.assertEqual(zone.scope_type, "zone")
-        self.assertIsNone(zone.parent_id)  # zones are top-level
+        self.assertEqual(zone.parent_id, stage.id)  # zones sit under their stage
         self.assertEqual(
             ProjectScope.objects.get(project=project, name="(A6) building").scope_type, "area")
         self.assertEqual(
