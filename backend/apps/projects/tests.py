@@ -125,6 +125,61 @@ class ScheduleImportTests(TestCase):
         self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
         self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
 
+class P6ImportTests(TestCase):
+    """`import_workbook` falls back to a Primavera FOR (P6) sheet (WBS via row
+    outline levels) when the workbook has no zone-matrix sheets."""
+
+    def _p6_workbook(self):
+        import io
+
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "FOR (P6)"
+        rows = [
+            (0, "Activity ID", "Activity Name", "Activity Complete %"),
+            (0, "Execution", None, None),                 # root group → Zone
+            (1, "Milestones", None, None),                # empty branch → pruned
+            (1, "Zone A", None, None),                    # → Area
+            (2, "Finishing", None, None),                 # leaf group → Phase
+            (3, "MN-1", "Plaster", 0.5),                  # activity 50%
+            (3, "MN-2", "Tiling", 1.0),                   # activity 100%
+        ]
+        for i, (lvl, a, b, c) in enumerate(rows, start=1):
+            ws.cell(row=i, column=1, value=a)
+            ws.cell(row=i, column=2, value=b)
+            ws.cell(row=i, column=3, value=c)
+            ws.row_dimensions[i].outlineLevel = lvl
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_p6_fallback_builds_tree_and_progress(self):
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity, ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="P6", project_type="commercial")
+
+        result = import_workbook(project, self._p6_workbook(), source="mar.xlsm")
+        self.assertEqual(result.get("source_kind"), "p6")
+        self.assertEqual(result["activities"], 2)
+
+        # Empty "Milestones" branch was pruned; the WBS became scopes.
+        names = set(ProjectScope.objects.filter(project=project).values_list("name", flat=True))
+        self.assertEqual(names, {"Execution", "Zone A", "Finishing"})
+        self.assertEqual(
+            ProjectScope.objects.get(project=project, name="Execution").scope_type, "zone")
+        self.assertEqual(
+            ProjectScope.objects.get(project=project, name="Finishing").scope_type, "phase")
+
+        acts = {a.name: float(a.progress_percent) for a in Activity.objects.filter(project=project)}
+        self.assertEqual(acts, {"Plaster": 50.0, "Tiling": 100.0})
+        self.assertEqual(round(result["overall_progress"]), 75)  # equal weight → (50+100)/2
+
+
 STRONG_PW = "Str0ngPassw0rd!"
 
 

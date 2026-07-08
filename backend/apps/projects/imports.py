@@ -203,8 +203,19 @@ def _save_snapshot(project, *, date, source):
 def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, source="") -> dict:
     parsed = parse_workbook(file_obj)
     if not parsed:
+        # No zone-matrix sheets — fall back to a Primavera 'FOR (P6)' sheet if the
+        # workbook has one, so a P6-only export still imports.
+        from .p6_import import build_from_p6, parse_p6_tree
+        try:
+            file_obj.seek(0)
+        except (AttributeError, OSError):
+            pass
+        roots = parse_p6_tree(file_obj)
+        if roots:
+            return build_from_p6(project, roots, replace=replace,
+                                 snapshot_date=snapshot_date, source=source)
         return {"zones": 0, "subzones": 0, "activities": 0, "overall_progress": 0.0,
-                "error": "No zone sheets recognised."}
+                "error": "No zone sheets or FOR (P6) sheet recognised."}
 
     if replace:
         project.scopes.all().delete()  # cascades subzones + activities
