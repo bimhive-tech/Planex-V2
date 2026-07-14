@@ -169,32 +169,36 @@ def parse_sheet(rows, is_header=None):
     return {"subzones": subzones, "tasks": tasks}
 
 
-def _header_checker(ws):
-    """Callable is_header(row_idx0, name_col0) → True when that name cell is a
-    styled section header (bold + a solid fill) — how the trackers mark the
-    disciplines that carry no col-A "W"."""
-    def is_header(row_idx0, name_col0):
-        cell = ws.cell(row=row_idx0 + 1, column=name_col0 + 1)
-        try:
-            bold = bool(cell.font and cell.font.bold)
-            filled = bool(cell.fill and cell.fill.patternType)
-        except (AttributeError, ValueError):
-            return False
-        return bold and filled
-    return is_header
+def _styled_header(cell):
+    """True when a cell is a styled section header (bold + a solid fill). Works on
+    read-only cells too, so we can detect phase headers without leaving streaming
+    mode — a full-workbook load of a 20MB+ tracker needs ~1GB and OOMs the worker."""
+    try:
+        return bool(cell.font and cell.font.bold) and bool(cell.fill and cell.fill.patternType)
+    except (AttributeError, ValueError):
+        return False
 
 
 def parse_workbook(file_obj) -> dict:
-    # Not read_only: we need cell styles to detect styled (bold+fill) phase headers.
-    wb = openpyxl.load_workbook(file_obj, data_only=True)
+    # read_only streams the file (keeps memory sane on big workbooks). ReadOnlyCell
+    # still exposes font/fill, so styled phase headers are detectable here — and we
+    # only iterate the zone sheets, never the huge skipped FOR (P6)/Summary sheets.
+    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
     result = {}
     try:
         for name in wb.sheetnames:
             if name.strip().lower() in SKIP_SHEETS:
                 continue
             ws = wb[name]
-            rows = list(ws.iter_rows(values_only=True))
-            sheet = parse_sheet(rows, _header_checker(ws))
+            values, styled = [], []
+            for row in ws.iter_rows():
+                values.append(tuple(c.value for c in row))
+                styled.append(tuple(_styled_header(c) for c in row))
+
+            def is_header(row_idx0, name_col0, styled=styled):
+                return name_col0 < len(styled[row_idx0]) and styled[row_idx0][name_col0]
+
+            sheet = parse_sheet(values, is_header)
             if sheet and sheet["tasks"] and sheet["subzones"]:
                 result[name.strip()] = sheet
     finally:
