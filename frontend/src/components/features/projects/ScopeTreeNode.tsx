@@ -2,7 +2,7 @@
 
 // One row (+ its children) in the Schedule tab's nested tree: Phase → Zone →
 // Building → Area → Activity. Recursive; lazily loads activities under leaves.
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
@@ -26,6 +26,10 @@ export interface ScopeNodeProps {
   visibleIds: Set<string> | null;
   // Active Task filter (by name) — passed through to ScopeActivities.
   onlyTaskName: string;
+  // Latest Expand all / Collapse all command, or null if none has been issued.
+  // `seq` changes on every press so repeating the same command still applies
+  // after rows have been toggled by hand.
+  expandAll: { open: boolean; seq: number } | null;
   // As-of / month view mode query (?mode=…&as_of=…), "" for the current view.
   viewQuery: string;
   onAddScope: (parentId: string, type: string) => void;
@@ -39,13 +43,25 @@ export interface ScopeNodeProps {
 }
 
 export function ScopeNode(props: ScopeNodeProps) {
-  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage, visibleIds } = props;
+  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage, visibleIds, expandAll } = props;
   const childScopes = (childrenOf.get(scope.id) ?? []).filter((c) => !visibleIds || visibleIds.has(c.id));
   const activityCount = activityCountOf[scope.id] ?? 0;
   // Collapse nodes with many children/tasks by default — unless a Zone/Subzone/
   // Phase filter is active, in which case the tree is already pruned to the
-  // selected branch, so always reveal it.
-  const [open, setOpen] = useState(visibleIds ? true : childScopes.length <= 25 && activityCount <= 25);
+  // selected branch, so always reveal it. An Expand/Collapse all command wins
+  // over both: rows mount as their parent opens, so a node appearing after the
+  // press has to honour it too, not fall back to the default.
+  const [open, setOpen] = useState(
+    expandAll ? expandAll.open : visibleIds ? true : childScopes.length <= 25 && activityCount <= 25,
+  );
+  // Seeded with the command applied at mount, so the effect only fires on later presses.
+  const appliedSeq = useRef(expandAll?.seq);
+  useEffect(() => {
+    if (expandAll && expandAll.seq !== appliedSeq.current) {
+      appliedSeq.current = expandAll.seq;
+      setOpen(expandAll.open);
+    }
+  }, [expandAll]);
   const hasChildren = childScopes.length > 0 || activityCount > 0;
   const pct = progressOf(scope.id);
   const indent = { "--depth": String(depth) } as CSSProperties;

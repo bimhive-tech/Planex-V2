@@ -21,6 +21,10 @@ import { ScopeNode } from "./ScopeTreeNode";
 import { buildTree, resolveScheduleFilter } from "./scheduleTreeUtils";
 import styles from "./scheduleTree.module.css";
 
+// Expanding an imported schedule mounts every row and lazily fetches each leaf's
+// tasks, so past this size it's worth a heads-up rather than a frozen tab.
+const EXPAND_ALL_PROMPT_SCOPES = 300;
+
 interface Props {
   projectId: string;
   canManage: boolean;
@@ -76,6 +80,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [subzoneFilter, setSubzoneFilter] = useState("");
   const [phaseFilter, setPhaseFilter] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
+  const [expandAll, setExpandAll] = useState<{ open: boolean; seq: number } | null>(null);
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -148,11 +153,21 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     [projectId, phaseScope?.id],
   );
 
+  function toggleAll(open: boolean) {
+    const scopeCount = data?.scopes.length ?? 0;
+    if (open && scopeCount > EXPAND_ALL_PROMPT_SCOPES
+        && !window.confirm(`This schedule has ${scopeCount.toLocaleString()} rows. Expanding all of them may take a moment. Continue?`)) {
+      return;
+    }
+    setExpandAll((prev) => ({ open, seq: (prev?.seq ?? 0) + 1 }));
+  }
+
   function handleZoneFilter(value: string) {
     setZoneFilter(value);
     setSubzoneFilter("");
     setPhaseFilter("");
     setTaskFilter("");
+    setExpandAll(null);  // a new filter re-prunes the tree; start from its default shape
     if (gridZone) {
       const z = zoneOptions.find((s) => s.id === value);
       setGridZone(z ? { id: z.id, name: z.name } : null);
@@ -162,10 +177,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     setSubzoneFilter(value);
     setPhaseFilter("");
     setTaskFilter("");
+    setExpandAll(null);
   }
   function handlePhaseFilter(value: string) {
     setPhaseFilter(value);
     setTaskFilter("");
+    setExpandAll(null);
   }
 
   function openGrid(id: string, name: string) {
@@ -258,24 +275,35 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
         <span className={styles.muted}>
           {data ? `${data.scopes.length} scopes · ${data.activity_count} tasks · ${data.overall_progress}% overall` : "Structure"}
         </span>
-        {canManage && (
-          <div className={styles.toolbarActions}>
-            <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
-            <Button size="sm" variant="secondary" disabled={importing}
-              onClick={() => fileRef.current?.click()}>
-              {importing ? "Importing…" : "Import Excel"}
-            </Button>
-            <input ref={scheduleFileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleScheduleImport} />
-            <Button size="sm" variant="secondary" disabled={scheduleImporting}
-              onClick={() => scheduleFileRef.current?.click()}>
-              {scheduleImporting ? "Importing…" : "Import Schedule"}
-            </Button>
-            <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
-              onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
-              Add phase
-            </Button>
-          </div>
-        )}
+        <div className={styles.toolbarActions}>
+          {/* Reading the tree isn't a managing action, so these stay available to everyone. */}
+          <Button size="sm" variant="secondary" disabled={visibleRoots.length === 0}
+            onClick={() => toggleAll(true)}>
+            Expand all
+          </Button>
+          <Button size="sm" variant="secondary" disabled={visibleRoots.length === 0}
+            onClick={() => toggleAll(false)}>
+            Collapse all
+          </Button>
+          {canManage && (
+            <>
+              <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
+              <Button size="sm" variant="secondary" disabled={importing}
+                onClick={() => fileRef.current?.click()}>
+                {importing ? "Importing…" : "Import Excel"}
+              </Button>
+              <input ref={scheduleFileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleScheduleImport} />
+              <Button size="sm" variant="secondary" disabled={scheduleImporting}
+                onClick={() => scheduleFileRef.current?.click()}>
+                {scheduleImporting ? "Importing…" : "Import Schedule"}
+              </Button>
+              <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
+                onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
+                Add phase
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
@@ -305,7 +333,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
                 childrenOf={childrenOf} progressOf={progressOf} activityCountOf={activityCountOf}
                 canManage={canManage} canSubmit={canSubmit}
                 visibleIds={visibleIds}
-                onlyTaskName={taskFilter} viewQuery={viewQuery}
+                onlyTaskName={taskFilter} viewQuery={viewQuery} expandAll={expandAll}
                 onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
                 onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
                 onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,
