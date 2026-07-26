@@ -180,29 +180,37 @@ def _styled_header(cell):
 
 
 def parse_workbook(file_obj) -> dict:
+    """Convenience wrapper: open `file_obj` read-only and parse its zone sheets.
+    Callers already holding an open workbook should use parse_workbook_sheets —
+    opening a 20MB+ tracker costs ~26s, so the import path shares one open."""
     # read_only streams the file (keeps memory sane on big workbooks). ReadOnlyCell
     # still exposes font/fill, so styled phase headers are detectable here — and we
     # only iterate the zone sheets, never the huge skipped FOR (P6)/Summary sheets.
     wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
-    result = {}
     try:
-        for name in wb.sheetnames:
-            if name.strip().lower() in SKIP_SHEETS:
-                continue
-            ws = wb[name]
-            values, styled = [], []
-            for row in ws.iter_rows():
-                values.append(tuple(c.value for c in row))
-                styled.append(tuple(_styled_header(c) for c in row))
-
-            def is_header(row_idx0, name_col0, styled=styled):
-                return name_col0 < len(styled[row_idx0]) and styled[row_idx0][name_col0]
-
-            sheet = parse_sheet(values, is_header)
-            if sheet and sheet["tasks"] and sheet["subzones"]:
-                result[name.strip()] = sheet
+        return parse_workbook_sheets(wb)
     finally:
         wb.close()
+
+
+def parse_workbook_sheets(wb) -> dict:
+    """Parse every zone-matrix sheet in an already-open read-only workbook."""
+    result = {}
+    for name in wb.sheetnames:
+        if name.strip().lower() in SKIP_SHEETS:
+            continue
+        ws = wb[name]
+        values, styled = [], []
+        for row in ws.iter_rows():
+            values.append(tuple(c.value for c in row))
+            styled.append(tuple(_styled_header(c) for c in row))
+
+        def is_header(row_idx0, name_col0, styled=styled):
+            return name_col0 < len(styled[row_idx0]) and styled[row_idx0][name_col0]
+
+        sheet = parse_sheet(values, is_header)
+        if sheet and sheet["tasks"] and sheet["subzones"]:
+            result[name.strip()] = sheet
     return result
 
 
@@ -232,24 +240,29 @@ def _save_snapshot(project, *, date, source):
 
 @transaction.atomic
 def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, source="") -> dict:
-    # The real P6 schedule export (Activity ID/Name/Start/Finish/% Complete, WBS
-    # via indentation) is the standard template going forward — tried first since
-    # it never looks like a zone matrix and would otherwise misdetect as one.
-    from .p6_schedule_import import build_from_p6_schedule, parse_p6_schedule_tree
+    # Both read-only probes share ONE open: on a 20MB+ tracker openpyxl spends
+    # ~26s just opening the file, so probing formats with an open apiece is the
+    # dominant cost of an import.
+    from .p6_schedule_import import build_from_p6_schedule, parse_p6_schedule_sheets
     try:
         file_obj.seek(0)
     except (AttributeError, OSError):
         pass
-    schedule_roots = parse_p6_schedule_tree(file_obj)
+    wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
+    try:
+        # The real P6 schedule export (Activity ID/Name/Start/Finish/% Complete,
+        # WBS via indentation) is the standard template going forward — probed
+        # first since it never looks like a zone matrix and would otherwise
+        # misdetect as one.
+        schedule_roots = parse_p6_schedule_sheets(wb)
+        parsed = {} if schedule_roots else parse_workbook_sheets(wb)
+    finally:
+        wb.close()
+
     if schedule_roots:
         return build_from_p6_schedule(project, schedule_roots, replace=replace,
                                       snapshot_date=snapshot_date, source=source)
 
-    try:
-        file_obj.seek(0)
-    except (AttributeError, OSError):
-        pass
-    parsed = parse_workbook(file_obj)
     if not parsed:
         # No zone-matrix sheets — fall back to the legacy 'FOR (P6)' sheet if the
         # workbook has one, so an older P6-only export still imports.

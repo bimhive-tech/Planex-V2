@@ -25,6 +25,7 @@ schedule-import template going forward, tried before the zone-tracker matrix
 parser in imports.import_workbook.
 """
 import datetime
+import itertools
 import re
 from collections import defaultdict
 
@@ -92,58 +93,78 @@ def _leading_spaces(s):
 
 
 def parse_p6_schedule_tree(file_obj):
-    """Return [{name, children, activities, start, finish}] from the first sheet
-    matching this template, or None if no sheet does."""
+    """Convenience wrapper: open `file_obj` read-only and parse it. Callers that
+    already hold an open workbook should use parse_p6_schedule_sheets instead —
+    opening a 20MB+ tracker costs ~26s, so the import path shares one open."""
     wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
     try:
-        for ws in wb.worksheets:
-            rows = list(ws.iter_rows(values_only=True))
-            located = _locate_header(rows)
-            if not located:
-                continue
-            header_idx, cols = located
-            id_c, name_c = cols["activity id"], cols["activity name"]
-            start_c, finish_c = cols["start"], cols["finish"]
-            pct_c = cols.get("activity % complete")
-            dur_c = cols.get("original duration")
-            rem_c = cols.get("remaining duration")
-            float_c = cols.get("total float")
-            cost_c = cols.get("budgeted material cost")
-            ev_c = cols.get("earned value cost")
-
-            roots, stack = [], []  # stack of (depth, node)
-            for row in rows[header_idx + 1:]:
-                a = row[id_c] if id_c < len(row) else None
-                if a is None or (isinstance(a, str) and not a.strip()):
-                    continue
-                a_str = str(a)
-                b = row[name_c] if name_c < len(row) else None
-                start = _parse_date(row[start_c]) if start_c < len(row) else None
-                finish = _parse_date(row[finish_c]) if finish_c < len(row) else None
-
-                if isinstance(b, str) and b.strip():  # leaf activity
-                    if not stack:
-                        continue  # no parent WBS group to root it under
-                    pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
-                    stack[-1][1]["activities"].append({
-                        "code": a_str.strip()[:60], "name": b.strip()[:200],
-                        "pct": _to_pct(pct), "start": start, "finish": finish,
-                        "budget": _num(row, cost_c), "earned_value": _num(row, ev_c),
-                        "float": _int(row, float_c), "duration": _int(row, dur_c),
-                        "remaining": _int(row, rem_c),
-                    })
-                    continue
-
-                depth = _leading_spaces(a_str)
-                node = {"name": a_str.strip()[:180], "children": [], "activities": [],
-                       "start": start, "finish": finish}
-                while stack and stack[-1][0] >= depth:
-                    stack.pop()
-                (stack[-1][1]["children"] if stack else roots).append(node)
-                stack.append((depth, node))
-            return roots or None
+        return parse_p6_schedule_sheets(wb)
     finally:
         wb.close()
+
+
+def parse_p6_schedule_sheets(wb):
+    """Return [{name, children, activities, start, finish}] from the first sheet
+    of `wb` matching this template, or None if no sheet does.
+
+    This runs on EVERY import as a format probe, so a sheet that isn't ours must
+    be cheap to reject: we pull only the few rows the header could be on and move
+    to the next sheet if it doesn't match. Reading the whole sheet up front
+    instead would materialise ~1.5M cells of a big zone tracker's 'FOR (P6)' tab
+    just to throw them away."""
+    for ws in wb.worksheets:
+        stream = ws.iter_rows(values_only=True)
+        head, located = [], None
+        for row in stream:
+            head.append(row)
+            located = _locate_header(head)
+            if located or len(head) >= _HEADER_SCAN_ROWS:
+                break
+        if not located:
+            continue
+        header_idx, cols = located
+        # Rows after the header: what's left of the peeked rows, then the rest.
+        rows = itertools.chain(head[header_idx + 1:], stream)
+        id_c, name_c = cols["activity id"], cols["activity name"]
+        start_c, finish_c = cols["start"], cols["finish"]
+        pct_c = cols.get("activity % complete")
+        dur_c = cols.get("original duration")
+        rem_c = cols.get("remaining duration")
+        float_c = cols.get("total float")
+        cost_c = cols.get("budgeted material cost")
+        ev_c = cols.get("earned value cost")
+
+        roots, stack = [], []  # stack of (depth, node)
+        for row in rows:
+            a = row[id_c] if id_c < len(row) else None
+            if a is None or (isinstance(a, str) and not a.strip()):
+                continue
+            a_str = str(a)
+            b = row[name_c] if name_c < len(row) else None
+            start = _parse_date(row[start_c]) if start_c < len(row) else None
+            finish = _parse_date(row[finish_c]) if finish_c < len(row) else None
+
+            if isinstance(b, str) and b.strip():  # leaf activity
+                if not stack:
+                    continue  # no parent WBS group to root it under
+                pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
+                stack[-1][1]["activities"].append({
+                    "code": a_str.strip()[:60], "name": b.strip()[:200],
+                    "pct": _to_pct(pct), "start": start, "finish": finish,
+                    "budget": _num(row, cost_c), "earned_value": _num(row, ev_c),
+                    "float": _int(row, float_c), "duration": _int(row, dur_c),
+                    "remaining": _int(row, rem_c),
+                })
+                continue
+
+            depth = _leading_spaces(a_str)
+            node = {"name": a_str.strip()[:180], "children": [], "activities": [],
+                    "start": start, "finish": finish}
+            while stack and stack[-1][0] >= depth:
+                stack.pop()
+            (stack[-1][1]["children"] if stack else roots).append(node)
+            stack.append((depth, node))
+        return roots or None
     return None
 
 
