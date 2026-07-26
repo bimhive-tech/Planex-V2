@@ -177,6 +177,55 @@ def _entry_nodes(roots):
     return roots
 
 
+# A P6 schedule keeps its key dates as zero-work "milestone" activities, usually
+# grouped under one WBS node. They are dates, not work: they carry no cost and no
+# duration, so leaving them in the tree adds a branch that can never progress.
+# They belong in the Milestones panel instead.
+_MILESTONE_KEYWORDS = ("milestone", "النقاط الزمنية", "معالم")
+
+
+def _is_milestone_group(name: str) -> bool:
+    lowered = name.lower()
+    return any(k in lowered for k in _MILESTONE_KEYWORDS)
+
+
+def _subtree_activities(node):
+    yield from node["activities"]
+    for child in node["children"]:
+        yield from _subtree_activities(child)
+
+
+def _extract_milestones(roots) -> list:
+    """Remove milestone groups from the tree, returning their activities so the
+    caller can record them as Milestones."""
+    found = []
+
+    def walk(nodes):
+        keep = []
+        for node in nodes:
+            if _is_milestone_group(node["name"]):
+                found.extend(_subtree_activities(node))
+                continue  # drop the whole group from the schedule
+            node["children"] = walk(node["children"])
+            keep.append(node)
+        return keep
+
+    roots[:] = walk(roots)
+    return found
+
+
+def _prune_empty(roots):
+    """Drop branches that hold no activities anywhere. A P6 WBS carries planned-
+    but-unpopulated headings (e.g. a 'Super Structure' with nothing under it);
+    as scopes they are dead rows that can never show progress."""
+
+    def keep(node):
+        node["children"] = [c for c in node["children"] if keep(c)]
+        return bool(node["activities"] or node["children"])
+
+    roots[:] = [r for r in roots if keep(r)]
+
+
 def _weight_key(roots) -> str:
     """Which column drives roll-up weight, decided once for the whole file.
 
@@ -205,10 +254,33 @@ def _weight_key(roots) -> str:
     return "duration" if totals["duration"] > 0 else ""
 
 
+def _record_milestones(project, tasks):
+    """Store milestone activities as Milestones. Upserted by title rather than
+    replaced wholesale so re-importing an updated schedule refreshes the dates
+    without discarding milestones somebody added by hand."""
+    from .models import Milestone
+
+    for order, task in enumerate(tasks):
+        pct = task["pct"]
+        status = (Milestone.Status.COMPLETED if pct >= 100
+                  else Milestone.Status.IN_PROGRESS if pct > 0
+                  else Milestone.Status.UPCOMING)
+        Milestone.objects.update_or_create(
+            project=project, title=task["name"][:180],
+            defaults={"company": project.company, "sort_order": order, "status": status,
+                      "date": task["finish"] or task["start"]},
+        )
+    return len(tasks)
+
+
 def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, source=""):
-    """Create scopes + activities from a parsed P6 schedule tree. Top-level
-    groups become Stages; below that, a node holding activities directly is a
-    Phase, anything else (a pure grouping level) is an Area."""
+    """Create scopes + activities from a parsed P6 schedule tree.
+
+    Scope type comes from a node's height above the activities, so the shape
+    matches the hierarchy the rest of the app expects — Stage > Zone > Area >
+    Phase > Activity — regardless of how deep a given WBS branch runs. The
+    Phase level is the one that directly holds work, and Zone is what the
+    Excel-style grid view pivots on."""
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
@@ -219,8 +291,11 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     if replace:
         project.scopes.all().delete()
 
+    milestone_tasks = _extract_milestones(roots)
+    _prune_empty(roots)
     entries = _entry_nodes(roots)
     weight_key = _weight_key(roots)
+
     scopes_by_depth = defaultdict(list)
     activities = []
     counts = defaultdict(int)
@@ -228,27 +303,48 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
 
     def weight_of(task):
         """Nominal 1 when this activity has no value in the chosen column. It
-        keeps an all-zero-cost branch (e.g. a milestones group) rolling up on
-        its own merits instead of dividing by a zero weight sum, while staying
-        negligible against real cost weights."""
+        keeps an all-zero-cost branch rolling up on its own merits instead of
+        dividing by a zero weight sum, while staying negligible against real
+        cost weights."""
         value = task.get(weight_key) if weight_key else None
         return value if value and value > 0 else 1.0
 
-    def type_of(node, forced):
-        if forced:
-            return forced
-        return Scope.ScopeType.PHASE if node["activities"] else Scope.ScopeType.AREA
+    # Level comes from depth below the top of the WBS, which is how a planner
+    # reads it: the project splits into Stages, a Stage into Zones, a Zone into
+    # Areas. Measuring up from the activities instead sounds tidier but WBS
+    # branches are wildly uneven — 'Construction Phase' runs four levels deep
+    # where 'Technical Service' runs two — so the same "Civil Works" heading
+    # lands on a different level in each branch.
+    _BY_DEPTH = {0: Scope.ScopeType.STAGE, 1: Scope.ScopeType.ZONE, 2: Scope.ScopeType.AREA}
 
-    def walk(node, parent, depth, forced):
-        stype = type_of(node, forced)
+    def type_of(node, depth):
+        # Holding work always wins: that node is the work package, whatever depth
+        # it sits at, and the grid looks for activities under a Phase.
+        if node["activities"]:
+            return Scope.ScopeType.PHASE
+        return _BY_DEPTH.get(depth, Scope.ScopeType.AREA)
+
+    def walk(node, parent, depth, grid):
+        """`grid` carries the enclosing zone's column context: (index, name, rows)
+        where rows maps a task to its grid row, so the same task under different
+        columns lands on one row."""
+        stype = type_of(node, depth)
         counts[stype] += 1
         scope = Scope(company=company, project=project, parent=parent, scope_type=stype,
                       name=node["name"], sort_order=len(scopes_by_depth[depth]),
                       planned_start=node.get("start"), planned_finish=node.get("finish"),
                       discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
         scopes_by_depth[depth].append(scope)
+
         for task in node["activities"]:
             row_counter[0] += 1
+            col_index, col_name, rows = grid if grid else (0, "", None)
+            if rows is None:
+                row_index = row_counter[0]
+            else:
+                # Rows are keyed per (phase, task) so a task repeated across the
+                # zone's columns shares one row instead of stacking up.
+                row_index = rows.setdefault((node["name"], task["name"]), len(rows) + 1)
             activities.append(Activity(
                 company=company, project=project, scope=scope,
                 name=task["name"], code=task["code"], weight=weight_of(task),
@@ -257,14 +353,22 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
                 budgeted_cost=task["budget"], earned_value_cost=task["earned_value"],
                 total_float=task["float"], original_duration=task["duration"],
                 remaining_duration=task["remaining"],
-                row_index=row_counter[0], sort_order=row_counter[0],
+                row_index=row_index, sort_order=row_counter[0],
+                subzone_index=col_index, subzone_code=col_name,
                 progress_type=Activity.ProgressType.PERCENTAGE,
             ))
-        for child in node["children"]:
-            walk(child, scope, depth + 1, None)
+
+        # A Zone opens a fresh grid; each of its children is one column.
+        if stype == Scope.ScopeType.ZONE:
+            rows = {}
+            for index, child in enumerate(node["children"]):
+                walk(child, scope, depth + 1, (index, child["name"][:80], rows))
+        else:
+            for child in node["children"]:
+                walk(child, scope, depth + 1, grid)
 
     for entry in entries:
-        walk(entry, None, 0, Scope.ScopeType.STAGE)
+        walk(entry, None, 0, None)
 
     # Parents before children (UUID PKs are generated in Python, so we only need
     # insert order to satisfy the FK).
@@ -272,14 +376,17 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         Scope.objects.bulk_create(scopes_by_depth[depth], batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
 
+    milestones = _record_milestones(project, milestone_tasks)
+
     snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
     _save_snapshot(project, date=snap_date, source=source)
 
     return {
         "stages": counts.get(Scope.ScopeType.STAGE, 0),
-        "zones": 0,
+        "zones": counts.get(Scope.ScopeType.ZONE, 0),
         "subzones": counts.get(Scope.ScopeType.AREA, 0),
         "phases": counts.get(Scope.ScopeType.PHASE, 0),
+        "milestones": milestones,
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
         "snapshot_date": snap_date.isoformat(),

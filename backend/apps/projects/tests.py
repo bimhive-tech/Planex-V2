@@ -211,9 +211,10 @@ class P6ScheduleImportTests(TestCase):
     just the % Complete cell, matched by the original Activity ID kept as
     Activity.code."""
 
-    # Mirrors the reference export's full 14-column layout. Costs are chosen so
-    # cost weighting (5.0%) and duration weighting (21.6%) can't be confused:
-    # the cheap task is half done, the expensive one hasn't started.
+    # Mirrors the reference export: full 14-column layout, WBS by 2-space indent,
+    # a milestones group, and a branch deep enough to exercise every level
+    # (Stage > Zone > Area > Phase). Costs are chosen so cost weighting (52.5%)
+    # and duration weighting (60.0%) can't be confused.
     HEADER = ["Activity ID", "Activity Name", "Original Duration", "Actual Duration",
               "Remaining Duration", "Start", "Finish", "Total Float",
               "Activity % Complete", "Performance % Complete", "Schedule % Complete",
@@ -222,14 +223,24 @@ class P6ScheduleImportTests(TestCase):
     def _rows(self):
         import datetime
 
+        d = datetime.date
         return [
-            ["Tower Project", None, 100, 10, 90, datetime.date(2026, 1, 1), datetime.date(2026, 6, 1), 0, None, 0, 0, 10000000, 500000, 0],
-            ["  Milestones", None, 50, 5, 45, datetime.date(2026, 1, 1), datetime.date(2026, 3, 1), 5, None, 0, 0, 0, 0, 0],
-            # A milestone: zero duration AND zero cost — must still roll up its branch.
+            ["Tower Project", None, 100, 10, 90, d(2026, 1, 1), d(2026, 6, 1), 0, None, 0, 0, 20000000, 0, 0],
+            # Key dates, not work: no cost, no duration. Belong in Milestones.
+            ["  Milestones", None, 0, 0, 0, d(2026, 1, 1), d(2026, 3, 1), 5, None, 0, 0, 0, 0, 0],
             ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 5, 1, 1, 1, 0, 0, 0],
-            ["  Construction", None, 50, 5, 45, datetime.date(2026, 2, 1), datetime.date(2026, 6, 1), 0, None, 0, 0, 10000000, 500000, 0],
+            ["  Construction Phase", None, 100, 10, 90, d(2026, 2, 1), d(2026, 6, 1), 0, None, 0, 0, 20000000, 0, 0],
+            ["    Part A", None, 100, 10, 90, d(2026, 2, 1), d(2026, 6, 1), 0, None, 0, 0, 20000000, 0, 0],
+            ["      Civil Works", None, 50, 10, 40, d(2026, 2, 1), d(2026, 4, 1), 0, None, 0, 0, 10000000, 0, 0],
+            ["        Substructure", None, 50, 10, 40, d(2026, 2, 1), d(2026, 4, 1), 0, None, 0, 0, 10000000, 0, 0],
             ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0, 0.5, 0.5, 0.5, 1000000, 500000, 0],
-            ["CN.02", "Framing", 30, 0, 30, datetime.date(2026, 3, 1), datetime.date(2026, 4, 1), 12, 0, 0, 0, 9000000, 0, 0],
+            ["CN.02", "Framing", 30, 0, 30, d(2026, 3, 1), d(2026, 4, 1), 12, 0, 0, 0, 9000000, 0, 0],
+            # A second Area under the same Zone — the grid's second column.
+            ["      Arch Works", None, 50, 50, 0, d(2026, 4, 1), d(2026, 6, 1), 3, None, 0, 0, 10000000, 0, 0],
+            ["        Finishes", None, 50, 50, 0, d(2026, 4, 1), d(2026, 6, 1), 3, None, 0, 0, 10000000, 0, 0],
+            ["AR.01", "Painting", 50, 50, 0, d(2026, 4, 1), d(2026, 6, 1), 3, 1, 1, 1, 10000000, 10000000, 0],
+            # An empty heading: planned in the WBS but holding no work anywhere.
+            ["      MEP Works", None, 0, 0, 0, d(2026, 5, 1), d(2026, 6, 1), 9, None, 0, 0, 0, 0, 0],
         ]
 
     def _workbook(self, drop_cost_columns=False):
@@ -261,21 +272,109 @@ class P6ScheduleImportTests(TestCase):
 
         result = import_workbook(project, self._workbook(), source="P6 template.xlsx")
         self.assertEqual(result.get("source_kind"), "p6_schedule")
-        self.assertEqual(result["activities"], 3)
+        self.assertEqual(result["activities"], 3)  # the milestone is not an activity
 
         # The project-title wrapper row is dropped; its children are top-level.
         names = set(ProjectScope.objects.filter(project=project, parent__isnull=True)
                     .values_list("name", flat=True))
-        self.assertEqual(names, {"Milestones", "Construction"})
-        construction = ProjectScope.objects.get(project=project, name="Construction")
-        self.assertEqual(construction.scope_type, "stage")
-        self.assertEqual(construction.planned_start, datetime.date(2026, 2, 1))
+        self.assertEqual(names, {"Construction Phase"})
+        stage = ProjectScope.objects.get(project=project, name="Construction Phase")
+        self.assertEqual(stage.scope_type, "stage")
+        self.assertEqual(stage.planned_start, datetime.date(2026, 2, 1))
 
         foundation = Activity.objects.get(project=project, code="CN.01")
         self.assertEqual(foundation.name, "Foundation")
         self.assertEqual(float(foundation.progress_percent), 50.0)
         self.assertEqual(foundation.planned_start, datetime.date(2026, 2, 1))  # "1-Feb-26 A" stripped
         self.assertEqual(foundation.planned_finish, datetime.date(2026, 2, 20))  # "20-Feb-26*" stripped
+
+    def test_wbs_depth_maps_to_stage_zone_area_phase(self):
+        """The level a node lands on comes from its depth in the WBS, so the
+        imported tree matches the hierarchy the rest of the app navigates."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        types = dict(ProjectScope.objects.filter(project=project).values_list("name", "scope_type"))
+        self.assertEqual(types["Construction Phase"], "stage")
+        self.assertEqual(types["Part A"], "zone")
+        self.assertEqual(types["Civil Works"], "area")
+        self.assertEqual(types["Substructure"], "phase")  # holds the work
+        # Stages never nest — a deep branch keeps descending Zone/Area, not Stage.
+        self.assertFalse(ProjectScope.objects.filter(
+            project=project, scope_type="stage", parent__isnull=False).exists())
+
+    def test_drops_wbs_headings_that_hold_no_work(self):
+        """'MEP Works' is planned in the WBS but has nothing under it — as a scope
+        it is a dead row that can never show progress."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        self.assertFalse(ProjectScope.objects.filter(project=project, name="MEP Works").exists())
+
+    def test_milestones_leave_the_schedule_for_the_milestone_list(self):
+        """A milestone is a date, not work: it carries no cost or duration, so as
+        a scope it is a branch that can never progress."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity, Milestone, ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        self.assertEqual(result["milestones"], 1)
+        self.assertFalse(ProjectScope.objects.filter(project=project, name="Milestones").exists())
+        self.assertFalse(Activity.objects.filter(project=project, code="MS.01").exists())
+
+        milestone = Milestone.objects.get(project=project, title="Kickoff")
+        self.assertEqual(milestone.status, Milestone.Status.COMPLETED)  # 100% complete
+
+    def test_reimport_updates_milestones_and_keeps_manual_ones(self):
+        """Re-importing refreshes imported milestones without discarding any the
+        team added by hand."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Milestone
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+        Milestone.objects.create(company=company, project=project, title="Handover party")
+
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+        titles = set(Milestone.objects.filter(project=project).values_list("title", flat=True))
+        self.assertEqual(titles, {"Kickoff", "Handover party"})  # no duplicate Kickoff
+
+    def test_zone_children_become_grid_columns(self):
+        """The grid pivots on a Zone, one column per child — so a P6 import has to
+        set the column/row coordinates the zone-tracker import provides."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity, ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        zone = ProjectScope.objects.get(project=project, name="Part A")
+        columns = dict(Activity.objects.filter(project=project)
+                       .values_list("code", "subzone_code"))
+        self.assertEqual(columns["CN.01"], "Civil Works")
+        self.assertEqual(columns["AR.01"], "Arch Works")
+        # Distinct columns, and every row within the zone numbered distinctly.
+        acts = Activity.objects.filter(scope__parent__parent=zone)
+        self.assertEqual(acts.values("subzone_index").distinct().count(), 2)
+        self.assertEqual(acts.values("row_index").distinct().count(), 3)
 
     def test_captures_cost_and_schedule_columns(self):
         from apps.accounts.models import Company
@@ -312,7 +411,8 @@ class P6ScheduleImportTests(TestCase):
         result = import_workbook(project, self._workbook(), source="P6.xlsx")
 
         self.assertEqual(result["weighted_by"], "budget")
-        self.assertEqual(result["overall_progress"], 5.0)
+        # (1m x 50% + 9m x 0% + 10m x 100%) / 20m
+        self.assertEqual(result["overall_progress"], 52.5)
         # Weight tracks cost, and must not overflow the (widened) decimal field.
         self.assertEqual(float(Activity.objects.get(project=project, code="CN.02").weight), 9000000)
 
@@ -326,22 +426,25 @@ class P6ScheduleImportTests(TestCase):
         result = import_workbook(project, self._workbook(drop_cost_columns=True), source="P6.xlsx")
 
         self.assertEqual(result["weighted_by"], "duration")
-        self.assertEqual(result["overall_progress"], 21.6)
+        # (20d x 50% + 30d x 0% + 50d x 100%) / 100d
+        self.assertEqual(result["overall_progress"], 60.0)
 
-    def test_zero_cost_branch_still_rolls_up(self):
-        """A milestone group with no cost at all would divide by a zero weight
-        sum and read 0%; the nominal fallback weight keeps it honest."""
+    def test_zero_cost_activity_still_counts(self):
+        """An activity with no cost would weigh zero and vanish from the roll-up;
+        the nominal fallback keeps its branch honest."""
         from apps.accounts.models import Company
         from .imports import import_workbook
-        from .models import ProjectScope
+        from .models import Activity, ProjectScope
         from .services import scope_progress_map
 
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
         import_workbook(project, self._workbook(), source="P6.xlsx")
 
-        milestones = ProjectScope.objects.get(project=project, name="Milestones")
-        self.assertEqual(scope_progress_map(project)[str(milestones.id)], 100.0)
+        # Strip the costs to mimic a branch the exporter left unpriced.
+        Activity.objects.filter(project=project).update(budgeted_cost=None, weight=1)
+        finishes = ProjectScope.objects.get(project=project, name="Finishes")
+        self.assertEqual(scope_progress_map(project)[str(finishes.id)], 100.0)
 
     def test_export_refreshes_pct_complete_by_code(self):
         from apps.accounts.models import Company

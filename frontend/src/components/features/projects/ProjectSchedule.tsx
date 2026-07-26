@@ -124,7 +124,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
   const roots = childrenOf.get(null) ?? [];
 
-  const zoneOptions = useMemo(() => roots.filter((s) => s.scope_type === "zone"), [roots]);
+  // Zones are not always at the top: a P6 import nests them under their stage
+  // (Construction Phase > Stadium Part A), so collect them at any depth.
+  const zoneOptions = useMemo(
+    () => [...childrenOf.values()].flat().filter((s) => s.scope_type === "zone"),
+    [childrenOf],
+  );
   const { visibleIds, subzoneScope, phaseScope } = useMemo(
     () => resolveScheduleFilter(childrenOf, zoneFilter, subzoneFilter, phaseFilter),
     [childrenOf, zoneFilter, subzoneFilter, phaseFilter],
