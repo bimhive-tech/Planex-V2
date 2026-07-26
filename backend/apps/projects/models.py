@@ -355,7 +355,11 @@ class Activity(TimestampedModel):
     unit = models.CharField(max_length=40, blank=True)
     progress_type = models.CharField(max_length=20, choices=ProgressType.choices, default=ProgressType.PERCENTAGE)
     planned_quantity = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    weight = models.DecimalField(max_digits=8, decimal_places=2, default=1)
+    # Roll-up lever. A zone tracker fills this from its "W" column; a P6 import
+    # fills it with the activity's budgeted cost, which is what makes our overall
+    # % match P6's own Performance % Complete. Cost figures run to billions, so
+    # this is far wider than a hand-entered weight would need.
+    weight = models.DecimalField(max_digits=18, decimal_places=2, default=1)
     # Actual completion 0–100. (Interim: set directly; the review/approval chain
     # that feeds "accepted" progress is a later module.)
     progress_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -373,6 +377,20 @@ class Activity(TimestampedModel):
     # tracker cell, which only has a phase-level date via its parent scope).
     planned_start = models.DateField(null=True, blank=True)
     planned_finish = models.DateField(null=True, blank=True)
+
+    # Cost + schedule columns carried by a P6 export. Null for imports that have
+    # no such data (zone trackers), so "no value" stays distinct from "zero".
+    budgeted_cost = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    earned_value_cost = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    total_float = models.IntegerField(null=True, blank=True)  # days of slack; <=0 is on the critical path
+    original_duration = models.IntegerField(null=True, blank=True)
+    remaining_duration = models.IntegerField(null=True, blank=True)
+
+    @property
+    def is_critical(self) -> bool:
+        """P6 treats an activity with no slack left as critical — any slip on it
+        slips the project finish."""
+        return self.total_float is not None and self.total_float <= 0
 
     class Meta:
         indexes = [

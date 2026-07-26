@@ -211,8 +211,28 @@ class P6ScheduleImportTests(TestCase):
     just the % Complete cell, matched by the original Activity ID kept as
     Activity.code."""
 
-    def _workbook(self):
+    # Mirrors the reference export's full 14-column layout. Costs are chosen so
+    # cost weighting (5.0%) and duration weighting (21.6%) can't be confused:
+    # the cheap task is half done, the expensive one hasn't started.
+    HEADER = ["Activity ID", "Activity Name", "Original Duration", "Actual Duration",
+              "Remaining Duration", "Start", "Finish", "Total Float",
+              "Activity % Complete", "Performance % Complete", "Schedule % Complete",
+              "Budgeted Material Cost", "Earned Value Cost", "Schedule Variance Index"]
+
+    def _rows(self):
         import datetime
+
+        return [
+            ["Tower Project", None, 100, 10, 90, datetime.date(2026, 1, 1), datetime.date(2026, 6, 1), 0, None, 0, 0, 10000000, 500000, 0],
+            ["  Milestones", None, 50, 5, 45, datetime.date(2026, 1, 1), datetime.date(2026, 3, 1), 5, None, 0, 0, 0, 0, 0],
+            # A milestone: zero duration AND zero cost — must still roll up its branch.
+            ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 5, 1, 1, 1, 0, 0, 0],
+            ["  Construction", None, 50, 5, 45, datetime.date(2026, 2, 1), datetime.date(2026, 6, 1), 0, None, 0, 0, 10000000, 500000, 0],
+            ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0, 0.5, 0.5, 0.5, 1000000, 500000, 0],
+            ["CN.02", "Framing", 30, 0, 30, datetime.date(2026, 3, 1), datetime.date(2026, 4, 1), 12, 0, 0, 0, 9000000, 0, 0],
+        ]
+
+    def _workbook(self, drop_cost_columns=False):
         import io
 
         import openpyxl
@@ -220,20 +240,10 @@ class P6ScheduleImportTests(TestCase):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sheet1"
-        header = ["Activity ID", "Activity Name", "Original Duration", "Actual Duration",
-                 "Remaining Duration", "Start", "Finish", "Total Float",
-                 "Activity % Complete", "Performance % Complete", "Schedule % Complete"]
-        rows = [
-            ["Tower Project", None, 100, 10, 90, datetime.date(2026, 1, 1), datetime.date(2026, 6, 1), 0, None, 0, 0],
-            ["  Milestones", None, 50, 5, 45, datetime.date(2026, 1, 1), datetime.date(2026, 3, 1), 0, None, 0, 0],
-            ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 0, 1, 0, 0],
-            ["  Construction", None, 50, 5, 45, datetime.date(2026, 2, 1), datetime.date(2026, 6, 1), 0, None, 0, 0],
-            ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0, 0.5, 0, 0],
-            ["CN.02", "Framing", 30, 0, 30, datetime.date(2026, 3, 1), datetime.date(2026, 4, 1), 0, 0, 0, 0],
-        ]
-        ws.append(header)
-        for row in rows:
-            ws.append(row)
+        keep = slice(0, 11) if drop_cost_columns else slice(None)
+        ws.append(self.HEADER[keep])
+        for row in self._rows():
+            ws.append(row[keep])
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
@@ -266,6 +276,72 @@ class P6ScheduleImportTests(TestCase):
         self.assertEqual(float(foundation.progress_percent), 50.0)
         self.assertEqual(foundation.planned_start, datetime.date(2026, 2, 1))  # "1-Feb-26 A" stripped
         self.assertEqual(foundation.planned_finish, datetime.date(2026, 2, 20))  # "20-Feb-26*" stripped
+
+    def test_captures_cost_and_schedule_columns(self):
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        framing = Activity.objects.get(project=project, code="CN.02")
+        self.assertEqual(float(framing.budgeted_cost), 9000000)
+        self.assertEqual(float(framing.earned_value_cost), 0)
+        self.assertEqual(framing.original_duration, 30)
+        self.assertEqual(framing.remaining_duration, 30)
+        self.assertEqual(framing.total_float, 12)
+        self.assertFalse(framing.is_critical)  # 12 days of slack
+
+        foundation = Activity.objects.get(project=project, code="CN.01")
+        self.assertEqual(foundation.total_float, 0)
+        self.assertTrue(foundation.is_critical)  # no slack -> on the critical path
+
+    def test_weights_by_cost_so_overall_matches_p6(self):
+        """P6 derives a WBS's % from earned value / budgeted cost, and earned
+        value is pct x budget — so cost weighting reproduces its number. Here
+        the half-done task is cheap and the untouched one expensive: cost says
+        ~5%, duration would say ~21.6%."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        self.assertEqual(result["weighted_by"], "budget")
+        self.assertEqual(result["overall_progress"], 5.0)
+        # Weight tracks cost, and must not overflow the (widened) decimal field.
+        self.assertEqual(float(Activity.objects.get(project=project, code="CN.02").weight), 9000000)
+
+    def test_falls_back_to_duration_without_cost_columns(self):
+        """A schedule exported without the cost columns still weights sensibly."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(drop_cost_columns=True), source="P6.xlsx")
+
+        self.assertEqual(result["weighted_by"], "duration")
+        self.assertEqual(result["overall_progress"], 21.6)
+
+    def test_zero_cost_branch_still_rolls_up(self):
+        """A milestone group with no cost at all would divide by a zero weight
+        sum and read 0%; the nominal fallback weight keeps it honest."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import ProjectScope
+        from .services import scope_progress_map
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        milestones = ProjectScope.objects.get(project=project, name="Milestones")
+        self.assertEqual(scope_progress_map(project)[str(milestones.id)], 100.0)
 
     def test_export_refreshes_pct_complete_by_code(self):
         from apps.accounts.models import Company

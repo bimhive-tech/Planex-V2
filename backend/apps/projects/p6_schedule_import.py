@@ -1,15 +1,28 @@
 """Import the real Primavera P6 schedule export.
 
 Unlike the legacy 'FOR (P6)' sheet (p6_import.py), this is a genuine P6-to-Excel
-export: a single flat sheet with real columns (Activity ID, Activity Name,
-Original Duration, Start, Finish, Activity % Complete, ...) where the WBS
-hierarchy is encoded as LEADING SPACES in the Activity ID column's text — P6
-doesn't set Excel outline levels for this export, so indentation is the only
-signal. A group/WBS row has a name in Activity ID and nothing in Activity Name;
-a leaf activity row has both, with 0 leading spaces regardless of its actual
-depth (it always belongs to whichever WBS group most recently appeared above
-it). This is the standard schedule-import template going forward — tried before
-the zone-tracker matrix parser in imports.import_workbook.
+export: a single flat sheet whose columns are Activity ID, Activity Name,
+Original/Actual/Remaining Duration, Start, Finish, Total Float, Activity /
+Performance / Schedule % Complete, Budgeted Material Cost, Earned Value Cost and
+Schedule Variance Index.
+
+Shape of the sheet:
+  • The WBS hierarchy is encoded as LEADING SPACES in the Activity ID column's
+    text (2 per level) — P6 doesn't set Excel outline levels here, so
+    indentation is the only signal.
+  • A WBS/group row has its name in Activity ID and NOTHING in Activity Name;
+    a leaf activity row has both, always at 0 indentation, and belongs to
+    whichever WBS group most recently appeared above it.
+  • The single depth-0 row is the project title, unwrapped so we don't create a
+    scope that merely repeats the project's name.
+  • Dates are datetimes except where P6 annotates them: "21-Aug-25 A" (actual)
+    and "19-Nov-27*" (constrained) arrive as strings and are parsed too.
+  • % complete columns are 0–1 fractions. Only "Activity % Complete" is set on
+    leaves; the WBS rows' Performance/Schedule % are roll-ups we recompute.
+
+Weighting is the subtle part — see _weight_key. This is the standard
+schedule-import template going forward, tried before the zone-tracker matrix
+parser in imports.import_workbook.
 """
 import datetime
 import re
@@ -60,6 +73,20 @@ def _to_pct(v):
     return max(0.0, min(100.0, round(pct, 2)))
 
 
+def _num(row, col):
+    """A cell's numeric value, or None. None (not 0) so "column absent" and
+    "genuinely zero" stay distinguishable — the weighting decision depends on it."""
+    if col is None or col >= len(row):
+        return None
+    v = row[col]
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _int(row, col):
+    v = _num(row, col)
+    return int(v) if v is not None else None
+
+
 def _leading_spaces(s):
     return len(s) - len(s.lstrip(" "))
 
@@ -77,8 +104,12 @@ def parse_p6_schedule_tree(file_obj):
             header_idx, cols = located
             id_c, name_c = cols["activity id"], cols["activity name"]
             start_c, finish_c = cols["start"], cols["finish"]
-            dur_c = cols.get("original duration")
             pct_c = cols.get("activity % complete")
+            dur_c = cols.get("original duration")
+            rem_c = cols.get("remaining duration")
+            float_c = cols.get("total float")
+            cost_c = cols.get("budgeted material cost")
+            ev_c = cols.get("earned value cost")
 
             roots, stack = [], []  # stack of (depth, node)
             for row in rows[header_idx + 1:]:
@@ -93,12 +124,13 @@ def parse_p6_schedule_tree(file_obj):
                 if isinstance(b, str) and b.strip():  # leaf activity
                     if not stack:
                         continue  # no parent WBS group to root it under
-                    dur = row[dur_c] if dur_c is not None and dur_c < len(row) else None
                     pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
                     stack[-1][1]["activities"].append({
                         "code": a_str.strip()[:60], "name": b.strip()[:200],
                         "pct": _to_pct(pct), "start": start, "finish": finish,
-                        "weight": float(dur) if isinstance(dur, (int, float)) and dur > 0 else 1.0,
+                        "budget": _num(row, cost_c), "earned_value": _num(row, ev_c),
+                        "float": _int(row, float_c), "duration": _int(row, dur_c),
+                        "remaining": _int(row, rem_c),
                     })
                     continue
 
@@ -124,6 +156,34 @@ def _entry_nodes(roots):
     return roots
 
 
+def _weight_key(roots) -> str:
+    """Which column drives roll-up weight, decided once for the whole file.
+
+    P6 computes a WBS's % complete as (earned value / budgeted cost), and earned
+    value IS pct x budgeted cost — so weighting by budgeted cost reproduces P6's
+    own number exactly. Verified against the reference export: cost weighting
+    gives 3.15%, matching its Performance % Complete, where duration weighting
+    gave 4.04%. A schedule exported without costs falls back to duration, and
+    one with neither to equal weight.
+
+    Decided per-file rather than per-activity so the scheme stays predictable:
+    mixing cost and duration weights across rows would compare unlike units."""
+    totals = {"budget": 0.0, "duration": 0.0}
+
+    def walk(node):
+        for task in node["activities"]:
+            totals["budget"] += task["budget"] or 0
+            totals["duration"] += task["duration"] or 0
+        for child in node["children"]:
+            walk(child)
+
+    for root in roots:
+        walk(root)
+    if totals["budget"] > 0:
+        return "budget"
+    return "duration" if totals["duration"] > 0 else ""
+
+
 def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, source=""):
     """Create scopes + activities from a parsed P6 schedule tree. Top-level
     groups become Stages; below that, a node holding activities directly is a
@@ -139,10 +199,19 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         project.scopes.all().delete()
 
     entries = _entry_nodes(roots)
+    weight_key = _weight_key(roots)
     scopes_by_depth = defaultdict(list)
     activities = []
     counts = defaultdict(int)
     row_counter = [0]
+
+    def weight_of(task):
+        """Nominal 1 when this activity has no value in the chosen column. It
+        keeps an all-zero-cost branch (e.g. a milestones group) rolling up on
+        its own merits instead of dividing by a zero weight sum, while staying
+        negligible against real cost weights."""
+        value = task.get(weight_key) if weight_key else None
+        return value if value and value > 0 else 1.0
 
     def type_of(node, forced):
         if forced:
@@ -161,9 +230,12 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
             row_counter[0] += 1
             activities.append(Activity(
                 company=company, project=project, scope=scope,
-                name=task["name"], code=task["code"], weight=task["weight"],
+                name=task["name"], code=task["code"], weight=weight_of(task),
                 progress_percent=task["pct"], phase_name=node["name"],
                 planned_start=task["start"], planned_finish=task["finish"],
+                budgeted_cost=task["budget"], earned_value_cost=task["earned_value"],
+                total_float=task["float"], original_duration=task["duration"],
+                remaining_duration=task["remaining"],
                 row_index=row_counter[0], sort_order=row_counter[0],
                 progress_type=Activity.ProgressType.PERCENTAGE,
             ))
@@ -191,4 +263,5 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         "overall_progress": project_overall_progress(project),
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",
+        "weighted_by": weight_key or "equal",  # surfaced so the UI can say how % was derived
     }

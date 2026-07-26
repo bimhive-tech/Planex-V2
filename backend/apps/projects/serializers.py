@@ -124,13 +124,15 @@ class ScopeWriteSerializer(serializers.ModelSerializer):
 
 class ActivitySerializer(serializers.ModelSerializer):
     progress_type_display = serializers.CharField(source="get_progress_type_display", read_only=True)
+    is_critical = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Activity
         fields = [
             "id", "scope", "name", "code", "unit", "progress_type", "progress_type_display",
             "planned_quantity", "weight", "progress_percent", "sort_order",
-            "planned_start", "planned_finish",
+            "planned_start", "planned_finish", "budgeted_cost", "earned_value_cost",
+            "total_float", "original_duration", "remaining_duration", "is_critical",
         ]
 
 

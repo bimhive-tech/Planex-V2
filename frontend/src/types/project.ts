@@ -180,6 +180,15 @@ export interface Activity {
   weight: string;
   progress_percent: string;
   sort_order: number;
+  planned_start: string | null;
+  planned_finish: string | null;
+  // Populated by a P6 schedule import; null for zone-tracker imports.
+  budgeted_cost: string | null;
+  earned_value_cost: string | null;
+  total_float: number | null;
+  original_duration: number | null;
+  remaining_duration: number | null;
+  is_critical: boolean;
 }
 
 export interface ProjectStructure {
