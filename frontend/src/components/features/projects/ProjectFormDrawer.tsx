@@ -24,10 +24,11 @@ type Form = Record<string, string>;
 
 const FIELDS = [
   "name", "code", "project_type", "priority", "location", "description",
-  "budget", "currency", "client_name",
+  "budget", "currency", "advance_payment", "client_name",
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email",
-  "planned_start", "planned_finish", "revised_finish", "size_sqm", "notes",
+  "planned_start", "planned_finish", "revised_finish", "forecast_finish",
+  "eot_days", "size_sqm", "notes",
 ];
 
 const blank = (): Form => {
@@ -74,7 +75,10 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
     setError(null);
     // Empty dates / size must be null, not "".
     const payload: Record<string, unknown> = { ...form };
-    for (const k of ["planned_start", "planned_finish", "revised_finish", "size_sqm", "budget"]) {
+    for (const k of [
+      "planned_start", "planned_finish", "revised_finish", "forecast_finish",
+      "size_sqm", "budget", "advance_payment", "eot_days",
+    ]) {
       if (!payload[k]) payload[k] = null;
     }
     try {
@@ -119,6 +123,12 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Budget" name="budget" type="number" step="0.01" value={form.budget} onChange={set("budget")} />
           <Input label="Currency" name="currency" value={form.currency} onChange={set("currency")} />
         </div>
+        <div className={styles.row2}>
+          <Input label="Advance payment" name="advance_payment" type="number" step="0.01"
+            value={form.advance_payment} onChange={set("advance_payment")} />
+          <Input label="EOT (days)" name="eot_days" type="number" step="1"
+            value={form.eot_days} onChange={set("eot_days")} />
+        </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="description">Description</label>
           <textarea id="description" className={styles.textarea} rows={2}
@@ -132,8 +142,9 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
         </div>
         <div className={styles.row2}>
           <Input label="Revised finish" name="revised_finish" type="date" value={form.revised_finish} onChange={set("revised_finish")} />
-          <Input label="Size (sqm)" name="size_sqm" type="number" step="0.01" value={form.size_sqm} onChange={set("size_sqm")} />
+          <Input label="Forecast finish" name="forecast_finish" type="date" value={form.forecast_finish} onChange={set("forecast_finish")} />
         </div>
+        <Input label="Size (sqm)" name="size_sqm" type="number" step="0.01" value={form.size_sqm} onChange={set("size_sqm")} />
 
         <p className={styles.section}>Client</p>
         <Input label="Client name" name="client_name" value={form.client_name} onChange={set("client_name")} />

@@ -204,6 +204,101 @@ class P6ImportTests(TestCase):
         self.assertEqual(round(result["overall_progress"]), 75)  # equal weight → (50+100)/2
 
 
+class P6ScheduleImportTests(TestCase):
+    """`import_workbook` prefers the real P6 schedule template (Activity ID/Name/
+    Start/Finish/% Complete, WBS via leading-space indentation — no outline
+    levels) over the zone-matrix and legacy P6 fallback. Export then refreshes
+    just the % Complete cell, matched by the original Activity ID kept as
+    Activity.code."""
+
+    def _workbook(self):
+        import datetime
+        import io
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        header = ["Activity ID", "Activity Name", "Original Duration", "Actual Duration",
+                 "Remaining Duration", "Start", "Finish", "Total Float",
+                 "Activity % Complete", "Performance % Complete", "Schedule % Complete"]
+        rows = [
+            ["Tower Project", None, 100, 10, 90, datetime.date(2026, 1, 1), datetime.date(2026, 6, 1), 0, None, 0, 0],
+            ["  Milestones", None, 50, 5, 45, datetime.date(2026, 1, 1), datetime.date(2026, 3, 1), 0, None, 0, 0],
+            ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 0, 1, 0, 0],
+            ["  Construction", None, 50, 5, 45, datetime.date(2026, 2, 1), datetime.date(2026, 6, 1), 0, None, 0, 0],
+            ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0, 0.5, 0, 0],
+            ["CN.02", "Framing", 30, 0, 30, datetime.date(2026, 3, 1), datetime.date(2026, 4, 1), 0, 0, 0, 0],
+        ]
+        ws.append(header)
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_builds_tree_with_dates_and_codes(self):
+        import datetime
+
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity, ProjectScope
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+
+        result = import_workbook(project, self._workbook(), source="P6 template.xlsx")
+        self.assertEqual(result.get("source_kind"), "p6_schedule")
+        self.assertEqual(result["activities"], 3)
+
+        # The project-title wrapper row is dropped; its children are top-level.
+        names = set(ProjectScope.objects.filter(project=project, parent__isnull=True)
+                    .values_list("name", flat=True))
+        self.assertEqual(names, {"Milestones", "Construction"})
+        construction = ProjectScope.objects.get(project=project, name="Construction")
+        self.assertEqual(construction.scope_type, "stage")
+        self.assertEqual(construction.planned_start, datetime.date(2026, 2, 1))
+
+        foundation = Activity.objects.get(project=project, code="CN.01")
+        self.assertEqual(foundation.name, "Foundation")
+        self.assertEqual(float(foundation.progress_percent), 50.0)
+        self.assertEqual(foundation.planned_start, datetime.date(2026, 2, 1))  # "1-Feb-26 A" stripped
+        self.assertEqual(foundation.planned_finish, datetime.date(2026, 2, 20))  # "20-Feb-26*" stripped
+
+    def test_export_refreshes_pct_complete_by_code(self):
+        from apps.accounts.models import Company
+        from . import exports
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6 template.xlsx")
+
+        act = project.activities.get(code="CN.02")
+        act.progress_percent = 75
+        act.save(update_fields=["progress_percent"])
+
+        from django.core.files.base import ContentFile
+        project.source_workbook.save("P6 template.xlsx", ContentFile(self._workbook().read()), save=True)
+
+        content, filename = exports.refresh_source_workbook(project)
+        self.assertTrue(filename.endswith(".xlsx"))
+
+        import io
+
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb["Sheet1"]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row[0] == "CN.02":
+                self.assertAlmostEqual(row[8], 0.75)
+                break
+        else:
+            self.fail("CN.02 row not found in refreshed workbook")
+
+
 STRONG_PW = "Str0ngPassw0rd!"
 
 

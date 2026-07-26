@@ -95,7 +95,9 @@ def _read_wide(ws):
         label = _row_label(ws, row)
         if planned_row is None and _is_data_label(label, "planned"):
             planned_row = row
-        elif actual_row is None and _is_data_label(label, "actual"):
+        # Site cash-flow sheets often call the actual cash-in "invoices" rather
+        # than "actual" — treat either as the real-money row.
+        elif actual_row is None and (_is_data_label(label, "actual") or _is_data_label(label, "invoice")):
             actual_row = row
     if planned_row is None and actual_row is None:
         return {}
@@ -145,15 +147,21 @@ def _read_tall(ws):
 
 
 def parse_cashflow(upload):
-    """Return {month(date): (planned, actual)} from the first sheet that yields a
-    recognisable cash-flow layout, or raise ValueError if none do."""
+    """Return {month(date): (planned, actual)} from the best sheet that yields a
+    recognisable cash-flow layout, or raise ValueError if none do.
+
+    A workbook with several per-contract cash-flow sheets (e.g. cashflow1/2/3)
+    plus one aggregating them (e.g. "cashflow total") should import the total,
+    not whichever partial sheet happens to come first — so sheets with "total"
+    in their name are tried before the rest."""
     wb = openpyxl.load_workbook(upload, read_only=False, data_only=True)
     try:
+        sheets = sorted(wb.worksheets, key=lambda ws: "total" not in ws.title.strip().lower())
         # A reader only returns data once it has locked onto a real layout (the
         # wide reader needs MIN_MONTHS date cells to accept a header row), so any
         # non-empty result here is a genuine cash-flow — even a couple of months.
         for reader in (_read_wide, _read_tall):
-            for ws in wb.worksheets:
+            for ws in sheets:
                 data = reader(ws)
                 if data:
                     return data

@@ -232,10 +232,27 @@ def _save_snapshot(project, *, date, source):
 
 @transaction.atomic
 def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, source="") -> dict:
+    # The real P6 schedule export (Activity ID/Name/Start/Finish/% Complete, WBS
+    # via indentation) is the standard template going forward — tried first since
+    # it never looks like a zone matrix and would otherwise misdetect as one.
+    from .p6_schedule_import import build_from_p6_schedule, parse_p6_schedule_tree
+    try:
+        file_obj.seek(0)
+    except (AttributeError, OSError):
+        pass
+    schedule_roots = parse_p6_schedule_tree(file_obj)
+    if schedule_roots:
+        return build_from_p6_schedule(project, schedule_roots, replace=replace,
+                                      snapshot_date=snapshot_date, source=source)
+
+    try:
+        file_obj.seek(0)
+    except (AttributeError, OSError):
+        pass
     parsed = parse_workbook(file_obj)
     if not parsed:
-        # No zone-matrix sheets — fall back to a Primavera 'FOR (P6)' sheet if the
-        # workbook has one, so a P6-only export still imports.
+        # No zone-matrix sheets — fall back to the legacy 'FOR (P6)' sheet if the
+        # workbook has one, so an older P6-only export still imports.
         from .p6_import import build_from_p6, parse_p6_tree
         try:
             file_obj.seek(0)

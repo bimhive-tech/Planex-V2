@@ -10,7 +10,8 @@ STAKEHOLDER_FIELDS = [
     "client_name", "consultant_name", "consultant_phone", "consultant_email",
     "contractor_name", "contractor_phone", "contractor_email",
 ]
-DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish"]
+DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
+CONTRACT_FIELDS = ["advance_payment", "eot_days"]
 
 
 class ProjectListSerializer(serializers.ModelSerializer):
@@ -41,7 +42,8 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "project_type", "project_type_display",
             "priority", "priority_display", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
+            "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
             "team_count", "open_submission_count", "created_at", "updated_at",
         ]
@@ -82,8 +84,8 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             "name", "code", "project_type", "priority", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, "size_sqm", "notes",
-            "is_archived",
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
+            "size_sqm", "notes", "is_archived",
         ]
 
     def validate_name(self, value):
@@ -128,6 +130,7 @@ class ActivitySerializer(serializers.ModelSerializer):
         fields = [
             "id", "scope", "name", "code", "unit", "progress_type", "progress_type_display",
             "planned_quantity", "weight", "progress_percent", "sort_order",
+            "planned_start", "planned_finish",
         ]
 
 

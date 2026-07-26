@@ -1,13 +1,17 @@
-"""Primavera 'FOR (P6)' export.
+"""Primavera P6 export.
 
 Preferred path: return the project's ORIGINAL imported workbook unchanged except
-for the 'FOR (P6)' sheet's "Activity Complete %" column, refreshed to Planex's
-current accepted progress. Every other cell, sheet, formula, and macro is left
-byte-identical — so the export matches the reference exactly.
+for its progress column(s), refreshed to Planex's current accepted progress.
+Every other cell, sheet, formula, and macro is left byte-identical — so the
+export matches the reference exactly. Two source shapes are handled:
 
-Rows are matched to Planex progress by (building code + normalised task name),
-since the P6 sheet's own Activity IDs aren't stored on our side. Unmatched rows
-keep their original value.
+* The real P6 schedule template (p6_schedule_import.py) — rows are matched by
+  exact Activity ID, which we kept as Activity.code at import time, so refresh
+  just updates each leaf row's "Activity % Complete" cell.
+* The legacy 'FOR (P6)' sheet (p6_import.py) — Activity IDs aren't stored on our
+  side, so rows are matched by (building code + normalised task name) instead.
+
+Either way, unmatched rows keep their original value.
 
 Fallback (no stored workbook): a generated activity sheet in the same column
 shape — see build_p6_workbook.
@@ -86,10 +90,40 @@ def _find_p6_sheet(wb):
     return None
 
 
+def _refresh_p6_schedule(wb, project) -> bool:
+    """If any sheet in `wb` matches the real P6 schedule template, refresh each
+    leaf row's "Activity % Complete" cell from the matching Activity (looked up
+    by its exact original Activity ID, kept as Activity.code at import time).
+    Returns whether a matching sheet was found (and refreshed)."""
+    from .p6_schedule_import import _locate_header
+
+    for ws in wb.worksheets:
+        rows = list(ws.iter_rows(values_only=True))
+        located = _locate_header(rows)
+        if not located:
+            continue
+        header_idx, cols = located
+        id_col, name_col = cols["activity id"] + 1, cols["activity name"] + 1
+        pct_col = cols["activity % complete"] + 1
+
+        progress_by_code = dict(project.activities.exclude(code="").values_list("code", "progress_percent"))
+        for r in range(header_idx + 2, ws.max_row + 1):
+            a = ws.cell(row=r, column=id_col).value
+            b = ws.cell(row=r, column=name_col).value
+            if a is None or not isinstance(b, str) or not b.strip():
+                continue  # a WBS banner row, not a leaf activity
+            pct = progress_by_code.get(str(a).strip()[:60])
+            if pct is None:
+                continue
+            ws.cell(row=r, column=pct_col).value = round(float(pct) / 100, 4)
+        return True
+    return False
+
+
 def refresh_source_workbook(project) -> tuple[bytes, str] | None:
-    """Reload the stored workbook, refresh the P6 '% Complete' column from live
-    progress, and return (bytes, filename). None if there's no stored workbook
-    or it has no P6 sheet."""
+    """Reload the stored workbook, refresh the P6 '% Complete' column(s) from
+    live progress, and return (bytes, filename). None if there's no stored
+    workbook or it matches neither known P6 shape."""
     field = project.source_workbook
     if not field:
         return None
@@ -99,41 +133,47 @@ def refresh_source_workbook(project) -> tuple[bytes, str] | None:
         return None
 
     is_xlsm = field.name.lower().endswith(".xlsm")
-    wb = openpyxl.load_workbook(BytesIO(raw), keep_vba=is_xlsm)
-    ws = _find_p6_sheet(wb)
-    if ws is None:
-        return None
-
-    lookup = _progress_lookup(project)
-    seen = defaultdict(int)  # how many P6 rows of each (building, name) we've consumed
-    current_building = ""
-    for row in ws.iter_rows():
-        a = row[_ID_COL - 1].value if len(row) >= _ID_COL else None
-        b = row[_NAME_COL - 1].value if len(row) >= _NAME_COL else None
-        a_str = str(a).strip() if a is not None else ""
-
-        is_activity = bool(_ACTIVITY_ID_RX.match(a_str)) and b is not None
-        if not is_activity:
-            # WBS banner row — update the building context when it names one.
-            code = _building_code(a_str)
-            if code:
-                current_building = code
-            continue
-
-        key = (current_building, _norm(b))
-        values = lookup.get(key)
-        if values and len(row) >= _PCT_COL:
-            i = seen[key]
-            seen[key] += 1
-            # Nth P6 row of this task -> Nth Planex activity (clamp if counts differ).
-            value = values[i] if i < len(values) else values[-1]
-            # Store as a 0–1 fraction (the sheet's convention); keep the cell's format.
-            row[_PCT_COL - 1].value = round(value / 100, 4)
-
-    buf = BytesIO()
-    wb.save(buf)
     ext = "xlsm" if is_xlsm else "xlsx"
-    return buf.getvalue(), f"{project.name} - FOR (P6).{ext}"
+    wb = openpyxl.load_workbook(BytesIO(raw), keep_vba=is_xlsm)
+
+    ws = _find_p6_sheet(wb)
+    if ws is not None:
+        lookup = _progress_lookup(project)
+        seen = defaultdict(int)  # how many P6 rows of each (building, name) we've consumed
+        current_building = ""
+        for row in ws.iter_rows():
+            a = row[_ID_COL - 1].value if len(row) >= _ID_COL else None
+            b = row[_NAME_COL - 1].value if len(row) >= _NAME_COL else None
+            a_str = str(a).strip() if a is not None else ""
+
+            is_activity = bool(_ACTIVITY_ID_RX.match(a_str)) and b is not None
+            if not is_activity:
+                # WBS banner row — update the building context when it names one.
+                code = _building_code(a_str)
+                if code:
+                    current_building = code
+                continue
+
+            key = (current_building, _norm(b))
+            values = lookup.get(key)
+            if values and len(row) >= _PCT_COL:
+                i = seen[key]
+                seen[key] += 1
+                # Nth P6 row of this task -> Nth Planex activity (clamp if counts differ).
+                value = values[i] if i < len(values) else values[-1]
+                # Store as a 0–1 fraction (the sheet's convention); keep the cell's format.
+                row[_PCT_COL - 1].value = round(value / 100, 4)
+
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue(), f"{project.name} - FOR (P6).{ext}"
+
+    if _refresh_p6_schedule(wb, project):
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue(), f"{project.name} - P6.{ext}"
+
+    return None
 
 
 # --- fallback generated sheet (no stored workbook) ------------------------

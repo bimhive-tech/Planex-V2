@@ -60,8 +60,13 @@ class Project(TimestampedModel):
     planned_start = models.DateField(null=True, blank=True)
     planned_finish = models.DateField(null=True, blank=True)
     revised_finish = models.DateField(null=True, blank=True)
+    forecast_finish = models.DateField(null=True, blank=True)  # current forecast, separate from the revised baseline
     size_sqm = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     notes = models.TextField(blank=True)
+
+    # Contract KPIs surfaced on the Overview tab (matches the client's dashboard header).
+    advance_payment = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    eot_days = models.PositiveIntegerField(null=True, blank=True)  # extension of time granted, in days
 
     is_archived = models.BooleanField(default=False)
 
@@ -363,6 +368,11 @@ class Activity(TimestampedModel):
     row_index = models.PositiveIntegerField(default=0)
     subzone_code = models.CharField(max_length=80, blank=True)
     subzone_index = models.PositiveIntegerField(default=0)
+
+    # A real P6 schedule import gives each activity its own dates (unlike a zone
+    # tracker cell, which only has a phase-level date via its parent scope).
+    planned_start = models.DateField(null=True, blank=True)
+    planned_finish = models.DateField(null=True, blank=True)
 
     class Meta:
         indexes = [

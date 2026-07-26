@@ -26,6 +26,18 @@ function formatMoney(amount: string | null, currency: string): string {
   return `${currency} ${new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(n)}`;
 }
 
+// Days between the current forecast and the planned finish — positive means
+// running late. Falls back to the revised baseline finish when there's no
+// separate forecast yet.
+function delayDays(planned: string | null, forecast: string | null, revised: string | null): number | null {
+  const against = forecast || revised;
+  if (!planned || !against) return null;
+  const p = new Date(planned).getTime();
+  const f = new Date(against).getTime();
+  if (Number.isNaN(p) || Number.isNaN(f)) return null;
+  return Math.round((f - p) / DAY);
+}
+
 function timeline(start: string | null, finish: string | null) {
   if (!start || !finish) return null;
   const s = new Date(start).getTime();
@@ -99,6 +111,7 @@ function StatusBar({ tone, label, count, pct }: { tone: string; label: string; c
 
 export function ProjectOverview({ project: p, stats, canManage }: { project: ProjectDetail; stats: ProjectStats; canManage: boolean }) {
   const t = timeline(p.planned_start, p.planned_finish);
+  const delay = delayDays(p.planned_finish, p.forecast_finish, p.revised_finish);
   const b = stats.breakdown;
   const pct = (n: number) => (b.total ? Math.round((n / b.total) * 100) : 0);
   const daysLeft = t ? t.remaining : null;
@@ -158,8 +171,18 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
             <CardHead icon="projects" title="Project Details" sub="Key information for this project." />
             <Row label="Client">{p.client_name || "—"}</Row>
             <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
+            <Row label="Advance payment">{formatMoney(p.advance_payment, p.currency)}</Row>
             <Row label="Size">{p.size_sqm ? `${Number(p.size_sqm).toLocaleString()} sqm` : "—"}</Row>
             <Row label="Duration">{t ? `${t.months} months` : "—"}</Row>
+            <Row label="EOT">{p.eot_days ? `${p.eot_days} days` : "—"}</Row>
+            <Row label="Forecast finish">{p.forecast_finish ? new Date(p.forecast_finish).toLocaleDateString() : "—"}</Row>
+            <Row label="Delay">
+              {delay === null ? "—" : (
+                <Badge tone={delay > 0 ? "danger" : "success"}>
+                  {delay > 0 ? `${delay} days late` : delay < 0 ? `${-delay} days ahead` : "On time"}
+                </Badge>
+              )}
+            </Row>
             <Row label="Status">
               <Badge tone={p.is_archived ? "neutral" : "success"}>{p.is_archived ? "Archived" : "Active"}</Badge>
             </Row>
