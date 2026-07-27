@@ -46,7 +46,7 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, proposals, streaming]);
 
-  async function send(content: string, file: File | null) {
+  async function send(content: string, files: File[]) {
     setSendError(null);
     let id = sessionId;
     if (!id) {
@@ -61,14 +61,14 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
     setMessages((prev) => [
       ...prev,
       { id: `local-${Date.now()}`, role: "user", content, tool_name: "", created_at: new Date().toISOString(),
-        attachments: file ? [{ id: "local", original_filename: file.name, content_type: file.type, size_bytes: file.size }] : [] },
+        attachments: files.map((f) => ({ id: `local-${f.name}`, original_filename: f.name, content_type: f.type, size_bytes: f.size })) },
       { id: "streaming", role: "assistant", content: "", tool_name: "", created_at: new Date().toISOString(), attachments: [] },
     ]);
     setStreaming(true);
 
     const form = new FormData();
     form.append("content", content);
-    if (file) form.append("file", file);
+    for (const f of files) form.append("file", f);
 
     try {
       for await (const event of streamPost<AiStreamEvent>(`/ai/sessions/${id}/messages/send/`, form)) {

@@ -215,13 +215,19 @@
   background: var(--bg-surface);
 }
 
+.filePreviewRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
 .filePreview {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   font-size: 13px;
   color: var(--text-secondary);
-  margin-bottom: var(--space-2);
   background: var(--bg-canvas);
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2);

@@ -198,6 +198,62 @@ class ProposalPersistenceTests(TestCase):
         self.assertEqual(Project.objects.filter(name="New Tower").count(), 1)
 
 
+class MultiFileUploadTests(TestCase):
+    """A single message can carry more than one attachment — each becomes its
+    own ChatAttachment on the same user ChatMessage, and _user_content (see
+    services.py) folds all of them into that one turn for the model to read."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme", ai_enabled=True)
+        role = Role.objects.create(company=self.company, name=SeededRole.COMPANY_ADMIN,
+                                    permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.user = User.objects.create_user(email="u@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.user, role=role)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_two_files_in_one_message_both_become_attachments(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        session = self.client.post("/api/ai/sessions/", {}, format="json").data
+        f1 = SimpleUploadedFile("a.txt", b"first file contents", content_type="text/plain")
+        f2 = SimpleUploadedFile("b.txt", b"second file contents", content_type="text/plain")
+
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+            create=lambda **kw: [_fake_chunk(content="ok"), _fake_chunk(finish_reason="stop")],
+        )))
+        # StreamingHttpResponse's generator is lazy -- it only actually runs
+        # once consumed, so draining it MUST happen inside the patch context.
+        # Doing that outside it (as an earlier version of this test did) let
+        # the unpatched get_client() through, which -- with a real key
+        # configured in .env for manual testing -- would have made a real,
+        # billed call to OpenAI from an automated test.
+        with patch("apps.ai_assistant.services.get_client", return_value=fake_client), \
+             patch("apps.ai_assistant.services.get_model", return_value="gpt-4o"):
+            res = self.client.post(
+                f"/api/ai/sessions/{session['id']}/messages/send/",
+                {"content": "here are two files", "file": [f1, f2]},
+                format="multipart",
+            )
+            self.assertEqual(res.status_code, 200)
+            b"".join(res.streaming_content)  # drain the generator so it actually runs, still inside the patch
+
+        user_msg = ChatMessage.objects.get(session_id=session["id"], role=ChatMessage.Role.USER)
+        names = set(user_msg.attachments.values_list("original_filename", flat=True))
+        self.assertEqual(names, {"a.txt", "b.txt"})
+
+    def test_extraction_is_not_truncated(self):
+        """AI_MAX_ATTACHMENT_CHARS was removed -- a large text file must come
+        through whole, not cut at an old hardcoded character limit."""
+        from io import BytesIO
+
+        from apps.ai_assistant.extract import extract_text
+
+        big = "x" * 200_000
+        text = extract_text(BytesIO(big.encode()), "big.txt")
+        self.assertEqual(len(text), 200_000)
+
+
 class AgentLoopTests(TestCase):
     """The agent loop itself, against a mocked OpenAI client."""
 

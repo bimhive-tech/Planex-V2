@@ -1,8 +1,13 @@
 """Turns an uploaded chat attachment into plain text the model can read.
 Excel/MD/TXT now; PDF is a stated v1 gap (see the plan) — it returns a clear
-placeholder instead of crashing, so the assistant can tell the user why."""
+placeholder instead of crashing, so the assistant can tell the user why.
+
+No character cap here — a hardcoded truncation point silently cut off real
+schedules mid-file, producing an incomplete-but-plausible-looking import with
+no clear signal why. If a file is genuinely too large for the model's own
+context window, that now surfaces as a clear error from the API (see
+services.py's timeout + logging) instead of a silent partial read."""
 import openpyxl
-from django.conf import settings
 
 TEXT_EXTENSIONS = {"txt", "md"}
 EXCEL_EXTENSIONS = {"xlsx", "xlsm"}
@@ -40,7 +45,4 @@ def extract_text(file_obj, filename: str, content_type: str = "") -> str:
     else:
         return f"[Unsupported file type .{ext} — couldn't extract text.]"
 
-    limit = settings.AI_MAX_ATTACHMENT_CHARS
-    if len(text) > limit:
-        text = text[:limit] + f"\n\n[...truncated — file is longer than the {limit}-character limit read per attachment.]"
     return text

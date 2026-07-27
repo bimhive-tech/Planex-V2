@@ -172,10 +172,6 @@ if R2_BUCKET:
 # per-conversation picker's choices — keep this in sync with DEFAULT_MODEL).
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-5.6-terra")
-# Rough cap on how much of an uploaded file's extracted text gets sent to the
-# model in one go — keeps a huge tracker from blowing the context window (and
-# the bill). The assistant says so in its reply rather than silently truncating.
-AI_MAX_ATTACHMENT_CHARS = env.int("AI_MAX_ATTACHMENT_CHARS", default=60_000)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

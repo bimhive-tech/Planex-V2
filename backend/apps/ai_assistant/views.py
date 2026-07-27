@@ -84,7 +84,7 @@ class ChatMessageListView(APIView):
 
 
 class ChatMessageStreamView(APIView):
-    """POST a message (+ optional file). Streams the assistant's reply as
+    """POST a message (+ optional files). Streams the assistant's reply as
     Server-Sent Events — text deltas as they arrive, plus proposal/done/error
     events. Runs synchronously in the request cycle, held open by the stream."""
 
@@ -94,14 +94,15 @@ class ChatMessageStreamView(APIView):
     def post(self, request, session_id):
         session = get_object_or_404(ChatSession, pk=session_id, company=request.user.company, user=request.user)
         content = request.data.get("content", "").strip()
-        upload = request.FILES.get("file")
-        if not content and not upload:
+        uploads = request.FILES.getlist("file")
+        if not content and not uploads:
             raise ValidationError("Message content or a file is required.")
+        for upload in uploads:
+            if upload.size > MAX_ATTACHMENT_BYTES:
+                raise ValidationError(f"'{upload.name}' must be {MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB or smaller.")
 
         user_msg = ChatMessage.objects.create(session=session, role=ChatMessage.Role.USER, content=content)
-        if upload:
-            if upload.size > MAX_ATTACHMENT_BYTES:
-                raise ValidationError(f"File must be {MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB or smaller.")
+        for upload in uploads:
             extracted = extract_text(upload, upload.name, upload.content_type or "")
             upload.seek(0)
             ChatAttachment.objects.create(
@@ -111,7 +112,7 @@ class ChatMessageStreamView(APIView):
             )
 
         if not session.title:
-            session.title = content[:80] or (upload.name if upload else "New chat")
+            session.title = content[:80] or (uploads[0].name if uploads else "New chat")
             session.save(update_fields=["title", "updated_at"])
         else:
             session.save(update_fields=["updated_at"])  # bump ordering
