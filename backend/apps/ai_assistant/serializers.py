@@ -1,13 +1,19 @@
 """Serializers for the AI assistant's session/message history endpoints."""
 from rest_framework import serializers
 
+from .constants import AVAILABLE_MODEL_IDS
 from .models import ChatAttachment, ChatMessage, ChatSession
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatSession
-        fields = ["id", "title", "created_at", "updated_at"]
+        fields = ["id", "title", "model", "created_at", "updated_at"]
+
+    def validate_model(self, value):
+        if value and value not in AVAILABLE_MODEL_IDS:
+            raise serializers.ValidationError("Unknown model.")
+        return value
 
 
 class ChatAttachmentSerializer(serializers.ModelSerializer):

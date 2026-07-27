@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
+from .constants import AVAILABLE_MODELS
 from .extract import extract_text
 from .models import ChatAttachment, ChatMessage, ChatSession
 from .serializers import ChatMessageSerializer, ChatSessionSerializer
@@ -43,13 +44,23 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticated, AiAssistantAccess]
     serializer_class = ChatSessionSerializer
-    http_method_names = ["get", "post", "delete", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         return ChatSession.objects.filter(company=self.request.user.company, user=self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company, user=self.request.user)
+
+
+class AiModelsView(APIView):
+    """The models the chat's picker offers, with per-1M-token prices so the
+    user can weigh cost against capability themselves."""
+
+    permission_classes = [IsAuthenticated, AiAssistantAccess]
+
+    def get(self, request):
+        return Response(AVAILABLE_MODELS)
 
 
 class ChatMessageListView(APIView):

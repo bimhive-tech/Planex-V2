@@ -74,7 +74,7 @@ def stream_agent_reply(session, user):
 
     try:
         client = get_client()
-        model = get_model()
+        model = session.model or get_model()
     except AiNotConfigured as exc:
         yield sse({"type": "error", "message": str(exc)})
         return
@@ -86,8 +86,15 @@ def stream_agent_reply(session, user):
         finish_reason = None
 
         try:
+            # The gpt-5.6 family (our whole AVAILABLE_MODELS catalog) rejects
+            # function tools on Chat Completions unless reasoning is turned
+            # off this way — confirmed against the real API: "Function tools
+            # with reasoning_effort are not supported... set reasoning_effort
+            # to 'none'." (the alternative, the newer Responses API, would be
+            # a bigger migration than this fix warrants right now).
             stream = client.chat.completions.create(
                 model=model, messages=messages, tools=TOOL_SCHEMAS, stream=True,
+                reasoning_effort="none",
             )
             for chunk in stream:
                 choice = chunk.choices[0]

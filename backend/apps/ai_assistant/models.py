@@ -16,6 +16,10 @@ class ChatSession(TimestampedModel):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="chat_sessions")
     user = models.ForeignKey("accounts.User", on_delete=models.CASCADE, related_name="chat_sessions")
     title = models.CharField(max_length=200, blank=True)  # set from the first message
+    # Blank = fall back to settings.OPENAI_MODEL. Picked per-conversation from
+    # the model list in tools/constants.py (AVAILABLE_MODELS) so cost/quality
+    # is a user choice, not a fixed deployment setting.
+    model = models.CharField(max_length=60, blank=True)
 
     class Meta:
         ordering = ["-updated_at"]

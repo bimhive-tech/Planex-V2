@@ -3,8 +3,16 @@
 export interface ChatSessionRow {
   id: string;
   title: string;
+  model: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AiModelOption {
+  id: string;
+  label: string;
+  input_price: number;
+  output_price: number;
 }
 
 export interface ChatAttachmentRow {

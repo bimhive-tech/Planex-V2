@@ -15,6 +15,7 @@ import styles from "./ai.module.css";
 
 interface Props {
   sessionId: string | null;
+  createModel: string;
   onSessionCreated: (id: string) => void;
 }
 
@@ -22,7 +23,7 @@ interface DisplayMessage extends ChatMessageRow {
   pendingProposal?: { messageId: string; proposal: AiProposal };
 }
 
-export function ChatPanel({ sessionId, onSessionCreated }: Props) {
+export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function ChatPanel({ sessionId, onSessionCreated }: Props) {
     setSendError(null);
     let id = sessionId;
     if (!id) {
-      const session = await api.post<{ id: string }>("/ai/sessions/", {});
+      const session = await api.post<{ id: string }>("/ai/sessions/", createModel ? { model: createModel } : {});
       id = session.id;
       // Deliberately NOT calling onSessionCreated yet — it changes the parent's
       // `active` state, which this panel is keyed on (see AiChatPage), and
@@ -112,7 +113,10 @@ export function ChatPanel({ sessionId, onSessionCreated }: Props) {
             </div>
           )}
           {messages
-            .filter((m) => m.role === "user" || m.role === "assistant")
+            // A tool-call-only assistant turn (e.g. "call list_projects") has
+            // no text of its own — real data, not a bug, but nothing to show
+            // as a bubble unless it's also carrying a proposal card.
+            .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.trim() || m.pendingProposal))
             .map((m) => (
               <div key={m.id} className={`${styles.bubble} ${m.role === "user" ? styles.bubbleUser : styles.bubbleAssistant}`}>
                 <div className={styles.bubbleContent}>{m.content}</div>

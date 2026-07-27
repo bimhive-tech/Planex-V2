@@ -167,8 +167,11 @@ if R2_BUCKET:
     STORAGES["default"] = {"BACKEND": "config.storage_backends.PrivateR2Storage"}
 
 # --- AI assistant (OpenAI) --------------------------------------------------
+# Fallback when a chat session doesn't specify its own model (see
+# apps.ai_assistant.constants.AVAILABLE_MODELS / DEFAULT_MODEL for the
+# per-conversation picker's choices — keep this in sync with DEFAULT_MODEL).
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4o")
+OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-5.6-terra")
 # Rough cap on how much of an uploaded file's extracted text gets sent to the
 # model in one go — keeps a huge tracker from blowing the context window (and
 # the bill). The assistant says so in its reply rather than silently truncating.

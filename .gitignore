@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 *.sqlite3
+*.db
 staticfiles/
 
 # Node / Next
