@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
-from .finance_imports import import_cashflow
+from .finance_imports import import_cashflow, import_invoices
 from .models import CashFlowEntry, Invoice, Project
 
 MAX_IMPORT_BYTES = 40 * 1024 * 1024
@@ -148,6 +148,33 @@ class InvoiceListView(APIView):
         serializer.is_valid(raise_exception=True)
         invoice = serializer.save(company=project.company, project=project, created_by=request.user)
         return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+class InvoiceImportView(APIView):
+    """Import invoices from an extract-comparison workbook (a per-BOQ-item
+    matrix, one column per submitted extract). Upserts by (name, date) so a
+    re-import never touches invoices entered by hand or their attached scans."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, project_id):
+        project = _project(request, project_id)
+        _require_manage_finances(request)
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "No file uploaded."})
+        if not upload.name.lower().endswith((".xlsx", ".xlsm")):
+            raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
+        if upload.size > MAX_IMPORT_BYTES:
+            raise ValidationError({"file": "File is too large (max 40 MB)."})
+        try:
+            result = import_invoices(project, upload)
+        except ValueError as exc:
+            raise ValidationError({"file": str(exc)})
+        except Exception as exc:  # a corrupt workbook shouldn't 500
+            raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
+        return Response(result)
 
 
 class InvoiceDetailView(APIView):

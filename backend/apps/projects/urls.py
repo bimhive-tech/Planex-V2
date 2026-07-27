@@ -23,6 +23,7 @@ from .finance_views import (
     CashFlowView,
     InvoiceDetailView,
     InvoiceImageView,
+    InvoiceImportView,
     InvoiceListView,
 )
 from .submittal_views import (
@@ -85,6 +86,7 @@ urlpatterns = [
     path("projects/<uuid:project_id>/cashflow/", CashFlowView.as_view(), name="project-cashflow"),
     path("projects/<uuid:project_id>/cashflow/import/", CashFlowImportView.as_view(), name="project-cashflow-import"),
     path("projects/<uuid:project_id>/invoices/", InvoiceListView.as_view(), name="project-invoices"),
+    path("projects/<uuid:project_id>/invoices/import/", InvoiceImportView.as_view(), name="project-invoices-import"),
     path("projects/<uuid:project_id>/invoices/<uuid:invoice_id>/", InvoiceDetailView.as_view(), name="project-invoice"),
     path("projects/<uuid:project_id>/invoices/<uuid:invoice_id>/image/", InvoiceImageView.as_view(), name="project-invoice-image"),
     path("projects/<uuid:project_id>/submittals/", SubmittalListView.as_view(), name="project-submittals"),

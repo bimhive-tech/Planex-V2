@@ -1,6 +1,6 @@
-"""Import monthly cash flow from an Excel workbook.
+"""Import monthly cash flow, and invoices/extracts, from an Excel workbook.
 
-Two layouts are supported:
+Cash flow supports two layouts:
 
 * WIDE (the common site-office / Primavera cash-flow sheet): months run across a
   header row as real dates, with labelled "planned" and "actual" cash rows below.
@@ -8,14 +8,18 @@ Two layouts are supported:
 
 Cumulative and percentage rows are ignored — we only want the per-month amounts,
 since the app stores those and charts the cumulative S-curve itself.
+
+Invoices come from a different shape entirely — see parse_invoice_extracts below.
 """
 import datetime
+import re
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 import openpyxl
 from django.db import transaction
 
-from .models import CashFlowEntry
+from .models import CashFlowEntry, Invoice
 
 SCAN_ROWS = 100          # how deep to look for the header / label rows
 SCAN_COLS = 200          # cap width so 16k-column export sheets don't stall us
@@ -193,3 +197,168 @@ def import_cashflow(project, upload):
         "first_month": months[0].isoformat(),
         "last_month": months[-1].isoformat(),
     }
+
+
+# --- Invoices / extracts (مستخلصات) ----------------------------------------
+#
+# The reference layout is NOT a flat invoice list — it's a per-BOQ-item matrix:
+# one row per work item/zone, and one column-GROUP per submitted extract
+# ("حتى <date>" = "up to <date>"), each group holding a "رقم المستخلص" (extract
+# number) column and an "اجمالي الأعمال" (total work value) column. The value in
+# that column is the item's CUMULATIVE work done as of that extract, not the
+# extract's own amount — it climbs toward the item's contract value.
+#
+# An invoice's own value is therefore derived, not read directly: sum the
+# "اجمالي الأعمال" column down every row to get the project's cumulative total at
+# that extract, then subtract the previous extract's cumulative total. That
+# matches how a progress "مستخلص" actually works — it bills the work done since
+# the last one.
+
+_ARABIC_MONTHS = {
+    "يناير": 1, "فبراير": 2, "مارس": 3, "ابريل": 4, "أبريل": 4, "مايو": 5,
+    "يونيو": 6, "يوليو": 7, "اغسطس": 8, "أغسطس": 8, "سبتمبر": 9,
+    "اكتوبر": 10, "أكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12,
+}
+_EXTRACT_DATE_RX = re.compile(r"(\d{1,2})\s+([^\s\-]+)\s*-\s*(\d{4})")
+_TOTAL_WORKS_LABEL = "اجمالي الأعمال"
+_EXTRACT_HEADER_SCAN_ROWS = 10
+
+
+def _parse_extract_date(label):
+    """Best-effort parse of a "حتى 15 ديسمبر - 2023" style label. Real trackers
+    have typos (a wrong year on a late column is common) — return None rather
+    than raise, so one bad label doesn't block the whole import."""
+    m = _EXTRACT_DATE_RX.search(label or "")
+    if not m:
+        return None
+    day, month_name, year = m.groups()
+    month = _ARABIC_MONTHS.get(month_name.strip())
+    if not month:
+        return None
+    try:
+        return datetime.date(int(year), month, int(day))
+    except ValueError:
+        return None
+
+
+def _locate_extract_header(ws):
+    """Find (group_row, sub_row): sub_row is the row carrying "اجمالي الأعمال"
+    sub-headers; group_row is the nearest row above it carrying the per-extract
+    label (the label only occupies the first cell of its merged span — read_only
+    cells outside that first cell come back None, same as every other merged
+    header in these trackers)."""
+    for sub_row in range(1, min(ws.max_row, _EXTRACT_HEADER_SCAN_ROWS) + 1):
+        cells = [c.value for c in next(ws.iter_rows(min_row=sub_row, max_row=sub_row))]
+        if any(isinstance(v, str) and v.strip() == _TOTAL_WORKS_LABEL for v in cells):
+            for group_row in range(sub_row - 1, 0, -1):
+                grp = [c.value for c in next(ws.iter_rows(min_row=group_row, max_row=group_row))]
+                if any(isinstance(v, str) and v.strip() for v in grp):
+                    return group_row, sub_row
+    return None
+
+
+def parse_invoice_extracts(upload):
+    """Return ([{name, date, value}], skipped) — one dict per submitted extract
+    in chronological order, value already converted from cumulative to the
+    extract's own amount; `skipped` counts extracts dropped as unreliable (see
+    below). None (not a tuple) if no sheet matches this layout at all."""
+    wb = openpyxl.load_workbook(upload, read_only=True, data_only=True)
+    try:
+        for ws in wb.worksheets:
+            located = _locate_extract_header(ws)
+            if not located:
+                continue
+            group_row, sub_row = located
+            group_cells = [c.value for c in next(ws.iter_rows(min_row=group_row, max_row=group_row))]
+            sub_cells = [c.value for c in next(ws.iter_rows(min_row=sub_row, max_row=sub_row))]
+
+            # Forward-fill the group label across its merged span, keeping only
+            # the "اجمالي الأعمال" sub-column of each group — one per extract.
+            periods, label = [], ""
+            for i, v in enumerate(group_cells):
+                if isinstance(v, str) and v.strip():
+                    label = v.strip()
+                if i < len(sub_cells) and isinstance(sub_cells[i], str) \
+                        and sub_cells[i].strip() == _TOTAL_WORKS_LABEL and label:
+                    periods.append((i, label))
+            if not periods:
+                continue
+
+            sums = defaultdict(float)
+            for row in ws.iter_rows(min_row=sub_row + 1, values_only=True):
+                for idx, _ in periods:
+                    if idx < len(row):
+                        v = row[idx]
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            sums[idx] += v
+
+            # Column order in the sheet is NOT reliable as extract order — the
+            # reference file has a late column physically placed after ones
+            # dated months later than it (a scope added to the tracker after
+            # the fact, appended rather than inserted in date order). Diffing
+            # cumulative totals in sheet order on a file like that produces
+            # nonsense: a "delta" between two unrelated points in time. Sort by
+            # the parsed date first — column position only breaks ties (kept
+            # stable) when two extracts share one date.
+            dated = [(idx, label, _parse_extract_date(label), sums.get(idx, 0.0))
+                    for idx, label in periods]
+            dated.sort(key=lambda t: (t[2] is None, t[2] or datetime.date.max, t[0]))
+
+            # A cumulative-to-date total must not go backwards. It does, hard, in
+            # trackers whose source formulas have quietly broken (this workbook
+            # has confirmed #REF! errors elsewhere) — a later column's cached sum
+            # can be a stale fraction of an earlier one. Once a column's total
+            # comes in below the highest total seen so far, it and everything
+            # computed from it is unreliable: drop it rather than book a
+            # fabricated invoice, and keep comparing later columns against the
+            # last column that *did* make sense.
+            seen = defaultdict(int)  # de-dupes a repeated date label into "(2)", "(3)"...
+            out, last_good = [], 0.0
+            skipped = 0
+            for idx, label, date, cumulative in dated:
+                if cumulative < last_good:
+                    skipped += 1
+                    continue
+                seen[label] += 1
+                name = label if seen[label] == 1 else f"{label} ({seen[label]})"
+                out.append({
+                    "name": name[:200], "date": date,
+                    "value": round(cumulative - last_good, 2),
+                })
+                last_good = cumulative
+            return out, skipped
+    finally:
+        wb.close()
+    return None
+
+
+def import_invoices(project, upload):
+    """Create/update the project's invoices from an uploaded extract-comparison
+    workbook. Upserts by (name, date) rather than replacing wholesale, so a
+    re-import (the tracker gets a new extract column each period) never touches
+    invoices entered by hand or their attached scan images."""
+    result = parse_invoice_extracts(upload)
+    if not result:
+        raise ValueError(
+            "No invoice/extract layout found. Expected a per-item table with "
+            "'رقم المستخلص' and 'اجمالي الأعمال' columns, one pair per submitted extract."
+        )
+    periods, skipped = result
+    created = updated = 0
+    with transaction.atomic():
+        existing = {(inv.name, inv.date): inv for inv in project.invoices.all()}
+        for i, p in enumerate(periods):
+            value = Decimal(str(p["value"])).quantize(Decimal("0.01"))
+            match = existing.get((p["name"], p["date"]))
+            if match:
+                if match.value != value:
+                    match.value = value
+                    match.save(update_fields=["value"])
+                updated += 1
+            else:
+                Invoice.objects.create(
+                    company=project.company, project=project, name=p["name"],
+                    value=value, date=p["date"], sort_order=i,
+                )
+                created += 1
+    return {"periods": len(periods), "created": created, "updated": updated, "skipped": skipped}

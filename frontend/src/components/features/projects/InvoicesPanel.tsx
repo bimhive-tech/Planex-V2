@@ -2,7 +2,7 @@
 
 // Invoices (مستخلصات): name/reason + value + optional scan. Pulled into the
 // report's invoices section. Editing requires the manage-finances permission.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -26,8 +26,35 @@ export function InvoicesPanel({ projectId, canManage }: { projectId: string; can
   );
   const [modal, setModal] = useState<{ invoice: Invoice | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const items = data ?? [];
   const total = items.reduce((s, i) => s + (Number(i.value) || 0), 0);
+
+  // Upserts by name+date, so re-importing an updated tracker never touches
+  // invoices added by hand or their attached scans — no confirm needed.
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    setActionError(null);
+    setImportMsg(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await api.uploadApi<{ periods: number; created: number; updated: number; skipped: number }>(
+        `/projects/${projectId}/invoices/import/`, form);
+      const skippedNote = r.skipped ? ` (${r.skipped} extract${r.skipped === 1 ? "" : "s"} skipped — inconsistent data)` : "";
+      setImportMsg(`Imported ${r.periods} extracts: ${r.created} added, ${r.updated} updated${skippedNote}.`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Invoice import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function remove(inv: Invoice) {
     if (!window.confirm(`Delete “${inv.name}”?`)) return;
@@ -45,12 +72,19 @@ export function InvoicesPanel({ projectId, canManage }: { projectId: string; can
       <header className={styles.head}>
         <h2 className={styles.title}>Invoices</h2>
         {canManage && (
-          <Button size="sm" variant="secondary" leadingIcon={<Icon name="plus" size={15} />} onClick={() => setModal({ invoice: null })}>
-            Add
-          </Button>
+          <div className={styles.headActions}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
+            <Button size="sm" variant="secondary" disabled={importing} onClick={() => fileRef.current?.click()}>
+              {importing ? "Importing…" : "Import Excel"}
+            </Button>
+            <Button size="sm" leadingIcon={<Icon name="plus" size={15} />} onClick={() => setModal({ invoice: null })}>
+              Add
+            </Button>
+          </div>
         )}
       </header>
 
+      {importMsg && <p className={styles.importMsg}>{importMsg}</p>}
       {actionError && <p className="formError">{actionError}</p>}
 
       <StateView

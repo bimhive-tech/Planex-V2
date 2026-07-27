@@ -1210,6 +1210,72 @@ class FinanceSubmittalApiTests(TestCase):
         self.assertEqual(len(self.client.get(f"/api/projects/{self.project.id}/invoices/").json()), 1)
         self.assertEqual(self.client.delete(f"/api/projects/{self.project.id}/invoices/{iid}/").status_code, 204)
 
+    # ── Invoice import (extract-comparison matrix) ─────────────────────────
+    def _extract_matrix_upload(self):
+        """A miniature version of the reference layout: one row per BOQ item,
+        four extract column-groups (رقم المستخلص + اجمالي الأعمال), the third
+        one deliberately a cumulative DROP (a stand-in for the real file's
+        broken-formula columns) to exercise the monotonicity guard."""
+        def build(ws):
+            ws["B1"], ws["D1"] = "حتى 01 يناير - 2026", "حتى 01 فبراير - 2026"
+            ws["F1"], ws["H1"] = "حتى 01 مارس - 2026", "حتى 01 ابريل - 2026"
+            for col in ("B", "D", "F", "H"):
+                ws[f"{col}2"] = "رقم المستخلص"
+            for col in ("C", "E", "G", "I"):
+                ws[f"{col}2"] = "اجمالي الأعمال"
+            ws["C3"], ws["E3"], ws["G3"], ws["I3"] = 100, 250, 10, 200
+            ws["C4"], ws["E4"], ws["G4"], ws["I4"] = 50, 50, 10, 180
+        return self._xlsx_upload(build, name="extracts.xlsx")
+
+    def test_invoice_import_derives_deltas_and_skips_bad_extracts(self):
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/invoices/import/",
+                                {"file": self._extract_matrix_upload()})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.json()
+        self.assertEqual(body, {"periods": 3, "created": 3, "updated": 0, "skipped": 1})
+
+        invoices = self.client.get(f"/api/projects/{self.project.id}/invoices/").json()
+        invoices.sort(key=lambda i: i["sort_order"])
+        self.assertEqual([i["name"] for i in invoices], [
+            "حتى 01 يناير - 2026", "حتى 01 فبراير - 2026", "حتى 01 ابريل - 2026",
+        ])
+        # 150 (from 0), 150 (300-150), 80 (380-300) -- the dropped 20-total column
+        # is skipped entirely rather than used as a delta boundary.
+        self.assertEqual([i["value"] for i in invoices], ["150.00", "150.00", "80.00"])
+        self.assertEqual(invoices[0]["date"], "2026-01-01")
+
+    def test_invoice_import_reimport_upserts_and_keeps_manual_invoice(self):
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/invoices/import/",
+                         {"file": self._extract_matrix_upload()})
+        self.client.post(f"/api/projects/{self.project.id}/invoices/",
+                         {"name": "Manual advance", "value": "999"})
+
+        resp = self.client.post(f"/api/projects/{self.project.id}/invoices/import/",
+                                {"file": self._extract_matrix_upload()})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json(), {"periods": 3, "created": 0, "updated": 3, "skipped": 1})
+
+        invoices = self.client.get(f"/api/projects/{self.project.id}/invoices/").json()
+        self.assertEqual(len(invoices), 4)  # 3 imported + the manual one, no duplicates
+        self.assertIn("Manual advance", [i["name"] for i in invoices])
+
+    def test_invoice_import_requires_manage_finances(self):
+        self.login("fv@acme.com")  # VIEW_FINANCES only
+        resp = self.client.post(f"/api/projects/{self.project.id}/invoices/import/",
+                                {"file": self._extract_matrix_upload()})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_invoice_import_unreadable_layout(self):
+        def build(ws):
+            ws["A1"], ws["B1"] = "Some", "Sheet"
+            ws["A2"], ws["B2"] = "with no", "extract columns"
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/invoices/import/",
+                                {"file": self._xlsx_upload(build)})
+        self.assertEqual(resp.status_code, 400)
+
     def test_submittals_gated_by_company_perm(self):
         # A user with the submittals company permission can view AND manage.
         self.login("pl@acme.com")
