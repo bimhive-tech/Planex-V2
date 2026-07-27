@@ -340,6 +340,15 @@ class AgentLoopTests(TestCase):
         self.assertNotIn("tree", replayed)
         self.assertTrue(replayed["valid"])
 
+        # The assistant's OWN replayed tool_calls arguments must be trimmed
+        # too -- that's the other, bigger copy of the same tree, and it's not
+        # covered by trimming the tool result alone.
+        second_call_assistant_msg = next(
+            m for m in captured_messages[1] if m.get("role") == "assistant" and m.get("tool_calls"))
+        replayed_args = json.loads(second_call_assistant_msg["tool_calls"][0]["function"]["arguments"])
+        self.assertNotIn("tree", replayed_args)
+        self.assertEqual(replayed_args["project_id"], str(self.project.id))
+
         # But the persisted DB row still has it in full (confirm needs it).
         db_tool_msg = self.session.messages.get(tool_name="propose_import_tree")
         stored = json.loads(db_tool_msg.content)

@@ -52,23 +52,50 @@ def _user_content(m):
     return "\n\n".join(parts)
 
 
+_BULK_KEYS = ("tree", "fields")  # the large payload keys, not the small notes
+
+
 def _compact_tool_content(m):
     """A propose_* tool's result can carry an entire schedule tree — the model
     already generated that tree itself (it's sitting in its own preceding
-    tool_calls arguments, which still gets replayed in full every round), so
-    echoing the whole thing back a second time as the tool's result just
-    doubles an already-large payload and compounds on every later round in
-    the same conversation. The full result still gets persisted as-is (the
-    confirm endpoint needs it) — this only affects what's replayed to the
-    model on subsequent calls."""
+    tool_calls arguments), so echoing the whole thing back a second time as
+    the tool's result just doubles an already-large payload and compounds on
+    every later round in the same conversation. The full result still gets
+    persisted as-is (the confirm endpoint needs it) — this only affects what's
+    replayed to the model on subsequent calls. `unmapped` is kept: it's a
+    short list of notes (e.g. "file was truncated after Procurement"), not
+    bulk data, and the model uses it to explain what it couldn't place."""
     if m.tool_name not in PROPOSE_TOOLS:
         return m.content
     try:
         data = json.loads(m.content)
     except json.JSONDecodeError:
         return m.content
-    compact = {k: v for k, v in data.items() if k not in ("tree", "fields", "unmapped")}
+    compact = {k: v for k, v in data.items() if k not in _BULK_KEYS}
     return json.dumps(compact)
+
+
+def _compact_tool_call(raw):
+    """The other half of the same problem: the assistant's OWN message that
+    requested a propose_* call still carries the full tree in its arguments,
+    and unlike the tool result, this can't just be reused from the tool's
+    compacted summary. It has to keep the same tool_call id/name/shape (the
+    API replays tool-calling history structurally, not by re-validating
+    argument content), so only the bulky argument keys get dropped."""
+    name = raw.get("function", {}).get("name")
+    if name not in PROPOSE_TOOLS:
+        return raw
+    try:
+        args = json.loads(raw["function"]["arguments"])
+    except (json.JSONDecodeError, KeyError):
+        return raw
+    if not any(k in args for k in _BULK_KEYS):
+        return raw
+    compact_args = {k: v for k, v in args.items() if k not in _BULK_KEYS}
+    return {
+        **raw,
+        "function": {**raw["function"], "arguments": json.dumps(compact_args)},
+    }
 
 
 def _to_openai_messages(session):
@@ -78,7 +105,7 @@ def _to_openai_messages(session):
             messages.append({
                 "role": "assistant",
                 "content": m.content or None,
-                "tool_calls": m.tool_calls,
+                "tool_calls": [_compact_tool_call(c) for c in m.tool_calls],
             })
         elif m.role == ChatMessage.Role.TOOL:
             messages.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": _compact_tool_content(m)})
