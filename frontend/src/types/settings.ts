@@ -20,6 +20,7 @@ export interface CompanyRow {
   slug: string;
   is_active: boolean;
   is_platform_admin: boolean;
+  ai_enabled: boolean;
   user_count: number;
   created_at: string;
 }

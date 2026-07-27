@@ -1,0 +1,239 @@
+/* Ask AI: session rail (drawer on mobile, permanent on tablet+) + chat panel. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--header-height));
+}
+
+.rail {
+  display: none;
+}
+
+.mobileHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.mobileToggle {
+  color: var(--text-secondary);
+  padding: var(--space-1);
+}
+
+.mobileTitle {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sessionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.newChatBtn {
+  margin-bottom: var(--space-2);
+}
+
+.sessionItem {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sessionItem:hover {
+  background: var(--bg-canvas);
+}
+.sessionItemActive {
+  background: var(--primary-soft);
+  color: var(--primary-text-accent);
+  font-weight: 600;
+}
+
+.chatArea {
+  flex: 1;
+  min-height: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.emptyState {
+  margin: auto;
+  max-width: 320px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.bubble {
+  max-width: 85%;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.bubbleUser {
+  align-self: flex-end;
+  background: var(--primary);
+  color: #fff;
+}
+
+.bubbleAssistant {
+  align-self: flex-start;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.bubbleContent {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attachmentChip {
+  margin-top: var(--space-2);
+  display: inline-block;
+  font-size: 12px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.15);
+}
+.bubbleAssistant .attachmentChip {
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+}
+
+.proposalCard {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.proposalSummary {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.proposalCounts {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+}
+
+.proposalActions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.sendError {
+  padding: 0 var(--space-4);
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+.inputBar {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-surface);
+}
+
+.filePreview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+  background: var(--bg-canvas);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  width: fit-content;
+}
+
+.inputRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.attachBtn,
+.sendBtn {
+  color: var(--text-secondary);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.attachBtn:hover,
+.sendBtn:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.attachBtn:disabled,
+.sendBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.textarea {
+  flex: 1;
+  resize: none;
+  max-height: 140px;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* Tablet+: permanent rail, hide the mobile drawer trigger. */
+@media (min-width: 768px) {
+  .page {
+    flex-direction: row;
+  }
+  .rail {
+    display: block;
+    width: 260px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg-surface);
+  }
+  .mobileHeader {
+    display: none;
+  }
+}

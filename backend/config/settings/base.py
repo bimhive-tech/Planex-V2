@@ -42,6 +42,7 @@ LOCAL_APPS = [
     "apps.accounts",
     "apps.projects",
     "apps.reports",
+    "apps.ai_assistant",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -164,6 +165,14 @@ MAX_UPLOAD_BYTES = env.int("MAX_UPLOAD_BYTES", default=10 * 1024 * 1024)
 
 if R2_BUCKET:
     STORAGES["default"] = {"BACKEND": "config.storage_backends.PrivateR2Storage"}
+
+# --- AI assistant (OpenAI) --------------------------------------------------
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4o")
+# Rough cap on how much of an uploaded file's extracted text gets sent to the
+# model in one go — keeps a huge tracker from blowing the context window (and
+# the bill). The assistant says so in its reply rather than silently truncating.
+AI_MAX_ATTACHMENT_CHARS = env.int("AI_MAX_ATTACHMENT_CHARS", default=60_000)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

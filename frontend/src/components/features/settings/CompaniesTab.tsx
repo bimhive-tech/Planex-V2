@@ -15,12 +15,13 @@ import type { CompanyRow } from "@/types/settings";
 import { CompanyFormModal } from "./CompanyFormModal";
 import styles from "./settingsList.module.css";
 
-const COLS = { "--cols": "2fr 1fr 1fr 1fr auto" } as CSSProperties;
+const COLS = { "--cols": "2fr 1fr 1fr auto 1fr auto" } as CSSProperties;
 
 export function CompaniesTab() {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [deleting, setDeleting] = useState<CompanyRow | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const { data, loading, error, reload } = useFetch(
     () => api.get<Paginated<CompanyRow>>(`/companies/?page=${page}`),
     [page],
@@ -32,6 +33,16 @@ export function CompaniesTab() {
     if (!deleting) return;
     await api.del(`/companies/${deleting.id}/`);
     reload();
+  }
+
+  async function toggleAi(company: CompanyRow) {
+    setTogglingId(company.id);
+    try {
+      await api.patch(`/companies/${company.id}/`, { ai_enabled: !company.ai_enabled });
+      reload();
+    } finally {
+      setTogglingId(null);
+    }
   }
 
   return (
@@ -50,6 +61,7 @@ export function CompaniesTab() {
           <span>Name</span>
           <span>Users</span>
           <span>Status</span>
+          <span>AI</span>
           <span>Created</span>
           <span />
         </div>
@@ -77,6 +89,16 @@ export function CompaniesTab() {
                     {c.is_active ? "Active" : "Inactive"}
                   </Badge>
                 )}
+              </span>
+              <span>
+                <input
+                  type="checkbox"
+                  className={styles.aiCheck}
+                  aria-label={`AI features for ${c.name}`}
+                  checked={c.ai_enabled}
+                  disabled={c.is_platform_admin || togglingId === c.id}
+                  onChange={() => toggleAi(c)}
+                />
               </span>
               <span className={styles.muted}>{formatDate(c.created_at)}</span>
               <div className={styles.actions}>

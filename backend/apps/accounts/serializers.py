@@ -36,7 +36,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 class CompanyBriefSerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "slug", "is_platform_admin"]
+        fields = ["id", "name", "slug", "is_platform_admin", "ai_enabled"]
 
 
 class CurrentUserSerializer(serializers.ModelSerializer):

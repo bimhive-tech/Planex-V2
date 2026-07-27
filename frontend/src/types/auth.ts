@@ -5,6 +5,7 @@ export interface CompanyBrief {
   name: string;
   slug: string;
   is_platform_admin: boolean;
+  ai_enabled: boolean;
 }
 
 export interface CurrentUser {

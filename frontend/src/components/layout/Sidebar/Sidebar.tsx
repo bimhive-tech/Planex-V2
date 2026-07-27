@@ -9,7 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import type { IconName } from "@/components/ui/Icon";
 import { NAV_ITEMS } from "../nav";
 import { UserCard } from "./UserCard";
-import { hasPermission } from "@/lib/permissions";
+import { canUseAi, hasPermission } from "@/lib/permissions";
 import type { CurrentUser } from "@/types/auth";
 import styles from "./Sidebar.module.css";
 
@@ -23,6 +23,7 @@ export function Sidebar({ user, open, onClose }: Props) {
   const pathname = usePathname();
 
   const items = NAV_ITEMS.filter((item) => {
+    if (item.requiresAi && !canUseAi(user)) return false;
     if (item.platformOnly && !user.is_platform_admin) return false;
     if (user.is_platform_admin) return true;
     if (item.permission && !hasPermission(user, item.permission)) return false;

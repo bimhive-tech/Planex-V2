@@ -41,7 +41,10 @@ export type IconName =
   | "listOrdered"
   | "alignLeft"
   | "alignCenter"
-  | "alignRight";
+  | "alignRight"
+  | "sparkles"
+  | "paperclip"
+  | "send";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -263,6 +266,22 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
       <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  sparkles: (
+    <>
+      <path d="M12 3v5M12 16v5M3 12h5M16 12h5" />
+      <path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4Z" />
+    </>
+  ),
+  paperclip: (
+    <>
+      <path d="M21 12.5 12.5 21a5 5 0 0 1-7-7L14 5.5a3.5 3.5 0 0 1 5 5L10.5 19a2 2 0 0 1-3-3L15 8.5" />
+    </>
+  ),
+  send: (
+    <>
+      <path d="m3 11 18-8-8 18-2.5-7.5L3 11Z" />
     </>
   ),
 };

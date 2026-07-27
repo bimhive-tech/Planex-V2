@@ -22,10 +22,17 @@ export const Permission = {
   MANAGE_SUBMITTALS: "manage_submittals",
   VIEW_VARIATIONS: "view_variations",
   MANAGE_VARIATIONS: "manage_variations",
+  USE_AI_ASSISTANT: "use_ai_assistant",
 } as const;
 
 export type PermissionKey = (typeof Permission)[keyof typeof Permission];
 
 export function hasPermission(user: { permissions: string[] } | null, key: string): boolean {
   return !!user && user.permissions.includes(key);
+}
+
+// AI assistant needs both: the platform admin has switched it on for this
+// company, and the signed-in user's role grants the permission to use it.
+export function canUseAi(user: { permissions: string[]; company: { ai_enabled: boolean } | null } | null): boolean {
+  return !!user && !!user.company?.ai_enabled && hasPermission(user, Permission.USE_AI_ASSISTANT);
 }

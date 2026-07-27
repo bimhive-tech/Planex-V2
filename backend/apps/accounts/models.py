@@ -38,6 +38,10 @@ class Company(TimestampedModel):
     address = models.TextField(blank=True)
     website = models.CharField(max_length=255, blank=True)
 
+    # Platform-admin-only switch (Settings → Companies) — the AI assistant costs
+    # real per-call money, so it's opt-in per tenant rather than self-serve.
+    ai_enabled = models.BooleanField(default=False)
+
     class Meta:
         verbose_name_plural = "companies"
         ordering = ["name"]

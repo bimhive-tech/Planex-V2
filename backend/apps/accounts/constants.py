@@ -45,6 +45,10 @@ class Permission(models.TextChoices):
     VIEW_VARIATIONS = "view_variations", "View variations"
     MANAGE_VARIATIONS = "manage_variations", "Manage variations"
 
+    # AI assistant — also gated by Company.ai_enabled (platform-admin toggle);
+    # this permission only controls who *within* an AI-enabled company can use it.
+    USE_AI_ASSISTANT = "use_ai_assistant", "Use AI assistant"
+
 
 # Convenience groupings.
 ALL_PERMISSIONS = [p.value for p in Permission]
@@ -101,6 +105,9 @@ PERMISSION_GROUPS = [
     ("Variations", [
         Permission.VIEW_VARIATIONS.value,
         Permission.MANAGE_VARIATIONS.value,
+    ]),
+    ("AI Assistant", [
+        Permission.USE_AI_ASSISTANT.value,
     ]),
     ("Platform", PLATFORM_PERMISSIONS),
 ]

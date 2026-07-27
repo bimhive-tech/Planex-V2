@@ -13,6 +13,7 @@ from .constants import Permission, permission_catalog
 from .models import Company, Role, User
 from .permissions import HasPermission, IsPlatformAdmin
 from .settings_serializers import (
+    CompanyAiToggleSerializer,
     CompanyCreateSerializer,
     CompanyInfoSerializer,
     CompanyListSerializer,
@@ -79,6 +80,18 @@ class CompaniesViewSet(viewsets.ViewSet):
             raise PermissionDenied("The platform company can't be deleted.")
         svc.delete_company(company=company)  # cascades users, roles, all data
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def partial_update(self, request, pk=None):
+        """The AI on/off switch — the only thing editable on a company from here."""
+        from rest_framework.exceptions import NotFound
+        try:
+            company = Company.objects.annotate(user_count=Count("users", distinct=True)).get(pk=pk)
+        except (Company.DoesNotExist, ValueError):
+            raise NotFound("Company not found.")
+        serializer = CompanyAiToggleSerializer(company, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CompanyListSerializer(company).data)
 
 
 class RolesViewSet(viewsets.ViewSet):

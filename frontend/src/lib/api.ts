@@ -76,6 +76,34 @@ async function uploadApi<T>(path: string, form: FormData, method = "POST"): Prom
   return data as T;
 }
 
+// Streams a POST's Server-Sent Events response as parsed JSON events, one per
+// `data: {...}` frame. Uses `fetch` + a raw ReadableStream reader rather than
+// EventSource — EventSource can't POST a body (needed for the message text +
+// attached file), only GET.
+export async function* streamPost<T = unknown>(path: string, form: FormData): AsyncGenerator<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", body: form });
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => null);
+    const err = (data as ApiErrorBody | null)?.error;
+    throw new ApiError(res.status, err?.code ?? "error", err?.message ?? "Request failed.", err?.details ?? null);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (line) yield JSON.parse(line.slice("data: ".length)) as T;
+    }
+  }
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "GET" }),
   post: <T>(path: string, json?: unknown, options?: RequestOptions) =>

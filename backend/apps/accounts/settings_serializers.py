@@ -29,7 +29,18 @@ class CompanyListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Company
-        fields = ["id", "name", "slug", "is_active", "is_platform_admin", "user_count", "created_at"]
+        fields = ["id", "name", "slug", "is_active", "is_platform_admin", "ai_enabled",
+                  "user_count", "created_at"]
+
+
+class CompanyAiToggleSerializer(serializers.ModelSerializer):
+    """Settings → Companies: the platform-admin-only AI on/off switch. Deliberately
+    the only field writable through this serializer — everything else about a
+    company is either read-only here or edited via CompanyInfoSerializer."""
+
+    class Meta:
+        model = Company
+        fields = ["ai_enabled"]
 
 
 class CompanyCreateSerializer(serializers.Serializer):
