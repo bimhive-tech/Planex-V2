@@ -46,3 +46,13 @@ export type AiStreamEvent =
   | { type: "proposal"; message_id: string; proposal: AiProposal }
   | { type: "done" }
   | { type: "error"; message: string };
+
+export interface PendingProposal {
+  message_id: string;
+  proposal: AiProposal;
+}
+
+export interface ChatHistoryResponse {
+  results: ChatMessageRow[];
+  pending_proposals: PendingProposal[];
+}

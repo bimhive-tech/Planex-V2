@@ -64,14 +64,23 @@ class AiModelsView(APIView):
 
 
 class ChatMessageListView(APIView):
-    """GET the full history of one session."""
+    """GET the full history of one session, plus any confirmation still
+    awaiting a decision — that's what lets a pending proposal's card survive
+    a reload or a dropped connection instead of only existing for the
+    instant it was first streamed."""
 
     permission_classes = [IsAuthenticated, AiAssistantAccess]
 
     def get(self, request, session_id):
         session = get_object_or_404(ChatSession, pk=session_id, company=request.user.company, user=request.user)
         messages = session.messages.exclude(role=ChatMessage.Role.SYSTEM).exclude(role=ChatMessage.Role.TOOL)
-        return Response(ChatMessageSerializer(messages, many=True).data)
+        pending = session.messages.filter(proposal_status=ChatMessage.ProposalStatus.PENDING)
+        return Response({
+            "results": ChatMessageSerializer(messages, many=True).data,
+            "pending_proposals": [
+                {"message_id": str(m.id), "proposal": json.loads(m.content)} for m in pending
+            ],
+        })
 
 
 class ChatMessageStreamView(APIView):
@@ -124,7 +133,12 @@ class ChatProposalConfirmView(APIView):
         session = get_object_or_404(ChatSession, pk=session_id, company=request.user.company, user=request.user)
         tool_msg = get_object_or_404(ChatMessage, pk=message_id, session=session, role=ChatMessage.Role.TOOL)
 
+        if tool_msg.proposal_status != ChatMessage.ProposalStatus.PENDING:
+            raise ValidationError(f"This proposal was already {tool_msg.proposal_status or 'resolved'}.")
+
         if not request.data.get("confirm"):
+            tool_msg.proposal_status = ChatMessage.ProposalStatus.CANCELLED
+            tool_msg.save(update_fields=["proposal_status", "updated_at"])
             return Response({"cancelled": True})
 
         try:
@@ -140,4 +154,7 @@ class ChatProposalConfirmView(APIView):
             raise
         except Exception as exc:  # noqa: BLE001 — surfaced to the user, not a 500
             raise ValidationError(str(exc))
+
+        tool_msg.proposal_status = ChatMessage.ProposalStatus.CONFIRMED
+        tool_msg.save(update_fields=["proposal_status", "updated_at"])
         return Response({"committed": True, "result": result})

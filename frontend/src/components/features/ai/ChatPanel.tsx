@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { StateView } from "@/components/ui/StateView";
 import { api, streamPost } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import type { AiProposal, AiStreamEvent, ChatMessageRow } from "@/types/ai";
+import type { AiStreamEvent, ChatHistoryResponse, ChatMessageRow, PendingProposal } from "@/types/ai";
 import { MessageInput } from "./MessageInput";
 import { ProposalCard } from "./ProposalCard";
 import styles from "./ai.module.css";
@@ -19,28 +19,32 @@ interface Props {
   onSessionCreated: (id: string) => void;
 }
 
-interface DisplayMessage extends ChatMessageRow {
-  pendingProposal?: { messageId: string; proposal: AiProposal };
-}
-
 export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessageRow[]>([]);
+  // Proposals awaiting a decision — kept separate from `messages` because
+  // they can arrive two ways: live via an SSE "proposal" event, or (just as
+  // importantly) already-pending from history on load/reload. A card exists
+  // as long as its entry is in this list, regardless of which path added it.
+  const [proposals, setProposals] = useState<PendingProposal[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: history, loading, error } = useFetch(
-    () => (sessionId ? api.get<ChatMessageRow[]>(`/ai/sessions/${sessionId}/messages/`) : Promise.resolve([])),
+    () => (sessionId
+      ? api.get<ChatHistoryResponse>(`/ai/sessions/${sessionId}/messages/`)
+      : Promise.resolve({ results: [], pending_proposals: [] })),
     [sessionId],
   );
 
   useEffect(() => {
-    setMessages(history ?? []);
+    setMessages(history?.results ?? []);
+    setProposals(history?.pending_proposals ?? []);
   }, [history]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streaming]);
+  }, [messages, proposals, streaming]);
 
   async function send(content: string, file: File | null) {
     setSendError(null);
@@ -70,9 +74,9 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
       for await (const event of streamPost<AiStreamEvent>(`/ai/sessions/${id}/messages/send/`, form)) {
         if (event.type === "delta") {
           // Pure updater — React 18 Strict Mode (on by default in `next dev`)
-          // invokes state updaters twice to catch impure ones. The previous
-          // version mutated `last.content` in place, so the double-invoke
-          // appended every delta twice, doubling every word in the reply.
+          // invokes state updaters twice to catch impure ones. A version that
+          // mutated `last.content` in place doubled every word in the reply
+          // once, this doesn't.
           setMessages((prev) => {
             const idx = prev.length - 1;
             if (prev[idx]?.id !== "streaming") return prev;
@@ -81,13 +85,7 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
             return next;
           });
         } else if (event.type === "proposal") {
-          setMessages((prev) => {
-            const idx = prev.length - 1;
-            if (prev[idx]?.id !== "streaming") return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], pendingProposal: { messageId: event.message_id, proposal: event.proposal } };
-            return next;
-          });
+          setProposals((prev) => [...prev, { message_id: event.message_id, proposal: event.proposal }]);
         } else if (event.type === "error") {
           setSendError(event.message);
         }
@@ -108,40 +106,27 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
   }
 
   const placeholder = messages.find((m) => m.id === "streaming");
-  const isThinking = streaming && !placeholder?.content.trim() && !placeholder?.pendingProposal;
+  const isThinking = streaming && !placeholder?.content.trim();
 
   return (
     <div className={styles.panel}>
       <StateView loading={loading} error={error} isEmpty={false}>
         <div className={styles.messages}>
-          {messages.length === 0 && !streaming && (
+          {messages.length === 0 && proposals.length === 0 && !streaming && (
             <div className={styles.emptyState}>
               Ask about any project, request insights, or attach a schedule file to import.
             </div>
           )}
           {messages
             // A tool-call-only assistant turn (e.g. "call list_projects") has
-            // no text of its own — real data, not a bug, but nothing to show
-            // as a bubble unless it's also carrying a proposal card.
-            .filter((m) => (m.role === "user" || m.role === "assistant") && (m.content.trim() || m.pendingProposal))
+            // no text of its own — real data, not a bug, but nothing to show.
+            .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
             .map((m) => (
               <div key={m.id} className={`${styles.bubble} ${m.role === "user" ? styles.bubbleUser : styles.bubbleAssistant}`}>
                 <div className={styles.bubbleContent}>{m.content}</div>
                 {m.attachments.map((a) => (
                   <div key={a.id} className={styles.attachmentChip}>{a.original_filename}</div>
                 ))}
-                {m.pendingProposal && (
-                  <ProposalCard
-                    sessionId={sessionId!}
-                    messageId={m.pendingProposal.messageId}
-                    proposal={m.pendingProposal.proposal}
-                    onResolved={() =>
-                      setMessages((prev) =>
-                        prev.map((row) => (row.id === m.id ? { ...row, pendingProposal: undefined } : row)),
-                      )
-                    }
-                  />
-                )}
               </div>
             ))}
           {isThinking && (
@@ -151,6 +136,16 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
               <span className={styles.dot} />
             </div>
           )}
+          {proposals.map((p) => (
+            <div key={p.message_id} className={`${styles.bubble} ${styles.bubbleAssistant}`}>
+              <ProposalCard
+                sessionId={sessionId!}
+                messageId={p.message_id}
+                proposal={p.proposal}
+                onResolved={() => setProposals((prev) => prev.filter((row) => row.message_id !== p.message_id))}
+              />
+            </div>
+          ))}
           <div ref={bottomRef} />
         </div>
       </StateView>

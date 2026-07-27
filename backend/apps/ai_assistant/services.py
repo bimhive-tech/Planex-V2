@@ -164,11 +164,13 @@ def stream_agent_reply(session, user):
             except json.JSONDecodeError:
                 kwargs = {}
             result = _tool_result_content(call["name"], kwargs, user)
+            is_pending_proposal = call["name"] in PROPOSE_TOOLS and result.get("valid")
             tool_msg = ChatMessage.objects.create(
                 session=session, role=ChatMessage.Role.TOOL, content=json.dumps(result),
                 tool_call_id=call["id"], tool_name=call["name"],
+                proposal_status=ChatMessage.ProposalStatus.PENDING if is_pending_proposal else "",
             )
-            if call["name"] in PROPOSE_TOOLS and result.get("valid"):
+            if is_pending_proposal:
                 yield sse({"type": "proposal", "message_id": str(tool_msg.id), "proposal": result})
 
     yield sse({"type": "error", "message": "Stopped after too many tool-call rounds."})

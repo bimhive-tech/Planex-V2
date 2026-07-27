@@ -39,6 +39,11 @@ class ChatMessage(TimestampedModel):
         ASSISTANT = "assistant", "Assistant"
         TOOL = "tool", "Tool"
 
+    class ProposalStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        CANCELLED = "cancelled", "Cancelled"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     session = models.ForeignKey(ChatSession, on_delete=models.CASCADE, related_name="messages")
     role = models.CharField(max_length=20, choices=Role.choices)
@@ -46,10 +51,18 @@ class ChatMessage(TimestampedModel):
     tool_calls = models.JSONField(null=True, blank=True)
     tool_call_id = models.CharField(max_length=100, blank=True)
     tool_name = models.CharField(max_length=100, blank=True)
+    # Set only on role=tool rows from a propose_* tool. Blank = not a proposal
+    # at all. This is what lets a pending confirmation survive a reload or a
+    # dropped connection — the card that only ever existed in a live SSE
+    # stream had no way to come back once that moment passed.
+    proposal_status = models.CharField(max_length=20, choices=ProposalStatus.choices, blank=True)
 
     class Meta:
         ordering = ["created_at"]
-        indexes = [models.Index(fields=["session", "created_at"])]
+        indexes = [
+            models.Index(fields=["session", "created_at"]),
+            models.Index(fields=["session", "proposal_status"]),
+        ]
 
     def __str__(self):
         return f"{self.role}: {self.content[:60]}"

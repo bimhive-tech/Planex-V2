@@ -136,6 +136,68 @@ class ToolsTests(TestCase):
         self.assertEqual(req.company, self.company)
 
 
+class ProposalPersistenceTests(TestCase):
+    """A pending proposal must survive a reload/dropped connection — it's
+    only useful if the card can come back, not just exist for the instant
+    it first streamed. See ChatMessage.proposal_status."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme", ai_enabled=True)
+        role = Role.objects.create(company=self.company, name=SeededRole.COMPANY_ADMIN,
+                                    permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.user = User.objects.create_user(email="u@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.user, role=role)
+        self.session = ChatSession.objects.create(company=self.company, user=self.user)
+        proposal = propose_create_project(self.user, name="New Tower", project_type="commercial")
+        self.tool_msg = ChatMessage.objects.create(
+            session=self.session, role=ChatMessage.Role.TOOL, content=json.dumps(proposal),
+            tool_call_id="call_1", tool_name="propose_create_project",
+            proposal_status=ChatMessage.ProposalStatus.PENDING,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_pending_proposal_appears_in_history_after_reload(self):
+        res = self.client.get(f"/api/ai/sessions/{self.session.id}/messages/")
+        self.assertEqual(res.status_code, 200)
+        pending = res.data["pending_proposals"]
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["message_id"], str(self.tool_msg.id))
+        self.assertEqual(pending[0]["proposal"]["fields"]["name"], "New Tower")
+
+    def test_confirming_removes_it_from_pending_and_creates_the_project(self):
+        res = self.client.post(
+            f"/api/ai/sessions/{self.session.id}/messages/{self.tool_msg.id}/confirm/",
+            {"confirm": True}, format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(Project.objects.filter(name="New Tower").exists())
+
+        history = self.client.get(f"/api/ai/sessions/{self.session.id}/messages/")
+        self.assertEqual(history.data["pending_proposals"], [])
+        self.tool_msg.refresh_from_db()
+        self.assertEqual(self.tool_msg.proposal_status, ChatMessage.ProposalStatus.CONFIRMED)
+
+    def test_cancelling_removes_it_without_creating_anything(self):
+        res = self.client.post(
+            f"/api/ai/sessions/{self.session.id}/messages/{self.tool_msg.id}/confirm/",
+            {"confirm": False}, format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(Project.objects.filter(name="New Tower").exists())
+        history = self.client.get(f"/api/ai/sessions/{self.session.id}/messages/")
+        self.assertEqual(history.data["pending_proposals"], [])
+
+    def test_cannot_confirm_an_already_resolved_proposal_twice(self):
+        self.client.post(f"/api/ai/sessions/{self.session.id}/messages/{self.tool_msg.id}/confirm/",
+                          {"confirm": True}, format="json")
+        res = self.client.post(f"/api/ai/sessions/{self.session.id}/messages/{self.tool_msg.id}/confirm/",
+                                {"confirm": True}, format="json")
+        self.assertEqual(res.status_code, 400)
+        # Still only the one project from the first confirm.
+        self.assertEqual(Project.objects.filter(name="New Tower").count(), 1)
+
+
 class AgentLoopTests(TestCase):
     """The agent loop itself, against a mocked OpenAI client."""
 
