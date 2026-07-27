@@ -11,9 +11,18 @@ from apps.projects.services import activity_progress_as_of, project_overall_prog
 from .models import ReportImage
 
 
-def _planned_progress(project, as_of):
+def _planned_progress(project, as_of, use_imported=False):
     """Time-based planned % (0–100): how far along the contract calendar we are.
-    Matches the reference, where overdue scopes show planned = 100%."""
+    Matches the reference, where overdue scopes show planned = 100%.
+
+    `use_imported=True` prefers the project's own stated Schedule % Complete
+    when a real P6 import provided one — the same reasoning as
+    project_overall_progress's actual-progress override, and gated the same
+    way (only the report's single "current" figure, never a per-date series:
+    the S-curve calls this once per historical snapshot date and must always
+    compute live, or every point would show today's one imported number)."""
+    if use_imported and project.imported_planned_progress_percent is not None:
+        return float(project.imported_planned_progress_percent)
     s, f = project.planned_start, project.planned_finish
     if not (s and f and as_of and f > s):
         return None
@@ -479,7 +488,7 @@ def build_report_context(report):
     overall = project_overall_progress(project, progress)
     breakdown = _breakdown(project, progress)
 
-    planned = _planned_progress(project, as_of)
+    planned = _planned_progress(project, as_of, use_imported=(progress is None))
     duration = _duration(project, as_of)
 
     milestones = list(

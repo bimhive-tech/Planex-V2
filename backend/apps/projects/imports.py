@@ -240,15 +240,20 @@ def _save_snapshot(project, *, date, source):
 
 @transaction.atomic
 def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, source="") -> dict:
-    # A prior P6 import may have left an authoritative overall-% figure on the
-    # project (see project_overall_progress). Clear it up front, before format
-    # dispatch: if this import turns out to be another P6 schedule, that path
-    # sets its own fresh figure below; if it's a zone tracker or the legacy P6
-    # fallback instead, neither knows about this field, and leaving the old
-    # project's number in place would silently outlive the tree it described.
-    if replace and project.imported_progress_percent is not None:
+    # A prior P6 import may have left authoritative overall-% figures on the
+    # project (see project_overall_progress / reports._planned_progress). Clear
+    # them up front, before format dispatch: if this import turns out to be
+    # another P6 schedule, that path sets fresh figures below; if it's a zone
+    # tracker or the legacy P6 fallback instead, neither knows about these
+    # fields, and leaving the old project's numbers in place would silently
+    # outlive the tree they described.
+    if replace and (project.imported_progress_percent is not None
+                    or project.imported_planned_progress_percent is not None):
         project.imported_progress_percent = None
-        project.save(update_fields=["imported_progress_percent", "updated_at"])
+        project.imported_planned_progress_percent = None
+        project.save(update_fields=[
+            "imported_progress_percent", "imported_planned_progress_percent", "updated_at",
+        ])
 
     # Both read-only probes share ONE open: on a 20MB+ tracker openpyxl spends
     # ~26s just opening the file, so probing formats with an open apiece is the

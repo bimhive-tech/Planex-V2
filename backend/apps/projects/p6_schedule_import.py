@@ -142,7 +142,8 @@ def parse_p6_schedule_sheets(wb):
         float_c = cols.get("total float")
         cost_c = cols.get("budgeted material cost")
         ev_c = cols.get("earned value cost")
-        perf_c = cols.get("performance % complete")
+        perf_c = cols.get("performance % complete")  # actual (earned value / budget)
+        sched_c = cols.get("schedule % complete")  # planned (time-based)
 
         roots, stack = [], []  # stack of (depth, node)
         for row in rows:
@@ -169,8 +170,10 @@ def parse_p6_schedule_sheets(wb):
 
             depth = _leading_spaces(a_str)
             perf = row[perf_c] if perf_c is not None and perf_c < len(row) else None
+            sched = row[sched_c] if sched_c is not None and sched_c < len(row) else None
             node = {"name": a_str.strip()[:180], "children": [], "activities": [],
-                    "start": start, "finish": finish, "pct": _to_pct_optional(perf)}
+                    "start": start, "finish": finish,
+                    "pct": _to_pct_optional(perf), "schedule_pct": _to_pct_optional(sched)}
             while stack and stack[-1][0] >= depth:
                 stack.pop()
             (stack[-1][1]["children"] if stack else roots).append(node)
@@ -302,11 +305,13 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     if replace:
         project.scopes.all().delete()
 
-    # The project-title row (before it's unwrapped below) carries the file's
-    # OWN stated Performance % Complete — earned value / budgeted cost, the
-    # same thing our cost weighting approximates. Prefer it over our own
-    # weighted average: it's what the source schedule itself reports.
+    # The project-title row (before it's unwrapped below) carries the file's OWN
+    # stated actual (Performance % Complete — earned value / budgeted cost, the
+    # same thing our cost weighting approximates) and planned (Schedule %
+    # Complete — time-based) progress. Prefer both over our own formulas: they're
+    # what the source schedule itself reports.
     project_pct = roots[0].get("pct") if len(roots) == 1 else None
+    project_schedule_pct = roots[0].get("schedule_pct") if len(roots) == 1 else None
 
     milestone_tasks = _extract_milestones(roots)
     _prune_empty(roots)
@@ -396,7 +401,12 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     milestones = _record_milestones(project, milestone_tasks)
 
     project.imported_progress_percent = Decimal(str(project_pct)) if project_pct is not None else None
-    project.save(update_fields=["imported_progress_percent", "updated_at"])
+    project.imported_planned_progress_percent = (
+        Decimal(str(project_schedule_pct)) if project_schedule_pct is not None else None
+    )
+    project.save(update_fields=[
+        "imported_progress_percent", "imported_planned_progress_percent", "updated_at",
+    ])
 
     # _save_snapshot below calls project_overall_progress(project) with no as-of
     # override, so it picks up imported_progress_percent (just set above) as the
@@ -414,6 +424,7 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
         "overall_progress_source": "imported" if project_pct is not None else "computed",
+        "planned_progress": float(project_schedule_pct) if project_schedule_pct is not None else None,
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",
         "weighted_by": weight_key or "equal",  # surfaced so the UI can say how % was derived

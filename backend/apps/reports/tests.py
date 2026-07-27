@@ -146,6 +146,45 @@ class HierarchyRowsTests(TestCase):
         self.assertIsNone(rows[0]["previous"])  # zone itself wasn't in the map
 
 
+class PlannedProgressOverrideTests(TestCase):
+    """A real P6 export states its own Schedule % Complete (planned, time-based)
+    alongside Performance % Complete (actual). `_planned_progress` should prefer
+    it for the report's single "current" figure, the same way
+    `project_overall_progress` already prefers the imported actual figure."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31),
+            imported_planned_progress_percent=95.0)
+
+    def test_current_view_prefers_the_imported_planned_figure(self):
+        from .services import _planned_progress
+
+        # 2026-04-01 is ~25% through the contract calendar -- the imported 95%
+        # only comes through if the override actually wins.
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), use_imported=True)
+        self.assertEqual(planned, 95.0)
+
+    def test_series_call_ignores_the_imported_planned_figure(self):
+        """The S-curve computes one point per historical snapshot date; without
+        `use_imported`, every point must stay live, not flatten to one number."""
+        from .services import _planned_progress
+
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1))
+        self.assertNotEqual(planned, 95.0)
+
+    def test_falls_back_to_computed_without_a_stated_figure(self):
+        from .services import _planned_progress
+
+        self.project.imported_planned_progress_percent = None
+        self.project.save(update_fields=["imported_planned_progress_percent"])
+
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), use_imported=True)
+        self.assertNotEqual(planned, 95.0)
+
+
 class DisciplineRowsTests(TestCase):
     """`_discipline_rows` splits one unit's progress by trade, using each
     activity's phase's discipline tag (a phase's direct parent is the unit)."""

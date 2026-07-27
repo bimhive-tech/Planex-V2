@@ -68,15 +68,17 @@ class Project(TimestampedModel):
     advance_payment = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     eot_days = models.PositiveIntegerField(null=True, blank=True)  # extension of time granted, in days
 
-    # A real P6 schedule states its own overall % complete (Performance %
-    # Complete = earned value / budgeted cost) rather than leaving Planex to
-    # approximate one from activity weights. When present it's authoritative —
-    # project_overall_progress() returns it as-is instead of recomputing, since
-    # P6's own figure already accounts for context (critical path, resource
-    # loading) a simple weighted average can't fully reproduce. Cleared and
-    # re-set on every import; None for projects with no such source (a zone
-    # tracker, or a P6 export that didn't carry this column).
+    # A real P6 schedule states its own actual AND planned % complete for the
+    # whole project — Performance % Complete (earned value / budgeted cost) and
+    # Schedule % Complete (time-based) respectively — rather than leaving
+    # Planex to approximate either. When present they're authoritative:
+    # project_overall_progress() / the report's planned figure return them
+    # as-is instead of recomputing, since P6's own figures already account for
+    # context (critical path, resource loading) a simple formula can't fully
+    # reproduce. Cleared and re-set on every import; None for projects with no
+    # such source (a zone tracker, or a P6 export that didn't carry the column).
     imported_progress_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    imported_planned_progress_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     is_archived = models.BooleanField(default=False)
 

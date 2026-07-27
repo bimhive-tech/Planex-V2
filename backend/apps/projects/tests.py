@@ -220,13 +220,13 @@ class P6ScheduleImportTests(TestCase):
               "Activity % Complete", "Performance % Complete", "Schedule % Complete",
               "Budgeted Material Cost", "Earned Value Cost", "Schedule Variance Index"]
 
-    def _rows(self, project_performance_pct=None):
+    def _rows(self, project_performance_pct=None, project_schedule_pct=None):
         import datetime
 
         d = datetime.date
         return [
             ["Tower Project", None, 100, 10, 90, d(2026, 1, 1), d(2026, 6, 1), 0, None,
-             project_performance_pct, 0, 20000000, 0, 0],
+             project_performance_pct, project_schedule_pct, 20000000, 0, 0],
             # Key dates, not work: no cost, no duration. Belong in Milestones.
             ["  Milestones", None, 0, 0, 0, d(2026, 1, 1), d(2026, 3, 1), 5, None, 0, 0, 0, 0, 0],
             ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 5, 1, 1, 1, 0, 0, 0],
@@ -244,7 +244,7 @@ class P6ScheduleImportTests(TestCase):
             ["      MEP Works", None, 0, 0, 0, d(2026, 5, 1), d(2026, 6, 1), 9, None, 0, 0, 0, 0, 0],
         ]
 
-    def _workbook(self, drop_cost_columns=False, project_performance_pct=None):
+    def _workbook(self, drop_cost_columns=False, project_performance_pct=None, project_schedule_pct=None):
         import io
 
         import openpyxl
@@ -254,7 +254,7 @@ class P6ScheduleImportTests(TestCase):
         ws.title = "Sheet1"
         keep = slice(0, 11) if drop_cost_columns else slice(None)
         ws.append(self.HEADER[keep])
-        for row in self._rows(project_performance_pct):
+        for row in self._rows(project_performance_pct, project_schedule_pct):
             ws.append(row[keep])
         buf = io.BytesIO()
         wb.save(buf)
@@ -513,6 +513,46 @@ class P6ScheduleImportTests(TestCase):
         import_workbook(project, zone_wb, source="zones.xlsx")
         project.refresh_from_db()
         self.assertIsNone(project.imported_progress_percent)
+
+    def test_captures_the_files_own_planned_progress_alongside_actual(self):
+        """Performance % Complete is actual (earned value / budget); Schedule %
+        Complete is planned (time-based) -- a real P6 export states both for the
+        whole project, and both should be captured, not just actual."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(
+            project,
+            self._workbook(project_performance_pct=0.9, project_schedule_pct=0.95),
+            source="P6.xlsx",
+        )
+
+        self.assertEqual(result["planned_progress"], 95.0)
+        project.refresh_from_db()
+        self.assertEqual(float(project.imported_planned_progress_percent), 95.0)
+
+    def test_reimport_as_zone_tracker_clears_the_stated_planned_progress(self):
+        """Same reasoning as the actual-progress override: a zone tracker has no
+        Schedule % Complete, so a stale planned figure from a prior P6 import
+        must not silently outlive the tree it described."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(
+            project,
+            self._workbook(project_performance_pct=0.9, project_schedule_pct=0.95),
+            source="P6.xlsx",
+        )
+        project.refresh_from_db()
+        self.assertIsNotNone(project.imported_planned_progress_percent)
+
+        import_workbook(project, self._zone_tracker_workbook(), source="zones.xlsx")
+        project.refresh_from_db()
+        self.assertIsNone(project.imported_planned_progress_percent)
 
     def _zone_tracker_workbook(self):
         import io
