@@ -35,7 +35,7 @@ export interface ChatMessageRow {
 
 export interface AiProposal {
   valid: boolean;
-  action: "create_project" | "import_tree";
+  action: "create_project" | "import_tree" | "import_via_rule";
   summary: string;
   errors?: unknown;
   [key: string]: unknown;

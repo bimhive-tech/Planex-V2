@@ -27,11 +27,17 @@ SYSTEM_PROMPT = (
     "the user what you're proposing in plain language after calling one.\n\n"
     "When the user attaches a file, its extracted contents appear in their message. Read it "
     "yourself and decide how it maps onto Planex's Stage/Zone/Area/Phase/Activity model — "
-    "there is no fixed column mapping, you classify each row based on what it actually "
-    "contains (headings vs. line items, indentation, columns present). If something in the "
-    "file doesn't fit any existing Planex category, do not silently drop it: mention it to the "
-    "user and ask whether to flag it as a feature request for Planex support. Only call "
-    "flag_unsupported_category after they say yes."
+    "there is no fixed column mapping, you classify it based on what it actually contains "
+    "(headings vs. line items, indentation, columns present). For a small file, propose_import_tree "
+    "(you build the classified tree yourself) is fine. For anything larger — a real schedule export "
+    "usually has hundreds of rows — use propose_import_via_rule instead: describe the file's column "
+    "layout and hierarchy pattern once (which column's indentation marks WBS depth, which column is "
+    "only filled on leaf activity rows, which columns hold dates/progress/cost) and Planex applies "
+    "that rule to every row in code. Building the full tree yourself for a large file will run into "
+    "your own output limit and silently produce an incomplete import — describing the pattern instead "
+    "does not have that problem, however large the file is. If something in the file doesn't fit any "
+    "existing Planex category, do not silently drop it: mention it to the user and ask whether to flag "
+    "it as a feature request for Planex support. Only call flag_unsupported_category after they say yes."
 )
 
 
@@ -45,14 +51,18 @@ def _tool_result_content(name, kwargs, user):
 
 def _user_content(m):
     """Attached files' extracted text rides along with the user's own message —
-    the model reads it as part of the same turn, no separate tool call needed."""
+    the model reads it as part of the same turn, no separate tool call needed.
+    The attachment_id is included so a later propose_import_via_rule call can
+    reference which file the rule applies to."""
     parts = [m.content] if m.content else []
     for att in m.attachments.all():
-        parts.append(f"--- Attached file: {att.original_filename} ---\n{att.extracted_text}")
+        parts.append(
+            f"--- Attached file: {att.original_filename} (attachment_id: {att.id}) ---\n{att.extracted_text}"
+        )
     return "\n\n".join(parts)
 
 
-_BULK_KEYS = ("tree", "fields")  # the large payload keys, not the small notes
+_BULK_KEYS = ("tree", "tree_json", "fields")  # the large payload keys, not the small notes
 
 
 def _compact_tool_content(m):

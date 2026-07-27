@@ -16,8 +16,11 @@ from apps.projects.serializers import ProjectWriteSerializer
 from apps.projects.services import project_overall_progress
 from apps.reports.services import _breakdown, _duration, _planned_progress
 
+from .generic_schedule_import import build_tree_from_rule
+from .generic_schedule_import import summarize_tree as summarize_rule_tree
+from .generic_schedule_import import tree_from_json_safe, tree_to_json_safe
 from .import_tree import commit_tree, require_ai_import_permission, summarize_tree
-from .models import AiFeatureRequest
+from .models import AiFeatureRequest, ChatAttachment
 
 
 def _project_or_404(user, project_id):
@@ -140,6 +143,52 @@ def propose_import_tree(user, project_id, tree, unmapped=None, **_):
     }
 
 
+def propose_import_via_rule(user, project_id, attachment_id, rule, **_):
+    """For large tabular files: instead of the model re-emitting every row as
+    a classified tree (bounded by the model's own output-token limit, not
+    Planex's), it describes the file's column layout + hierarchy pattern
+    once, and this applies that rule to every row in ordinary Python code —
+    scales to files of any size, and produces exact, complete results the
+    same way the deterministic P6 importer already does, because it feeds
+    the SAME downstream pipeline (build_from_p6_schedule)."""
+    project = _project_or_404(user, project_id)
+    require_ai_import_permission(user, project)
+    try:
+        attachment = ChatAttachment.objects.get(
+            pk=attachment_id, message__session__company=user.company, message__session__user=user,
+        )
+    except (ChatAttachment.DoesNotExist, ValueError, TypeError):
+        return {"valid": False, "errors": "Attachment not found."}
+
+    import openpyxl
+
+    try:
+        wb = openpyxl.load_workbook(attachment.file, data_only=True, read_only=True)
+        try:
+            roots = build_tree_from_rule(wb, rule)
+        finally:
+            wb.close()
+    except Exception as exc:  # noqa: BLE001 — surfaced to the model as a validation error, not a crash
+        return {"valid": False, "errors": f"Couldn't apply that rule to the file: {exc}"}
+
+    if not roots:
+        return {"valid": False, "errors": "No rows matched that rule — double-check the column indices."}
+
+    counts = summarize_rule_tree(roots)
+    return {
+        "valid": True,
+        "action": "import_via_rule",
+        "project_id": str(project.id),
+        "tree_json": tree_to_json_safe(roots),
+        "counts": counts,
+        "summary": (
+            f"Import {counts['scopes']} scopes, {counts['activities']} activities, "
+            f"{counts['milestones']} milestones into \"{project.name}\" "
+            f"(replacing its current schedule), weighted by {counts['weighted_by']}"
+        ),
+    }
+
+
 # ── Commit — invoked by the confirm endpoint directly, never by the model ──
 
 def commit_proposal(user, proposal: dict):
@@ -155,6 +204,13 @@ def commit_proposal(user, proposal: dict):
         project = _project_or_404(user, proposal["project_id"])
         require_ai_import_permission(user, project)
         return commit_tree(project, proposal["tree"], replace=True)
+    if action == "import_via_rule":
+        from apps.projects.p6_schedule_import import build_from_p6_schedule
+
+        project = _project_or_404(user, proposal["project_id"])
+        require_ai_import_permission(user, project)
+        roots = tree_from_json_safe(proposal["tree_json"])
+        return build_from_p6_schedule(project, roots, replace=True, source="ai-import")
     raise ValueError(f"Unknown proposal action: {action!r}")
 
 
@@ -166,6 +222,7 @@ READ_TOOLS = {
 PROPOSE_TOOLS = {
     "propose_create_project": propose_create_project,
     "propose_import_tree": propose_import_tree,
+    "propose_import_via_rule": propose_import_via_rule,
 }
 ALL_TOOLS = {**READ_TOOLS, **PROPOSE_TOOLS}
 
@@ -235,10 +292,15 @@ TOOL_SCHEMAS = [
     {"type": "function", "function": {
         "name": "propose_import_tree",
         "description": "Propose importing a classified Stage/Zone/Area/Phase schedule tree you built "
-                        "from an uploaded file's contents into a project. This does NOT write anything "
-                        "yet — the user must confirm in the UI first, and it replaces the project's "
-                        "current schedule. Use `unmapped` for anything in the file you couldn't place "
-                        "in Planex's model (a category it doesn't support yet).",
+                        "yourself, node by node, from an uploaded file's contents into a project. Only "
+                        "use this for SMALL files (roughly under 50 rows) or ones with irregular "
+                        "structure that propose_import_via_rule's column-mapping approach can't "
+                        "describe. For a large regular table, use propose_import_via_rule instead — "
+                        "building this tree by hand for hundreds of rows will hit your own output "
+                        "limit and produce an incomplete result. This does NOT write anything yet — "
+                        "the user must confirm in the UI first, and it replaces the project's current "
+                        "schedule. Use `unmapped` for anything in the file you couldn't place in "
+                        "Planex's model (a category it doesn't support yet).",
         "parameters": {
             "type": "object",
             "properties": {
@@ -248,6 +310,49 @@ TOOL_SCHEMAS = [
                              "description": "Short descriptions of data you couldn't place anywhere."},
             },
             "required": ["project_id", "tree"],
+        },
+    }},
+    {"type": "function", "function": {
+        "name": "propose_import_via_rule",
+        "description": (
+            "Propose importing a LARGE tabular schedule file by describing its column layout and "
+            "hierarchy pattern ONCE, instead of re-typing every row yourself — Planex applies your "
+            "rule to every row in code, so it handles files of any size correctly and completely. "
+            "Use this whenever the file has a regular table where one column's text is indented with "
+            "leading spaces to show WBS/hierarchy depth (a heading row), and a separate column is "
+            "filled in ONLY on real leaf activity rows (blank on headings) — this is the common shape "
+            "for P6-style and MS-Project-style schedule exports. Prefer this over propose_import_tree "
+            "for anything more than ~50 rows. This does NOT write anything yet — the user must confirm "
+            "in the UI first, and it replaces the project's current schedule."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "attachment_id": {"type": "string", "description": "The attachment_id shown with the file in the conversation."},
+                "rule": {
+                    "type": "object",
+                    "description": "Describes the file's shape once; applied to every row in code.",
+                    "properties": {
+                        "sheet_name": {"type": "string", "description": "Sheet to read, if there's more than one."},
+                        "header_row_index": {"type": "integer", "description": "0-based row index of the column header row."},
+                        "columns": {
+                            "type": "object",
+                            "properties": {
+                                "hierarchy_text": {"type": "integer", "description": "0-based column index whose text's leading spaces encode WBS depth — also the code/ID text on leaf rows."},
+                                "name": {"type": "integer", "description": "0-based column index with the activity's own name/description — blank on heading rows, filled only on leaf activity rows."},
+                                "start": {"type": "integer", "description": "0-based column index of the start date, if present."},
+                                "finish": {"type": "integer", "description": "0-based column index of the finish date, if present."},
+                                "progress_percent": {"type": "integer", "description": "0-based column index of a 0-100 or 0-1 percent-complete value, if present."},
+                                "weight": {"type": "integer", "description": "0-based column index of whatever should drive roll-up weighting (cost, quantity, or duration), if present."},
+                            },
+                            "required": ["hierarchy_text", "name"],
+                        },
+                    },
+                    "required": ["columns"],
+                },
+            },
+            "required": ["project_id", "attachment_id", "rule"],
         },
     }},
 ]

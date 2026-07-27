@@ -20,6 +20,7 @@ from .tools import (
     list_projects,
     propose_create_project,
     propose_import_tree,
+    propose_import_via_rule,
 )
 
 STRONG_PW = "Str0ngPassw0rd!"
@@ -134,6 +135,96 @@ class ToolsTests(TestCase):
         req = AiFeatureRequest.objects.get(pk=result["id"])
         self.assertEqual(req.status, AiFeatureRequest.Status.PENDING)
         self.assertEqual(req.company, self.company)
+
+    def _attachment_with_workbook(self, rows, header=("Code", "Name", "Start", "Finish", "% Complete", "Cost")):
+        """A small generic (non-P6) tabular file: column 0 is indented WBS
+        text, column 1 is only filled on leaf activity rows -- the exact
+        shape propose_import_via_rule expects to be described by a rule."""
+        import io
+
+        import openpyxl
+        from django.core.files.base import ContentFile
+
+        from .models import ChatAttachment
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(header)
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        session = ChatSession.objects.create(company=self.company, user=self.user)
+        msg = ChatMessage.objects.create(session=session, role=ChatMessage.Role.USER, content="import this")
+        attachment = ChatAttachment.objects.create(
+            message=msg, original_filename="generic.xlsx", content_type="application/xlsx",
+            size_bytes=len(buf.getvalue()), extracted_text="",
+        )
+        attachment.file.save("generic.xlsx", ContentFile(buf.getvalue()), save=True)
+        return attachment
+
+    def _generic_rows(self):
+        """Two top-level stages, not one -- a lone top-level heading with no
+        activities of its own gets unwrapped as if it were a P6-style
+        project-title wrapper row (correct reused behavior for a file that
+        really is shaped that way; just not what a two-branch fixture is
+        testing here)."""
+        import datetime as dt
+
+        d = dt.date
+        return [
+            ["Stage A", None, None, None, None, None],
+            ["  Zone A", None, None, None, None, None],
+            ["A.01", "Foundation", d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000],
+            ["A.02", "Framing", d(2026, 1, 11), d(2026, 1, 20), 0, 2000],
+            ["Stage B", None, None, None, None, None],
+            ["  Zone B", None, None, None, None, None],
+            ["B.01", "Site clearance", d(2026, 2, 1), d(2026, 2, 5), 1, 500],
+        ]
+
+    def test_propose_import_via_rule_does_not_write_until_confirmed(self):
+        attachment = self._attachment_with_workbook(self._generic_rows())
+        rule = {"header_row_index": 0,
+                "columns": {"hierarchy_text": 0, "name": 1, "start": 2, "finish": 3,
+                            "progress_percent": 4, "weight": 5}}
+
+        proposal = propose_import_via_rule(
+            self.user, project_id=str(self.project.id), attachment_id=str(attachment.id), rule=rule,
+        )
+        self.assertTrue(proposal["valid"], proposal.get("errors"))
+        self.assertEqual(proposal["counts"], {"scopes": 4, "activities": 3, "milestones": 0, "weighted_by": "budget"})
+        self.assertEqual(ProjectScope.objects.filter(project=self.project).count(), 0)  # not written yet
+
+        result = commit_proposal(self.user, proposal)
+        self.assertEqual(result["activities"], 3)
+        self.assertEqual(ProjectScope.objects.filter(project=self.project).count(), 4)
+        zone = ProjectScope.objects.get(project=self.project, name="Zone A")
+        self.assertEqual(set(zone.activities.values_list("name", flat=True)), {"Foundation", "Framing"})
+
+    def test_propose_import_via_rule_rejects_bad_column_indices(self):
+        attachment = self._attachment_with_workbook(self._generic_rows())
+        rule = {"header_row_index": 0, "columns": {"hierarchy_text": 99, "name": 1}}
+        proposal = propose_import_via_rule(
+            self.user, project_id=str(self.project.id), attachment_id=str(attachment.id), rule=rule,
+        )
+        self.assertFalse(proposal["valid"])
+
+    def test_propose_import_via_rule_rejects_an_attachment_from_another_user(self):
+        # Same company and same permission level as self.user -- the only
+        # difference is which user's session the attachment belongs to, so
+        # this isolates attachment scoping from a plain permission check.
+        admin_role = Role.objects.get(company=self.company, name=SeededRole.COMPANY_ADMIN)
+        other_user = User.objects.create_user(email="other@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=other_user, role=admin_role)
+
+        attachment = self._attachment_with_workbook(self._generic_rows())
+        rule = {"header_row_index": 0, "columns": {"hierarchy_text": 0, "name": 1}}
+        result = propose_import_via_rule(
+            other_user, project_id=str(self.project.id), attachment_id=str(attachment.id), rule=rule,
+        )
+        self.assertFalse(result["valid"])
 
 
 class ProposalPersistenceTests(TestCase):
