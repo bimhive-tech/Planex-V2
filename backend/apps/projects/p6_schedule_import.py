@@ -28,6 +28,7 @@ import datetime
 import itertools
 import re
 from collections import defaultdict
+from decimal import Decimal
 
 import openpyxl
 
@@ -72,6 +73,14 @@ def _to_pct(v):
         return 0.0
     pct = v * 100 if v <= 1.0001 else v
     return max(0.0, min(100.0, round(pct, 2)))
+
+
+def _to_pct_optional(v):
+    """Like _to_pct, but None (not 0.0) when there's no real value — needed to
+    tell "this WBS row has no Performance % Complete" apart from "it's 0%"."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    return _to_pct(v)
 
 
 def _num(row, col):
@@ -133,6 +142,7 @@ def parse_p6_schedule_sheets(wb):
         float_c = cols.get("total float")
         cost_c = cols.get("budgeted material cost")
         ev_c = cols.get("earned value cost")
+        perf_c = cols.get("performance % complete")
 
         roots, stack = [], []  # stack of (depth, node)
         for row in rows:
@@ -158,8 +168,9 @@ def parse_p6_schedule_sheets(wb):
                 continue
 
             depth = _leading_spaces(a_str)
+            perf = row[perf_c] if perf_c is not None and perf_c < len(row) else None
             node = {"name": a_str.strip()[:180], "children": [], "activities": [],
-                    "start": start, "finish": finish}
+                    "start": start, "finish": finish, "pct": _to_pct_optional(perf)}
             while stack and stack[-1][0] >= depth:
                 stack.pop()
             (stack[-1][1]["children"] if stack else roots).append(node)
@@ -291,6 +302,12 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     if replace:
         project.scopes.all().delete()
 
+    # The project-title row (before it's unwrapped below) carries the file's
+    # OWN stated Performance % Complete — earned value / budgeted cost, the
+    # same thing our cost weighting approximates. Prefer it over our own
+    # weighted average: it's what the source schedule itself reports.
+    project_pct = roots[0].get("pct") if len(roots) == 1 else None
+
     milestone_tasks = _extract_milestones(roots)
     _prune_empty(roots)
     entries = _entry_nodes(roots)
@@ -378,6 +395,13 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
 
     milestones = _record_milestones(project, milestone_tasks)
 
+    project.imported_progress_percent = Decimal(str(project_pct)) if project_pct is not None else None
+    project.save(update_fields=["imported_progress_percent", "updated_at"])
+
+    # _save_snapshot below calls project_overall_progress(project) with no as-of
+    # override, so it picks up imported_progress_percent (just set above) as the
+    # "current" figure — the report's progress history now agrees with the
+    # source schedule's own number instead of our approximation of it.
     snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
     _save_snapshot(project, date=snap_date, source=source)
 
@@ -389,6 +413,7 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         "milestones": milestones,
         "activities": len(activities),
         "overall_progress": project_overall_progress(project),
+        "overall_progress_source": "imported" if project_pct is not None else "computed",
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",
         "weighted_by": weight_key or "equal",  # surfaced so the UI can say how % was derived

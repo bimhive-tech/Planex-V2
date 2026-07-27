@@ -220,12 +220,13 @@ class P6ScheduleImportTests(TestCase):
               "Activity % Complete", "Performance % Complete", "Schedule % Complete",
               "Budgeted Material Cost", "Earned Value Cost", "Schedule Variance Index"]
 
-    def _rows(self):
+    def _rows(self, project_performance_pct=None):
         import datetime
 
         d = datetime.date
         return [
-            ["Tower Project", None, 100, 10, 90, d(2026, 1, 1), d(2026, 6, 1), 0, None, 0, 0, 20000000, 0, 0],
+            ["Tower Project", None, 100, 10, 90, d(2026, 1, 1), d(2026, 6, 1), 0, None,
+             project_performance_pct, 0, 20000000, 0, 0],
             # Key dates, not work: no cost, no duration. Belong in Milestones.
             ["  Milestones", None, 0, 0, 0, d(2026, 1, 1), d(2026, 3, 1), 5, None, 0, 0, 0, 0, 0],
             ["MS.01", "Kickoff", 0, 0, 0, "1-Jan-26 A", None, 5, 1, 1, 1, 0, 0, 0],
@@ -243,7 +244,7 @@ class P6ScheduleImportTests(TestCase):
             ["      MEP Works", None, 0, 0, 0, d(2026, 5, 1), d(2026, 6, 1), 9, None, 0, 0, 0, 0, 0],
         ]
 
-    def _workbook(self, drop_cost_columns=False):
+    def _workbook(self, drop_cost_columns=False, project_performance_pct=None):
         import io
 
         import openpyxl
@@ -253,7 +254,7 @@ class P6ScheduleImportTests(TestCase):
         ws.title = "Sheet1"
         keep = slice(0, 11) if drop_cost_columns else slice(None)
         ws.append(self.HEADER[keep])
-        for row in self._rows():
+        for row in self._rows(project_performance_pct):
             ws.append(row[keep])
         buf = io.BytesIO()
         wb.save(buf)
@@ -445,6 +446,88 @@ class P6ScheduleImportTests(TestCase):
         Activity.objects.filter(project=project).update(budgeted_cost=None, weight=1)
         finishes = ProjectScope.objects.get(project=project, name="Finishes")
         self.assertEqual(scope_progress_map(project)[str(finishes.id)], 100.0)
+
+    def test_uses_the_files_own_overall_progress_when_present(self):
+        """A real P6 export states its own Performance % Complete for the whole
+        project. Prefer that over our weighted approximation of it — deliberately
+        picking a value (90%) that disagrees with what cost-weighting would say
+        (52.5%) proves the override wins rather than coincidentally matching."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(project_performance_pct=0.9), source="P6.xlsx")
+
+        self.assertEqual(result["overall_progress"], 90.0)
+        self.assertEqual(result["overall_progress_source"], "imported")
+        project.refresh_from_db()
+        self.assertEqual(float(project.imported_progress_percent), 90.0)
+
+    def test_overall_progress_falls_back_to_computed_without_a_stated_figure(self):
+        """When the file has no project-level Performance % Complete (this
+        fixture's default), Planex computes its own weighted figure exactly as
+        before — the override is opt-in per file, not assumed."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        self.assertEqual(result["overall_progress"], 52.5)
+        self.assertEqual(result["overall_progress_source"], "computed")
+        project.refresh_from_db()
+        self.assertIsNone(project.imported_progress_percent)
+
+    def test_as_of_view_ignores_the_stated_overall_progress(self):
+        """The stated figure is a single point in time (import time) -- an
+        as-of/historical report must still compute live, not report import-day's
+        number for an arbitrary past or future date."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import project_overall_progress
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(project_performance_pct=0.9), source="P6.xlsx")
+
+        activity = project.activities.first()
+        overridden = project_overall_progress(project, {str(activity.id): 0.0})
+        self.assertNotEqual(overridden, 90.0)
+
+    def test_reimport_as_zone_tracker_clears_the_stated_overall_progress(self):
+        """Switching a project from a real P6 export to a zone-tracker Excel
+        import must drop the old figure -- otherwise it silently outlives the
+        schedule it described, no longer matching anything in the new tree."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(project_performance_pct=0.9), source="P6.xlsx")
+        project.refresh_from_db()
+        self.assertIsNotNone(project.imported_progress_percent)
+
+        zone_wb = self._zone_tracker_workbook()
+        import_workbook(project, zone_wb, source="zones.xlsx")
+        project.refresh_from_db()
+        self.assertIsNone(project.imported_progress_percent)
+
+    def _zone_tracker_workbook(self):
+        import io
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "ZONE (A)"
+        ws.append([None, None, "(A1)", "(A2)"])
+        ws.append([2.0, "Task1", 1, 0.5])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
 
     def test_export_refreshes_pct_complete_by_code(self):
         from apps.accounts.models import Company

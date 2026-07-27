@@ -36,7 +36,15 @@ def project_overall_progress(project, progress=None) -> float:
     across the project's activities. 0 when there are none. When `progress`
     (an activity_id->% map, e.g. as-of-date) is given, the DB aggregate is
     computed once and then *corrected* only for the few overridden activities —
-    never iterate the whole table (projects hold tens of thousands of rows)."""
+    never iterate the whole table (projects hold tens of thousands of rows).
+
+    A "current" call (no as-of override) defers to imported_progress_percent
+    when the project has one — a real P6 schedule states its own overall %,
+    and that's a better number than our weighted approximation of it. An
+    as-of/historical call always computes live: the imported figure is a single
+    point in time (import time), not meaningful for an arbitrary past date."""
+    if progress is None and project.imported_progress_percent is not None:
+        return float(project.imported_progress_percent)
     agg = project.activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
     wsum = float(agg["wsum"] or 0)
     if not wsum:
