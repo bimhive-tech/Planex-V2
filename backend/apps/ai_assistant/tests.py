@@ -189,6 +189,44 @@ class AgentLoopTests(TestCase):
         # No proposal event for a read tool.
         self.assertNotIn("proposal", [e["type"] for e in events])
 
+    def test_propose_tool_result_is_compacted_before_replay_but_full_in_db(self):
+        """A propose_import_tree result can carry an entire schedule tree. The
+        model already generated that tree once (in its own tool_calls
+        arguments); echoing it back in full as the tool result would double
+        an already-large payload on every future round. The DB keeps the full
+        result (the confirm endpoint needs it) — only what's replayed to the
+        model gets trimmed."""
+        big_tree = [{"name": "Stage", "scope_type": "stage",
+                     "activities": [{"name": f"Task {i}", "progress_percent": 0, "weight": 1} for i in range(50)]}]
+        args = json.dumps({"project_id": str(self.project.id), "tree": big_tree})
+        tool_call = _fake_tool_call_delta(0, call_id="call_1", name="propose_import_tree", arguments=args)
+
+        captured_messages = []
+
+        def fake_create(**kwargs):
+            captured_messages.append(kwargs["messages"])
+            return next(calls)
+
+        calls = iter([
+            [_fake_chunk(tool_calls=[tool_call]), _fake_chunk(finish_reason="tool_calls")],
+            [_fake_chunk(content="Want me to import this?"), _fake_chunk(finish_reason="stop")],
+        ])
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
+        with patch("apps.ai_assistant.services.get_client", return_value=fake_client), \
+             patch("apps.ai_assistant.services.get_model", return_value="gpt-4o"):
+            list("".join(stream_agent_reply(self.session, self.user)))
+
+        # Second call's replayed tool message must not carry the tree.
+        second_call_tool_msg = next(m for m in captured_messages[1] if m.get("role") == "tool")
+        replayed = json.loads(second_call_tool_msg["content"])
+        self.assertNotIn("tree", replayed)
+        self.assertTrue(replayed["valid"])
+
+        # But the persisted DB row still has it in full (confirm needs it).
+        db_tool_msg = self.session.messages.get(tool_name="propose_import_tree")
+        stored = json.loads(db_tool_msg.content)
+        self.assertEqual(len(stored["tree"][0]["activities"]), 50)
+
     def test_missing_api_key_yields_a_clean_error_event(self):
         from .openai_client import AiNotConfigured
 

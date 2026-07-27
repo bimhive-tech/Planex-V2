@@ -13,7 +13,11 @@ def get_client() -> OpenAI:
 
     if not settings.OPENAI_API_KEY:
         raise AiNotConfigured("OPENAI_API_KEY is not set.")
-    return OpenAI(api_key=settings.OPENAI_API_KEY)
+    # A bounded timeout matters more here than usual: a very large tool
+    # result (e.g. a whole imported schedule tree) replayed in a big
+    # conversation can make a call slow enough to otherwise hang the request
+    # indefinitely instead of failing with a clear, catchable error.
+    return OpenAI(api_key=settings.OPENAI_API_KEY, timeout=90.0, max_retries=1)
 
 
 def get_model() -> str:

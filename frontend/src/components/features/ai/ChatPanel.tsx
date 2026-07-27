@@ -69,19 +69,23 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
     try {
       for await (const event of streamPost<AiStreamEvent>(`/ai/sessions/${id}/messages/send/`, form)) {
         if (event.type === "delta") {
+          // Pure updater — React 18 Strict Mode (on by default in `next dev`)
+          // invokes state updaters twice to catch impure ones. The previous
+          // version mutated `last.content` in place, so the double-invoke
+          // appended every delta twice, doubling every word in the reply.
           setMessages((prev) => {
+            const idx = prev.length - 1;
+            if (prev[idx]?.id !== "streaming") return prev;
             const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.id === "streaming") last.content += event.content;
+            next[idx] = { ...next[idx], content: next[idx].content + event.content };
             return next;
           });
         } else if (event.type === "proposal") {
           setMessages((prev) => {
+            const idx = prev.length - 1;
+            if (prev[idx]?.id !== "streaming") return prev;
             const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.id === "streaming") {
-              last.pendingProposal = { messageId: event.message_id, proposal: event.proposal };
-            }
+            next[idx] = { ...next[idx], pendingProposal: { messageId: event.message_id, proposal: event.proposal } };
             return next;
           });
         } else if (event.type === "error") {
@@ -102,6 +106,9 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
       if (!sessionId && id) onSessionCreated(id);
     }
   }
+
+  const placeholder = messages.find((m) => m.id === "streaming");
+  const isThinking = streaming && !placeholder?.content.trim() && !placeholder?.pendingProposal;
 
   return (
     <div className={styles.panel}>
@@ -137,6 +144,13 @@ export function ChatPanel({ sessionId, createModel, onSessionCreated }: Props) {
                 )}
               </div>
             ))}
+          {isThinking && (
+            <div className={`${styles.bubble} ${styles.bubbleAssistant} ${styles.thinking}`}>
+              <span className={styles.dot} />
+              <span className={styles.dot} />
+              <span className={styles.dot} />
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       </StateView>

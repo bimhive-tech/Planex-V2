@@ -4,10 +4,13 @@ text deltas out as they arrive. Runs synchronously in the request cycle (held
 open via streaming) — matches how the rest of this backend already handles
 even heavy work (see apps/projects/imports.py), no new job infrastructure."""
 import json
+import logging
 
 from .models import ChatMessage
 from .openai_client import AiNotConfigured, get_client, get_model
 from .tools import ALL_TOOLS, PROPOSE_TOOLS, TOOL_SCHEMAS
+
+logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 6
 
@@ -49,6 +52,25 @@ def _user_content(m):
     return "\n\n".join(parts)
 
 
+def _compact_tool_content(m):
+    """A propose_* tool's result can carry an entire schedule tree — the model
+    already generated that tree itself (it's sitting in its own preceding
+    tool_calls arguments, which still gets replayed in full every round), so
+    echoing the whole thing back a second time as the tool's result just
+    doubles an already-large payload and compounds on every later round in
+    the same conversation. The full result still gets persisted as-is (the
+    confirm endpoint needs it) — this only affects what's replayed to the
+    model on subsequent calls."""
+    if m.tool_name not in PROPOSE_TOOLS:
+        return m.content
+    try:
+        data = json.loads(m.content)
+    except json.JSONDecodeError:
+        return m.content
+    compact = {k: v for k, v in data.items() if k not in ("tree", "fields", "unmapped")}
+    return json.dumps(compact)
+
+
 def _to_openai_messages(session):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in session.messages.order_by("created_at"):
@@ -59,7 +81,7 @@ def _to_openai_messages(session):
                 "tool_calls": m.tool_calls,
             })
         elif m.role == ChatMessage.Role.TOOL:
-            messages.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content})
+            messages.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": _compact_tool_content(m)})
         elif m.role == ChatMessage.Role.USER:
             messages.append({"role": "user", "content": _user_content(m)})
         else:
@@ -113,6 +135,7 @@ def stream_agent_reply(session, user):
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
         except Exception as exc:  # noqa: BLE001 — network/API errors surfaced, not a crash
+            logger.exception("AI agent loop failed for session %s", session.id)
             yield sse({"type": "error", "message": str(exc)})
             return
 
