@@ -1215,12 +1215,18 @@ class FinanceSubmittalApiTests(TestCase):
         """A miniature version of the reference layout: one row per BOQ item,
         four extract column-groups (رقم المستخلص + اجمالي الأعمال), the third
         one deliberately a cumulative DROP (a stand-in for the real file's
-        broken-formula columns) to exercise the monotonicity guard."""
+        broken-formula columns) to exercise the monotonicity guard. Each
+        "رقم المستخلص" column repeats a real extract number down every row —
+        exactly like the reference file — since that's the invoice's actual
+        name; the "حتى <date>" header is only where the date comes from."""
         def build(ws):
             ws["B1"], ws["D1"] = "حتى 01 يناير - 2026", "حتى 01 فبراير - 2026"
             ws["F1"], ws["H1"] = "حتى 01 مارس - 2026", "حتى 01 ابريل - 2026"
-            for col in ("B", "D", "F", "H"):
+            for col, number in (("B", "مستخلص جاري (8)"), ("D", "مستخلص جاري (9)"),
+                               ("F", "مستخلص جاري (10)"), ("H", "مستخلص جاري (11)")):
                 ws[f"{col}2"] = "رقم المستخلص"
+                ws[f"{col}3"] = number
+                ws[f"{col}4"] = number
             for col in ("C", "E", "G", "I"):
                 ws[f"{col}2"] = "اجمالي الأعمال"
             ws["C3"], ws["E3"], ws["G3"], ws["I3"] = 100, 250, 10, 200
@@ -1237,8 +1243,10 @@ class FinanceSubmittalApiTests(TestCase):
 
         invoices = self.client.get(f"/api/projects/{self.project.id}/invoices/").json()
         invoices.sort(key=lambda i: i["sort_order"])
+        # Named after the real extract number (مستخلص جاري), not the "حتى <date>"
+        # column heading -- the (10) group is the one dropped by the guard.
         self.assertEqual([i["name"] for i in invoices], [
-            "حتى 01 يناير - 2026", "حتى 01 فبراير - 2026", "حتى 01 ابريل - 2026",
+            "مستخلص جاري (8)", "مستخلص جاري (9)", "مستخلص جاري (11)",
         ])
         # 150 (from 0), 150 (300-150), 80 (380-300) -- the dropped 20-total column
         # is skipped entirely rather than used as a delta boundary.

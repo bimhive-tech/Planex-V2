@@ -257,6 +257,10 @@ def _locate_extract_header(ws):
     return None
 
 
+_EXTRACT_NUMBER_LABEL = "رقم المستخلص"
+_PLACEHOLDER_VALUES = {"-", "—", ""}
+
+
 def parse_invoice_extracts(upload):
     """Return ([{name, date, value}], skipped) — one dict per submitted extract
     in chronological order, value already converted from cumulative to the
@@ -272,25 +276,36 @@ def parse_invoice_extracts(upload):
             group_cells = [c.value for c in next(ws.iter_rows(min_row=group_row, max_row=group_row))]
             sub_cells = [c.value for c in next(ws.iter_rows(min_row=sub_row, max_row=sub_row))]
 
-            # Forward-fill the group label across its merged span, keeping only
-            # the "اجمالي الأعمال" sub-column of each group — one per extract.
+            # Forward-fill the group label across its merged span, keeping the
+            # "اجمالي الأعمال" sub-column of each group — one per extract — and,
+            # when present, the "رقم المستخلص" column immediately to its left.
+            # That extract-number cell (e.g. "مستخلص جاري (8)") is the real,
+            # human-recognizable name of the invoice; the date label above it is
+            # just the column heading and reads badly as a name.
             periods, label = [], ""
             for i, v in enumerate(group_cells):
                 if isinstance(v, str) and v.strip():
                     label = v.strip()
                 if i < len(sub_cells) and isinstance(sub_cells[i], str) \
                         and sub_cells[i].strip() == _TOTAL_WORKS_LABEL and label:
-                    periods.append((i, label))
+                    number_col = i - 1 if i >= 1 and isinstance(sub_cells[i - 1], str) \
+                        and sub_cells[i - 1].strip() == _EXTRACT_NUMBER_LABEL else None
+                    periods.append((i, number_col, label))
             if not periods:
                 continue
 
             sums = defaultdict(float)
+            numbers = {}  # value_col -> first real "رقم المستخلص" text seen
             for row in ws.iter_rows(min_row=sub_row + 1, values_only=True):
-                for idx, _ in periods:
+                for idx, number_col, _ in periods:
                     if idx < len(row):
                         v = row[idx]
                         if isinstance(v, (int, float)) and not isinstance(v, bool):
                             sums[idx] += v
+                    if number_col is not None and idx not in numbers and number_col < len(row):
+                        n = row[number_col]
+                        if isinstance(n, str) and n.strip() and n.strip() not in _PLACEHOLDER_VALUES:
+                            numbers[idx] = n.strip()
 
             # Column order in the sheet is NOT reliable as extract order — the
             # reference file has a late column physically placed after ones
@@ -300,8 +315,8 @@ def parse_invoice_extracts(upload):
             # nonsense: a "delta" between two unrelated points in time. Sort by
             # the parsed date first — column position only breaks ties (kept
             # stable) when two extracts share one date.
-            dated = [(idx, label, _parse_extract_date(label), sums.get(idx, 0.0))
-                    for idx, label in periods]
+            dated = [(idx, numbers.get(idx, label), _parse_extract_date(label), sums.get(idx, 0.0))
+                    for idx, _, label in periods]
             dated.sort(key=lambda t: (t[2] is None, t[2] or datetime.date.max, t[0]))
 
             # A cumulative-to-date total must not go backwards. It does, hard, in
@@ -312,17 +327,17 @@ def parse_invoice_extracts(upload):
             # computed from it is unreliable: drop it rather than book a
             # fabricated invoice, and keep comparing later columns against the
             # last column that *did* make sense.
-            seen = defaultdict(int)  # de-dupes a repeated date label into "(2)", "(3)"...
+            seen = defaultdict(int)  # de-dupes a repeated extract name into "(2)", "(3)"...
             out, last_good = [], 0.0
             skipped = 0
-            for idx, label, date, cumulative in dated:
+            for idx, name, date, cumulative in dated:
                 if cumulative < last_good:
                     skipped += 1
                     continue
-                seen[label] += 1
-                name = label if seen[label] == 1 else f"{label} ({seen[label]})"
+                seen[name] += 1
+                display = name if seen[name] == 1 else f"{name} ({seen[name]})"
                 out.append({
-                    "name": name[:200], "date": date,
+                    "name": display[:200], "date": date,
                     "value": round(cumulative - last_good, 2),
                 })
                 last_good = cumulative
