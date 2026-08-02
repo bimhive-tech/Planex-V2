@@ -258,6 +258,7 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
     # Both read-only probes share ONE open: on a 20MB+ tracker openpyxl spends
     # ~26s just opening the file, so probing formats with an open apiece is the
     # dominant cost of an import.
+    from .p6_id_schedule_import import parse_id_schedule_sheets
     from .p6_schedule_import import build_from_p6_schedule, parse_p6_schedule_sheets
     try:
         file_obj.seek(0)
@@ -265,18 +266,26 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
         pass
     wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
     try:
-        # The real P6 schedule export (Activity ID/Name/Start/Finish/% Complete,
-        # WBS via indentation) is the standard template going forward — probed
-        # first since it never looks like a zone matrix and would otherwise
-        # misdetect as one.
-        schedule_roots = parse_p6_schedule_sheets(wb)
+        # Newer exports carry the WBS path as a segmented Activity ID (see
+        # p6_id_schedule_import) instead of leading-space indentation — tried
+        # first since its detection is stricter (samples the ID column's own
+        # values) and would never accidentally match a leading-space file.
+        schedule_roots = parse_id_schedule_sheets(wb)
+        is_segmented_id = bool(schedule_roots)
+        if not schedule_roots:
+            # The real P6 schedule export (Activity ID/Name/Start/Finish/%
+            # Complete, WBS via indentation) is the standard template going
+            # forward — probed next since it never looks like a zone matrix
+            # and would otherwise misdetect as one.
+            schedule_roots = parse_p6_schedule_sheets(wb)
         parsed = {} if schedule_roots else parse_workbook_sheets(wb)
     finally:
         wb.close()
 
     if schedule_roots:
         return build_from_p6_schedule(project, schedule_roots, replace=replace,
-                                      snapshot_date=snapshot_date, source=source)
+                                      snapshot_date=snapshot_date, source=source,
+                                      unwrap_single_root=not is_segmented_id)
 
     if not parsed:
         # No zone-matrix sheets — fall back to the legacy 'FOR (P6)' sheet if the

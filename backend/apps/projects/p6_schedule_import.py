@@ -287,14 +287,23 @@ def _record_milestones(project, tasks):
     return len(tasks)
 
 
-def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, source=""):
+def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, source="",
+                          unwrap_single_root=True):
     """Create scopes + activities from a parsed P6 schedule tree.
 
     Scope type comes from a node's height above the activities, so the shape
     matches the hierarchy the rest of the app expects — Stage > Zone > Area >
     Phase > Activity — regardless of how deep a given WBS branch runs. The
     Phase level is the one that directly holds work, and Zone is what the
-    Excel-style grid view pivots on."""
+    Excel-style grid view pivots on.
+
+    `unwrap_single_root`: the leading-space scheme's lone top row just repeats
+    the project's own name (see _entry_nodes) and should be dropped. The
+    segmented-ID scheme (p6_id_schedule_import) has no such wrapper — its
+    "CON" segment is a real Stage level that can legitimately be the file's
+    only root — so its caller passes False; unwrapping there would silently
+    delete the whole Stage level whenever a file has just one Construction
+    code, which is the common case."""
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
@@ -310,12 +319,12 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     # same thing our cost weighting approximates) and planned (Schedule %
     # Complete — time-based) progress. Prefer both over our own formulas: they're
     # what the source schedule itself reports.
-    project_pct = roots[0].get("pct") if len(roots) == 1 else None
-    project_schedule_pct = roots[0].get("schedule_pct") if len(roots) == 1 else None
+    project_pct = roots[0].get("pct") if len(roots) == 1 and unwrap_single_root else None
+    project_schedule_pct = roots[0].get("schedule_pct") if len(roots) == 1 and unwrap_single_root else None
 
     milestone_tasks = _extract_milestones(roots)
     _prune_empty(roots)
-    entries = _entry_nodes(roots)
+    entries = _entry_nodes(roots) if unwrap_single_root else roots
     weight_key = _weight_key(roots)
 
     scopes_by_depth = defaultdict(list)
