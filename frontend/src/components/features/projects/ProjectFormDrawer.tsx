@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { api, ApiError } from "@/lib/api";
-import { PRIORITIES, PROJECT_TYPES } from "@/lib/projectTypes";
+import { useCurrencies, useProjectPriorities, useProjectTypes } from "@/hooks/useMasterData";
 import type { ProjectDetail } from "@/types/project";
 import styles from "./projectForm.module.css";
 
@@ -34,9 +34,6 @@ const FIELDS = [
 const blank = (): Form => {
   const f: Form = {};
   FIELDS.forEach((k) => (f[k] = ""));
-  f.project_type = "commercial";
-  f.priority = "medium";
-  f.currency = "AED";
   return f;
 };
 
@@ -46,6 +43,32 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: typesData } = useProjectTypes();
+  const { data: prioritiesData } = useProjectPriorities();
+  const { data: currenciesData } = useCurrencies();
+  const typeOptions = (typesData?.results ?? []).map((t) => ({ value: t.name, label: t.name }));
+  const priorityOptions = (prioritiesData?.results ?? []).map((p) => ({ value: p.name, label: p.name }));
+  const currencyOptions = (currenciesData?.results ?? [])
+    .map((c) => ({ value: c.code, label: `${c.code} — ${c.name}` }));
+
+  // A brand-new project has no stored value yet — default it to this
+  // company's own first option (Master Data is company-editable, so there's
+  // no longer a single hardcoded default that's always valid) once each list
+  // has loaded, without clobbering a value the user already picked.
+  useEffect(() => {
+    if (isEdit || !open) return;
+    if (!form.project_type && typeOptions.length) setForm((f) => ({ ...f, project_type: typeOptions[0].value }));
+  }, [isEdit, open, typeOptions, form.project_type]);
+  useEffect(() => {
+    if (isEdit || !open) return;
+    if (!form.priority && priorityOptions.length) setForm((f) => ({ ...f, priority: priorityOptions[0].value }));
+  }, [isEdit, open, priorityOptions, form.priority]);
+  useEffect(() => {
+    if (isEdit || !open || form.currency || !currencyOptions.length) return;
+    const preferred = currenciesData?.results.find((c) => c.is_default)?.code ?? currencyOptions[0].value;
+    setForm((f) => ({ ...f, currency: preferred }));
+  }, [isEdit, open, currencyOptions, currenciesData, form.currency]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +108,9 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
       const saved = isEdit
         ? await api.patch<ProjectDetail>(`/projects/${projectId}/`, payload)
         : await api.post<ProjectDetail>("/projects/", payload);
+      // The drawer doesn't unmount on close (only `open` toggles), so without
+      // this the *next* time it opens still shows "Saving…" stuck from here.
+      setSubmitting(false);
       onSaved(saved);
       onClose();
     } catch (err) {
@@ -114,14 +140,18 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Location" name="location" value={form.location} onChange={set("location")} />
         </div>
         <div className={styles.row2}>
-          <Select label="Type" name="project_type" options={[...PROJECT_TYPES]}
+          <Select label="Type" name="project_type"
+            options={typeOptions.length ? typeOptions : [{ value: form.project_type, label: "Loading…" }]}
             value={form.project_type} onChange={set("project_type")} />
-          <Select label="Priority" name="priority" options={[...PRIORITIES]}
+          <Select label="Priority" name="priority"
+            options={priorityOptions.length ? priorityOptions : [{ value: form.priority, label: "Loading…" }]}
             value={form.priority} onChange={set("priority")} />
         </div>
         <div className={styles.row2}>
           <Input label="Budget" name="budget" type="number" step="0.01" value={form.budget} onChange={set("budget")} />
-          <Input label="Currency" name="currency" value={form.currency} onChange={set("currency")} />
+          <Select label="Currency" name="currency"
+            options={currencyOptions.length ? currencyOptions : [{ value: form.currency, label: "Loading…" }]}
+            value={form.currency} onChange={set("currency")} />
         </div>
         <div className={styles.row2}>
           <Input label="Advance payment" name="advance_payment" type="number" step="0.01"

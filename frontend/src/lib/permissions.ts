@@ -6,6 +6,7 @@ export const Permission = {
   MANAGE_USERS: "manage_users",
   MANAGE_ROLES: "manage_roles",
   MANAGE_DEPARTMENTS: "manage_departments",
+  MANAGE_MASTER_DATA: "manage_master_data",
   MANAGE_PROJECTS: "manage_projects",
   VIEW_PROJECTS: "view_projects",
   VIEW_SCHEDULE: "view_schedule",

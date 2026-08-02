@@ -50,6 +50,30 @@ export interface RoleRow {
   created_at: string;
 }
 
+export interface CurrencyRow {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProjectTypeRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProjectPriorityRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface PermissionItem {
   key: string;
   label: string;

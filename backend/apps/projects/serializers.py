@@ -78,7 +78,20 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
 
 
 class ProjectWriteSerializer(serializers.ModelSerializer):
-    """Create/update. `company` is set server-side; name is unique per company."""
+    """Create/update. `company` is set server-side; name is unique per company.
+
+    project_type/priority are declared explicitly as plain CharFields, not left
+    to ModelSerializer's auto-generation: the model field still carries
+    `choices=` (so existing rows keep working with get_FOO_display()), but
+    that would make DRF build a ChoiceField restricted to just those 4/3
+    legacy values — rejecting any custom type/priority a company adds via
+    Settings -> Master Data. Currency already has no `choices=`, so it needs
+    no override."""
+
+    project_type = serializers.CharField(max_length=40)
+    # required=False to match the auto-generated field it replaces: the model
+    # default (Priority.MEDIUM) only applies when the key is absent entirely.
+    priority = serializers.CharField(max_length=10, required=False)
 
     class Meta:
         model = Project

@@ -18,6 +18,7 @@ class Permission(models.TextChoices):
     MANAGE_USERS = "manage_users", "Manage users"
     MANAGE_ROLES = "manage_roles", "Manage roles"
     MANAGE_DEPARTMENTS = "manage_departments", "Manage departments"
+    MANAGE_MASTER_DATA = "manage_master_data", "Manage master data"
 
     # Project domain (used by later modules; defined now so roles are stable).
     MANAGE_PROJECTS = "manage_projects", "Manage projects"
@@ -79,6 +80,7 @@ PERMISSION_GROUPS = [
         Permission.MANAGE_USERS.value,
         Permission.MANAGE_ROLES.value,
         Permission.MANAGE_DEPARTMENTS.value,
+        Permission.MANAGE_MASTER_DATA.value,
     ]),
     ("Projects", [
         Permission.MANAGE_PROJECTS.value,

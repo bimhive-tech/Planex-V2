@@ -22,6 +22,7 @@ const TABS: Tab[] = [
   { label: "Companies", href: "/settings/companies", show: (u) => u.is_platform_admin },
   { label: "Roles", href: "/settings/roles", show: (u) => can(u, Permission.MANAGE_ROLES) },
   { label: "Permissions", href: "/settings/permissions", show: (u) => can(u, Permission.MANAGE_ROLES) },
+  { label: "Master Data", href: "/settings/master-data", show: (u) => can(u, Permission.MANAGE_MASTER_DATA) },
 ];
 
 export function SettingsTabs({ user }: { user: CurrentUser }) {

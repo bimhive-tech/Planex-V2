@@ -10,13 +10,12 @@ import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import { PROJECT_TYPES } from "@/lib/projectTypes";
+import { useProjectTypes } from "@/hooks/useMasterData";
 import type { ProjectListRow } from "@/types/project";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import styles from "./projectHub.module.css";
 
-const TYPE_OPTIONS = [{ value: "", label: "All types" }, ...PROJECT_TYPES];
 const STATUS_OPTIONS = [
   { value: "active", label: "Active" },
   { value: "archived", label: "Archived" },
@@ -50,6 +49,12 @@ export function ProjectHub({ canManage }: { canManage: boolean }) {
     [debounced, type, status, page],
   );
   const rows = data?.results ?? [];
+
+  const { data: typesData } = useProjectTypes();
+  const typeOptions = [
+    { value: "", label: "All types" },
+    ...(typesData?.results ?? []).map((t) => ({ value: t.name, label: t.name })),
+  ];
 
   function openCreate() {
     setEditId(null);
@@ -106,7 +111,7 @@ export function ProjectHub({ canManage }: { canManage: boolean }) {
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search projects"
         />
-        <Select options={TYPE_OPTIONS} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }} aria-label="Filter by type" />
+        <Select options={typeOptions} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }} aria-label="Filter by type" />
         <Select options={STATUS_OPTIONS} value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} aria-label="Filter by status" />
       </div>
 

@@ -31,9 +31,12 @@ def seed_default_roles(company: Company) -> None:
 
 @transaction.atomic
 def create_company(*, name: str) -> Company:
-    """Create a shell company + its default roles (no users yet)."""
+    """Create a shell company + its default roles and master data (no users yet)."""
+    from apps.master_data.services import seed_default_master_data
+
     company = Company.objects.create(name=name)
     seed_default_roles(company)
+    seed_default_master_data(company)
     return company
 
 
