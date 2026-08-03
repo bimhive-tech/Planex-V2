@@ -18,8 +18,18 @@ from reportlab.platypus import Paragraph
 
 from .constants import merged_config
 from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
+from .pdf_charts import (
+    area_progress_chart,
+    cashflow_chart,
+    cashflow_curve,
+    duration_pie,
+    gantt_chart,
+    overall_donut,
+    planned_actual_chart,
+    scurve_chart,
+)
 from .pdf_layout import _draw_contained_image, _period_str
-from .pdf_tables import _fmt_date
+from .pdf_tables import _data_table, _fmt_date, _hierarchy_table, _info_table, _pct_or_dash, _styles, draw_table_in_box
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +89,7 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     if cfg is None:
         cfg = merged_config(report.template.config if report.template else None)
     ctx.setdefault("arabic", has_arabic(ctx["project"]["name"]) or has_arabic(cfg["labels"].get("summary")))
+    ctx.setdefault("_report", report)  # detailed_progress's lazy zone_grids needs report.project/scope_ids
 
     design = cfg.get("page_design") or {}
     page_w_mm, page_h_mm = _page_size_mm(design)
@@ -255,13 +266,27 @@ def _draw_placeholder(c, x, y, w, h, label):
 
 
 def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
-    """Phase 1 fills this in (resolve_table + draw_table_in_box)."""
-    _draw_placeholder(c, x, y, w, h, f"Table: {props.get('source', '')}")
+    source = props.get("source", "")
+    table = resolve_table(source, cfg, ctx, inst.scope)
+    if table is None:
+        _draw_placeholder(c, x, y, w, h, f"No data: {source}")
+        return
+    if not draw_table_in_box(c, table, x, y, w, h):
+        _draw_placeholder(c, x, y, w, h, f"Table too small: {source}")
 
 
 def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
-    """Phase 1 fills this in (resolve_chart + renderPDF.draw)."""
-    _draw_placeholder(c, x, y, w, h, f"Chart: {props.get('source', '')}")
+    source = props.get("source", "")
+    min_w, min_h = MIN_CHART_W_MM * mm, MIN_CHART_H_MM * mm
+    if w < min_w or h < min_h:
+        _draw_placeholder(c, x, y, w, h, f"Chart too small: {source}")
+        return
+    drawing = resolve_chart(source, props.get("chart_type"), cfg, ctx, inst.scope, w, h)
+    if drawing is None:
+        _draw_placeholder(c, x, y, w, h, f"No data: {source}")
+        return
+    from reportlab.graphics import renderPDF
+    renderPDF.draw(drawing, c, x, y)
 
 
 # ── Field binding ────────────────────────────────────────────────────────────
@@ -296,6 +321,170 @@ def resolve_field(source: str, ctx: dict, scope: dict, page_no: int) -> str:
 def _resolve_item_field(source: str, scope: dict) -> str:
     """Phase 2 fills this in (repeat-page item.* bindings)."""
     return ""
+
+
+# ── Table binding ────────────────────────────────────────────────────────────
+
+def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
+    """Build a ready-to-draw Table flowable for one of reportElements.ts's
+    TABLE_SOURCES, reusing the exact row-construction logic and labels the
+    legacy renderer uses (pdf.py) — or None when there's nothing to show.
+    `item.*` sources (repeat pages) are phase 2."""
+    if source.startswith("item."):
+        return None
+    styles = _styles(cfg)
+    labels = cfg["labels"]
+    rtl = bool(ctx.get("arabic"))
+    p = ctx.get("project") or {}
+
+    if source == "project_info":
+        dur = ctx.get("duration") or {}
+        rows = [
+            (labels["info_name"], p.get("name")),
+            (labels.get("info_code", "Code"), p.get("code")),
+            (labels["info_client"], p.get("client")),
+            (labels["info_consultant"], p.get("consultant")),
+            (labels["info_contractor"], p.get("contractor")),
+            (labels["info_type"], p.get("type")),
+            (labels["info_location"], p.get("location")),
+            (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p.get("budget") else ""),
+            (labels.get("info_duration", "Duration"),
+             f"{dur['total']} {labels['unit_days']}" if dur.get("total") else ""),
+            (labels["info_start"], _fmt_date(p.get("planned_start"))),
+            (labels["info_finish"], _fmt_date(p.get("planned_finish"))),
+            (labels.get("info_revised", "Forecast finish"),
+             _fmt_date(p.get("revised_finish")) if p.get("revised_finish") else ""),
+            (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
+            (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p.get("size_sqm") else ""),
+        ]
+        rows = [(k, v) for k, v in rows if v and v != "—"]
+        return _info_table(cfg, styles, rows, rtl) if rows else None
+
+    if source == "zone_progress":
+        zones = ctx.get("zones") or []
+        if not zones:
+            return None
+        rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
+        return _data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows, col_widths=[None, 40 * mm])
+
+    if source == "hierarchy_progress":
+        hierarchy = ctx.get("hierarchy") or []
+        return _hierarchy_table(cfg, styles, hierarchy, labels, rtl) if hierarchy else None
+
+    if source == "discipline_progress":
+        discipline = ctx.get("discipline") or []
+        if not discipline:
+            return None
+        header = [labels["col_unit"], labels["col_concrete"], labels["col_architecture"],
+                  labels["col_electrical"], labels["col_mechanical"], labels["col_other"]]
+        rows = [[r["name"]] + [_pct_or_dash(r.get(d)) for d in
+                               ("concrete", "architecture", "electrical", "mechanical", "other")]
+                for r in discipline]
+        return _data_table(cfg, styles, header, rows)
+
+    if source == "progress_compare":
+        zones = [z for z in (ctx.get("zones") or []) if z.get("planned") is not None]
+        if not zones:
+            return None
+        rows = [[z["name"],
+                 f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
+                 f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
+                 f"{z['progress']:.1f}%"] for z in zones]
+        return _data_table(cfg, styles,
+            [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
+            rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm])
+
+    if source == "milestones":
+        milestones = ctx.get("milestones") or []
+        if not milestones:
+            return None
+        rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in milestones]
+        return _data_table(cfg, styles, [labels["col_milestone"], labels["col_date"], labels["col_status"]],
+                            rows, col_widths=[None, 32 * mm, 34 * mm])
+
+    if source == "invoices":
+        invoices = ctx.get("invoices") or []
+        if not invoices:
+            return None
+        rows = [[i["name"], f"{i['value']:,.2f}", _fmt_date(i["date"]) if i["date"] else "—"] for i in invoices]
+        rows.append([labels.get("col_total", "Total"), f"{ctx.get('invoices_total', 0):,.2f}", ""])
+        return _data_table(cfg, styles,
+            [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]],
+            rows, col_widths=[None, 36 * mm, 30 * mm])
+
+    if source == "submittals":
+        rows = (ctx.get("submittals") or {}).get("rows") or []
+        if not rows:
+            return None
+        return _data_table(cfg, styles,
+            [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
+             labels.get("col_discipline", "Discipline"), labels["col_status"]],
+            [[r["title"], r["type"], r["discipline"], r["status"]] for r in rows])
+
+    if source == "delays":
+        delays = ctx.get("delays") or []
+        if not delays:
+            return None
+        rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in delays]
+        return _data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
+                            rows, col_widths=[None, 28 * mm, 28 * mm])
+
+    if source == "detailed_progress":
+        return _resolve_detailed_progress_table(cfg, ctx, styles)
+
+    return None
+
+
+def _resolve_detailed_progress_table(cfg, ctx, styles):
+    """Detailed activity grid — v1 scope: only the first zone's grid, only its
+    first 8 columns (the legacy `_grid_section` splits wide grids across
+    multiple pages/columns; reproducing that needs a 2D repeat, deferred)."""
+    grids = ctx.get("zone_grids")
+    if not grids:
+        report = ctx.get("_report")
+        project = getattr(report, "project", None)
+        if project is None:
+            return None
+        from .services import _zone_grids
+        zone_ids = [z["id"] for z in (ctx.get("zones") or []) if z.get("id")]
+        grids = _zone_grids(project, zone_ids, getattr(report, "scope_ids", None), ctx.get("_progress"))
+        ctx["zone_grids"] = grids
+    if not grids:
+        return None
+    grid = grids[0]
+    labels = cfg["labels"]
+    header = [labels.get("col_task", "Task")] + grid["columns"][:8]
+    rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
+    return _data_table(cfg, styles, header, rows)
+
+
+# ── Chart binding ────────────────────────────────────────────────────────────
+
+def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float):
+    """Build a ready-to-draw Drawing for one of reportElements.ts's
+    CHART_SOURCES, at the given box size (points) — or None with nothing to
+    show. `item.*`-scoped sources (repeat pages) are phase 2."""
+    if isinstance(source, str) and source.startswith("item."):
+        return None
+    labels = cfg["labels"]
+
+    if source == "zone_progress":
+        return planned_actual_chart(cfg, ctx, w, labels, height=h)
+    if source == "area_progress":
+        return area_progress_chart(cfg, ctx, w, labels, height=h)
+    if source == "scurve":
+        return scurve_chart(cfg, ctx, w, labels, height=h)
+    if source == "breakdown":
+        return overall_donut(cfg, ctx, w, labels, height=h)
+    if source == "duration":
+        return duration_pie(cfg, ctx, w, labels, height=h)
+    if source == "cashflow_monthly":
+        return cashflow_chart(cfg, ctx.get("cashflow") or [], w, labels, height=h)
+    if source == "cashflow_cumulative":
+        return cashflow_curve(cfg, ctx.get("cashflow") or [], w, labels, height=h)
+    if source == "gantt":
+        return gantt_chart(cfg, ctx.get("gantt") or [], w, labels, height=h)
+    return None
 
 
 # ── Repeating pages (phase 2 fleshes out _repeat_items) ─────────────────────

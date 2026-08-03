@@ -12,7 +12,15 @@ from apps.projects.models import Project
 from .constants import default_config, merged_config
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
-from .pdf_canvas import build_canvas_pdf, el_box, expand_pages, has_canvas_layout, resolve_field
+from .pdf_canvas import (
+    build_canvas_pdf,
+    el_box,
+    expand_pages,
+    has_canvas_layout,
+    resolve_chart,
+    resolve_field,
+    resolve_table,
+)
 
 STRONG_PW = "Str0ngPassw0rd!"
 
@@ -228,6 +236,117 @@ class ResolveFieldTests(SimpleTestCase):
 
     def test_unknown_source_returns_empty_string_not_none(self):
         self.assertEqual(resolve_field("not.a.real.source", _sample_ctx(), {}, page_no=1), "")
+
+
+def _full_ctx():
+    """_sample_ctx() plus every key resolve_table/resolve_chart read, so each
+    of the 10 table sources and 8 chart sources has real data to resolve."""
+    ctx = _sample_ctx()
+    ctx["arabic"] = True
+    ctx["planned"] = 82.0
+    ctx["zones"][0]["planned"] = 88.0
+    ctx["zones"][0]["previous"] = 85.0
+    ctx["zones"][1]["planned"] = 70.0
+    ctx["zones"][1]["previous"] = 65.0
+    ctx["areas"] = [{"name": "Area 1", "planned": 80.0, "actual": 75.0},
+                    {"name": "Area 2", "planned": 60.0, "actual": 55.0}]
+    ctx["hierarchy"] = [{"name": "المنطقة الأولى", "actual": 90.0, "previous": 85.0, "planned": 92.0,
+                        "children": [{"name": "Sub A", "actual": 88.0, "previous": 80.0, "planned": 90.0}]}]
+    ctx["discipline"] = [{"name": "Zone A", "concrete": 90.0, "architecture": 70.0,
+                          "electrical": 50.0, "mechanical": 40.0, "other": None}]
+    ctx["duration"] = {"total": 400, "elapsed": 200, "remaining": 200, "delay": 15}
+    ctx["cashflow"] = [
+        {"month": datetime.date(2026, 1, 1), "planned": 100.0, "actual": 90.0,
+         "cum_planned": 100.0, "cum_actual": 90.0},
+        {"month": datetime.date(2026, 2, 1), "planned": 120.0, "actual": 110.0,
+         "cum_planned": 220.0, "cum_actual": 200.0},
+    ]
+    ctx["invoices"] = [{"name": "Invoice 1", "value": 5000.0, "date": datetime.date(2026, 2, 1)}]
+    ctx["invoices_total"] = 5000.0
+    ctx["submittals"] = {
+        "rows": [{"title": "Shop drawing 1", "type": "Drawing", "discipline": "Architecture", "status": "Approved"}],
+        "summary": [{"status": "Approved", "key": "approved", "count": 1}],
+    }
+    ctx["delays"] = [{"title": "Late materials", "impact_days": 5, "status": "open"}]
+    ctx["gantt"] = [
+        {"name": "Zone A", "level": 0, "start": datetime.date(2026, 1, 1), "finish": datetime.date(2026, 6, 1),
+         "revised_finish": None, "progress": 60.0},
+        {"name": "Zone B", "level": 0, "start": datetime.date(2026, 2, 1), "finish": datetime.date(2026, 7, 1),
+         "revised_finish": None, "progress": 40.0},
+    ]
+    ctx["scurve"] = [
+        {"date": datetime.date(2026, 1, 1), "actual": 20.0, "planned": 25.0},
+        {"date": datetime.date(2026, 2, 1), "actual": 40.0, "planned": 50.0},
+    ]
+    return ctx
+
+
+class ResolveTableTests(SimpleTestCase):
+    """`resolve_table` for every TABLE_SOURCES entry (reportElements.ts) —
+    reuses the exact same row logic pdf.py's flowing renderer uses."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()  # normally done by build_canvas_pdf before any Paragraph is built
+
+    SOURCES_WITH_DATA = [
+        "project_info", "zone_progress", "hierarchy_progress", "discipline_progress",
+        "progress_compare", "milestones", "invoices", "submittals", "delays",
+    ]
+
+    def test_every_source_with_data_returns_a_table(self):
+        cfg = default_config()
+        ctx = _full_ctx()
+        for source in self.SOURCES_WITH_DATA:
+            table = resolve_table(source, cfg, ctx, {"item": None})
+            self.assertIsNotNone(table, source)
+
+    def test_missing_data_returns_none_not_a_crash(self):
+        cfg = default_config()
+        ctx = _sample_ctx()  # no hierarchy/discipline/invoices/submittals/delays
+        for source in ("hierarchy_progress", "discipline_progress", "invoices", "submittals", "delays"):
+            self.assertIsNone(resolve_table(source, cfg, ctx, {"item": None}), source)
+
+    def test_detailed_progress_without_a_real_project_returns_none(self):
+        # No DB project attached (ctx["_report"] absent) -> can't lazily compute
+        # zone_grids -> None, not an exception.
+        cfg = default_config()
+        self.assertIsNone(resolve_table("detailed_progress", cfg, _full_ctx(), {"item": None}))
+
+    def test_unknown_source_returns_none(self):
+        self.assertIsNone(resolve_table("not_a_real_source", default_config(), _full_ctx(), {"item": None}))
+
+    def test_item_scoped_source_returns_none_until_phase_2(self):
+        self.assertIsNone(resolve_table("item.children", default_config(), _full_ctx(), {"item": None}))
+
+
+class ResolveChartTests(SimpleTestCase):
+    """`resolve_chart` for every CHART_SOURCES entry (reportElements.ts)."""
+
+    SOURCES_WITH_DATA = [
+        "zone_progress", "area_progress", "scurve", "breakdown", "duration",
+        "cashflow_monthly", "cashflow_cumulative", "gantt",
+    ]
+
+    def test_every_source_with_data_returns_a_drawing(self):
+        cfg = default_config()
+        ctx = _full_ctx()
+        for source in self.SOURCES_WITH_DATA:
+            drawing = resolve_chart(source, "bar", cfg, ctx, {"item": None}, 120, 70)
+            self.assertIsNotNone(drawing, source)
+
+    def test_explicit_height_is_respected(self):
+        cfg = default_config()
+        drawing = resolve_chart("breakdown", "donut", cfg, _full_ctx(), {"item": None}, 120, 90)
+        self.assertEqual(drawing.height, 90)
+
+    def test_unknown_source_returns_none(self):
+        self.assertIsNone(resolve_chart("not_a_real_source", "bar", default_config(), _full_ctx(), {"item": None}, 100, 70))
+
+    def test_item_scoped_source_returns_none_until_phase_2(self):
+        self.assertIsNone(resolve_chart("item.units", "bar", default_config(), _full_ctx(), {"item": None}, 100, 70))
 
 
 class ExpandPagesTests(SimpleTestCase):
