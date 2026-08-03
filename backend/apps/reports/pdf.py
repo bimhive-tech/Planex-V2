@@ -46,6 +46,15 @@ from .pdf_charts import (
     zone_progress_chart,
 )
 from .pdf_layout import BORDER_INSET, draw_cover, draw_page_furniture, frame_rect
+from .pdf_tables import (
+    _aligned,
+    _data_table,
+    _fmt_date,
+    _hierarchy_table,
+    _info_table,
+    _pct_or_dash,
+    _styles,
+)
 
 
 class _ReportDoc(BaseDocTemplate):
@@ -137,32 +146,6 @@ class _RtlTOC(TableOfContents):
         return (self.width, self.height)
 
 
-def _styles(cfg):
-    f, c = cfg["fonts"], cfg["colors"]
-    lead = float(f.get("line_spacing", 1.5))
-
-    def mk(name, size, color, *, font=FONT_NAME, align=TA_LEFT, sb=0, sa=6):
-        return ParagraphStyle(name, fontName=font, fontSize=size, textColor=hexcolor(color),
-                              leading=size * lead, alignment=align, spaceBefore=sb, spaceAfter=sa)
-
-    return {
-        "section": ParagraphStyle("SectionHeading", fontName=BOLD, fontSize=f["h2_size"],
-                                  textColor=hexcolor(c["section_heading"]), alignment=TA_CENTER,
-                                  leading=f["h2_size"] * 1.3, spaceBefore=4, spaceAfter=4),
-        "sub": mk("sub", f["h3_size"], c["section_heading"], font=BOLD, sb=8, sa=4),
-        "body": mk("body", f["base_size"], c["text"]),
-        "bullet": mk("bullet", f["base_size"], c["text"], sa=3),
-        "muted": mk("muted", f["base_size"] - 1, c["muted"]),
-        "value": mk("value", f["base_size"], c["text"], font=BOLD),
-    }
-
-
-def _aligned(style, text, *, force=None):
-    s = ParagraphStyle(f"{style.name}_a", parent=style)
-    s.alignment = force if force is not None else (TA_RIGHT if has_arabic(text) else TA_LEFT)
-    return Paragraph(shape(text), s)
-
-
 def _heading(styles, text, *, listed=True):
     """Centered blue heading with an underline rule — the section title look.
     When listed=False the style is renamed so afterFlowable does NOT add a TOC
@@ -226,101 +209,6 @@ def _bullets(styles, items, rtl):
         text = f"{shape(it)} {marker}" if rtl else f"{marker}{shape(it)}"
         out.append(Paragraph(text, s))
     return out
-
-
-def _fmt_date(d):
-    return d.strftime("%d %b %Y") if d else "—"
-
-
-def _info_table(cfg, styles, rows, rtl):
-    """Bordered 2-col table: ■ label on the right, value on the left (RTL look)."""
-    c = cfg["colors"]
-    label_style = ParagraphStyle("lbl", parent=styles["value"], alignment=TA_RIGHT)
-    data = []
-    for label, value in rows:
-        lbl = Paragraph(f"{shape(label)} ■", label_style)
-        val = _aligned(styles["body"], value, force=TA_RIGHT if rtl else TA_LEFT)
-        data.append([val, lbl] if rtl else [lbl, val])
-    widths = [None, 58 * mm] if rtl else [58 * mm, None]
-    t = Table(data, colWidths=widths)
-    t.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.7, hexcolor(c["table_border"])),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (1 if rtl else 0, 0), (1 if rtl else 0, -1), hexcolor(c["table_row_alt"])),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    return t
-
-
-def _data_table(cfg, styles, header, rows, col_widths=None):
-    c, tcfg = cfg["colors"], cfg["table"]
-    head = ParagraphStyle("th", parent=styles["body"], fontName=BOLD if tcfg.get("header_bold") else FONT_NAME,
-                          textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
-    data = [[Paragraph(shape(h), head) for h in header]]
-    for row in rows:
-        data.append([_aligned(styles["body"], cell, force=TA_CENTER) for cell in row])
-    t = Table(data, colWidths=col_widths, repeatRows=1)
-    style = [
-        ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]
-    if tcfg.get("border"):
-        style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
-    if tcfg.get("zebra"):
-        for i in range(2, len(data), 2):
-            style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c["table_row_alt"])))
-    t.setStyle(TableStyle(style))
-    return t
-
-
-def _pct_or_dash(v):
-    return f"{v:.1f}%" if v is not None else "—"
-
-
-def _hierarchy_table(cfg, styles, rows, labels, rtl):
-    """Project -> Zone -> Subzone rollup. Zone rows are bold; subzone rows are
-    indented one level — same shape as the report's nested breakdown table."""
-    c, tcfg = cfg["colors"], cfg["table"]
-    head = ParagraphStyle("hih", parent=styles["body"], fontName=BOLD,
-                          textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
-    name_style = ParagraphStyle("hin", parent=styles["body"], alignment=TA_RIGHT if rtl else TA_LEFT)
-    name_bold = ParagraphStyle("hinb", parent=name_style, fontName=BOLD)
-    pct_style = ParagraphStyle("hip", parent=styles["body"], alignment=TA_CENTER)
-
-    header = [labels["col_zone"], labels["col_actual"], labels["col_previous"], labels["col_planned"]]
-    data = [[Paragraph(shape(h), head) for h in header]]
-    zebra_rows = []
-    for zone in rows:
-        zebra_rows.append(len(data))
-        data.append([
-            Paragraph(shape(zone["name"]), name_bold),
-            Paragraph(_pct_or_dash(zone["actual"]), pct_style),
-            Paragraph(_pct_or_dash(zone["previous"]), pct_style),
-            Paragraph(_pct_or_dash(zone["planned"]), pct_style),
-        ])
-        for child in zone["children"]:
-            indented = "    " + shape(child["name"])
-            data.append([
-                Paragraph(indented, name_style),
-                Paragraph(_pct_or_dash(child["actual"]), pct_style),
-                Paragraph(_pct_or_dash(child["previous"]), pct_style),
-                Paragraph(_pct_or_dash(child["planned"]), pct_style),
-            ])
-
-    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm], repeatRows=1)
-    style = [
-        ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]
-    for r in zebra_rows:
-        style.append(("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_row_alt"])))
-    if tcfg.get("border"):
-        style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
-    t.setStyle(TableStyle(style))
-    return t
 
 
 def _storage_image_flowable(key, max_width, max_height):
@@ -545,10 +433,11 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w, fig):
     return flow
 
 
-def build_report_pdf(report, ctx, out_pages=None) -> bytes:
+def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
     """Render `ctx` (from services.build_report_context) into PDF bytes."""
     ensure_fonts()
-    cfg = merged_config(report.template.config if report.template else None)
+    if cfg is None:
+        cfg = merged_config(report.template.config if report.template else None)
     ctx["arabic"] = has_arabic(ctx["project"]["name"]) or has_arabic(cfg["labels"].get("summary"))
     rtl = ctx["arabic"]
     styles = _styles(cfg)

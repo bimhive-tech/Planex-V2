@@ -12,6 +12,7 @@ from apps.projects.models import Project
 from .constants import default_config, merged_config
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
+from .pdf_canvas import build_canvas_pdf, el_box, expand_pages, has_canvas_layout, resolve_field
 
 STRONG_PW = "Str0ngPassw0rd!"
 
@@ -101,6 +102,159 @@ class PdfTests(SimpleTestCase):
         report = SimpleNamespace(title="Empty", template=template)
         # Still produces a valid (near-empty) document without error.
         self.assertTrue(build_report_pdf(report, _sample_ctx()).startswith(b"%PDF"))
+
+
+class CanvasPdfTests(SimpleTestCase):
+    """The new canvas-driven renderer (phase 0: page geometry, simple element
+    types, and non-item field bindings — tables/charts/repeat land in later
+    phases and draw a placeholder / are skipped until then)."""
+
+    def _template(self, layout_pages, master_elements=None, **design_overrides):
+        cfg = default_config()
+        cfg["page_design"] = {
+            "size": "A4", "orientation": "portrait", "margin_mm": 10,
+            "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+            "show_border": True, "background": "#ffffff",
+            "master_elements": master_elements or [],
+            **design_overrides,
+        }
+        cfg["layout"] = {"pages": layout_pages}
+        return ReportTemplate(name="Canvas", config=cfg)
+
+    def test_el_box_converts_top_left_mm_to_reportlab_points(self):
+        # The single most breakage-prone arithmetic in the feature: canvas is
+        # mm-from-top-left, ReportLab is points-from-bottom-left.
+        from reportlab.lib.units import mm
+
+        x, y, w, h = el_box({"x": 10, "y": 20, "w": 50, "h": 30}, 297)
+        self.assertAlmostEqual(x, 10 * mm)
+        self.assertAlmostEqual(y, (297 - 20 - 30) * mm)
+        self.assertAlmostEqual(w, 50 * mm)
+        self.assertAlmostEqual(h, 30 * mm)
+
+    def test_has_canvas_layout_false_for_default_config(self):
+        self.assertFalse(has_canvas_layout(default_config()))
+
+    def test_has_canvas_layout_true_once_a_page_has_an_element(self):
+        cfg = default_config()
+        cfg["layout"] = {"pages": [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "text", "x": 0, "y": 0, "w": 50, "h": 10, "z": 0, "props": {"text": "Hi"}},
+        ]}]}
+        self.assertTrue(has_canvas_layout(cfg))
+
+    def test_has_canvas_layout_true_for_an_empty_repeating_page(self):
+        cfg = default_config()
+        cfg["layout"] = {"pages": [{"id": "p1", "name": "Photos", "elements": [],
+                                    "repeat": {"source": "photos", "mode": "chunk"}}]}
+        self.assertTrue(has_canvas_layout(cfg))
+
+    def test_builds_canvas_pdf_with_arabic_data(self):
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "text", "x": 10, "y": 10, "w": 100, "h": 12, "z": 0,
+             "props": {"text": "Heading", "size": 16, "bold": True}},
+            {"id": "e2", "type": "field", "x": 10, "y": 30, "w": 100, "h": 10, "z": 1,
+             "props": {"source": "project.name"}},
+            {"id": "e3", "type": "rect", "x": 10, "y": 50, "w": 40, "h": 20, "z": 2,
+             "props": {"fill": "#eef3f8", "stroke": "#1F4E79", "stroke_width": 0.5}},
+            {"id": "e4", "type": "line", "x": 10, "y": 80, "w": 100, "h": 1, "z": 3,
+             "props": {"stroke": "#1F4E79", "stroke_width": 0.6}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="Monthly Progress Report", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+        self.assertGreater(len(data), 500)
+
+    def test_master_elements_repeat_on_every_expanded_page(self):
+        master = [{"id": "m1", "type": "field", "x": 5, "y": 5, "w": 30, "h": 8, "z": 0,
+                  "props": {"source": "page.number"}}]
+        pages = [
+            {"id": "p1", "name": "Page 1", "elements": []},
+            {"id": "p2", "name": "Page 2", "elements": []},
+        ]
+        template = self._template(pages, master_elements=master)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_table_and_chart_elements_draw_a_placeholder_not_crash(self):
+        """Phase 1 fills these in for real — until then they must degrade to a
+        visible placeholder, never an exception that kills the whole report."""
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 40, "z": 0,
+             "props": {"source": "zone_progress"}},
+            {"id": "e2", "type": "chart", "x": 10, "y": 60, "w": 80, "h": 60, "z": 1,
+             "props": {"source": "scurve", "chart_type": "line"}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_unknown_element_type_is_skipped_not_fatal(self):
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "not_a_real_type", "x": 0, "y": 0, "w": 10, "h": 10, "z": 0, "props": {}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        self.assertTrue(build_canvas_pdf(report, _sample_ctx()).startswith(b"%PDF"))
+
+
+class ResolveFieldTests(SimpleTestCase):
+    """`resolve_field` covers every non-item entry FIELD_SOURCES declares
+    (frontend/src/lib/reportElements.ts) — a missing mapping is otherwise
+    silent breakage (the field just renders blank in the PDF)."""
+
+    NON_ITEM_SOURCES = [
+        "project.name", "project.code", "project.client", "project.consultant",
+        "project.contractor", "project.location", "report.title", "report.number",
+        "report.period", "report.date", "progress.overall", "progress.planned", "page.number",
+    ]
+
+    def test_covers_every_declared_source(self):
+        ctx = _sample_ctx()
+        ctx["arabic"] = True
+        for source in self.NON_ITEM_SOURCES:
+            value = resolve_field(source, ctx, {"item": None}, page_no=3)
+            self.assertIsNotNone(value, source)
+
+    def test_page_number_reflects_the_expanded_instance(self):
+        self.assertEqual(resolve_field("page.number", _sample_ctx(), {}, page_no=7), "7")
+
+    def test_project_fields_read_from_ctx(self):
+        ctx = _sample_ctx()
+        self.assertEqual(resolve_field("project.client", ctx, {}, page_no=1), "NUCA")
+        self.assertEqual(resolve_field("project.contractor", ctx, {}, page_no=1), "Orascom")
+
+    def test_unknown_source_returns_empty_string_not_none(self):
+        self.assertEqual(resolve_field("not.a.real.source", _sample_ctx(), {}, page_no=1), "")
+
+
+class ExpandPagesTests(SimpleTestCase):
+    """`expand_pages` for fixed (non-repeat) pages — repeat expansion itself
+    lands in phase 2, but the no-repeat path is real now and must stay
+    correct once repeat is added alongside it."""
+
+    def test_fixed_pages_yield_one_instance_each_in_order(self):
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "A", "elements": []},
+            {"id": "b", "name": "B", "elements": []},
+        ]}}
+        instances = expand_pages(cfg, _sample_ctx(), report=None)
+        self.assertEqual([i.page["id"] for i in instances], ["a", "b"])
+        self.assertEqual([i.number for i in instances], [1, 2])
+        self.assertEqual(instances[0].scope["item"], None)
+
+    def test_no_pages_yields_no_instances(self):
+        self.assertEqual(expand_pages({"layout": {"pages": []}}, _sample_ctx(), report=None), [])
+
+    def test_repeat_page_with_no_items_yet_implemented_is_skipped(self):
+        # _repeat_items is a phase-2 stub returning [] today — a repeating
+        # page must not crash or emit a page in the meantime.
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Photos", "elements": [], "repeat": {"source": "photos", "mode": "chunk"}},
+        ]}}
+        self.assertEqual(expand_pages(cfg, _sample_ctx(), report=None), [])
 
 
 class HierarchyRowsTests(TestCase):

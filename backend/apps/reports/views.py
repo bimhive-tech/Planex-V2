@@ -14,8 +14,10 @@ from rest_framework.response import Response
 
 from apps.accounts.constants import Permission
 
+from .constants import merged_config
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf
+from .pdf_canvas import build_canvas_pdf, has_canvas_layout
 from .serializers import (
     ReportListSerializer,
     ReportTemplateSerializer,
@@ -77,11 +79,21 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def pdf(self, request, pk=None):
-        """Generate and stream the report PDF on demand."""
+        """Generate and stream the report PDF on demand.
+
+        `?engine=canvas`/`?engine=sections` force a specific renderer (useful
+        while the canvas engine is being built out); otherwise a template
+        with real Page Designer / Report Configuration content uses the new
+        canvas engine and everything else keeps using Content & Labels."""
         report = self.get_object()
         ctx = build_report_context(report)
+        cfg = merged_config(report.template.config if report.template else None)
         pages = {}
-        data = build_report_pdf(report, ctx, out_pages=pages)
+        engine = request.query_params.get("engine") or cfg.get("render_engine")
+        if engine == "canvas" or (engine is None and has_canvas_layout(cfg)):
+            data = build_canvas_pdf(report, ctx, cfg=cfg, out_pages=pages)
+        else:
+            data = build_report_pdf(report, ctx, out_pages=pages, cfg=cfg)
         resp = HttpResponse(data, content_type="application/pdf")
         safe = (report.report_number or report.title or "report").replace("/", "-")
         resp["Content-Disposition"] = f'inline; filename="report-{safe}.pdf"'

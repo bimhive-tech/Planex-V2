@@ -42,8 +42,9 @@ const TYPE_FIELDS: Record<string, PropField[]> = {
       { value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }] },
   ],
   logo: [
-    { path: "source", label: "Logo", kind: "select", options: [
-      { value: "company", label: "Company" }, { value: "project", label: "Project" }] },
+    { path: "source", label: "Image", kind: "select", options: [
+      { value: "left", label: "Left logo" }, { value: "right", label: "Right logo" },
+      { value: "cover", label: "Cover image" }] },
   ],
   rect: [
     { path: "fill", label: "Fill", kind: "color" },

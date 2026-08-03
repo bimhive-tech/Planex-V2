@@ -31,12 +31,12 @@ def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
     return leg
 
 
-def zone_progress_chart(cfg, ctx, width):
+def zone_progress_chart(cfg, ctx, width, height=None):
     """Actual progress per zone — fallback when no planned baseline exists."""
     zones = ctx["zones"][:12]
     if not zones:
         return None
-    height = 70 * mm
+    height = height or 70 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 22, 26
@@ -61,12 +61,12 @@ def zone_progress_chart(cfg, ctx, width):
     return d
 
 
-def planned_actual_chart(cfg, ctx, width, labels):
+def planned_actual_chart(cfg, ctx, width, labels, height=None):
     """Grouped planned-vs-actual bars per zone (reference progress charts)."""
     zones = [z for z in ctx["zones"] if z.get("planned") is not None][:10]
     if not zones:
-        return zone_progress_chart(cfg, ctx, width)
-    height = 78 * mm
+        return zone_progress_chart(cfg, ctx, width, height)
+    height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
@@ -98,12 +98,12 @@ def planned_actual_chart(cfg, ctx, width, labels):
     return d
 
 
-def _unit_bars(cfg, units, width, labels):
+def _unit_bars(cfg, units, width, labels, height=None):
     """Per-unit bars within a zone: grouped planned/actual when a baseline
     exists, else actual-only (most projects carry no per-unit dates yet, so the
     old version drew nothing — now it still shows where each unit stands)."""
     has_planned = any(u.get("planned") is not None for u in units)
-    height = 78 * mm
+    height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
@@ -144,16 +144,16 @@ def _unit_bars(cfg, units, width, labels):
 AREA_CHART_MAX = 15  # a grouped bar chart stops being readable past ~15 bars
 
 
-def area_progress_chart(cfg, ctx, width, labels):
+def area_progress_chart(cfg, ctx, width, labels, height=None):
     """Planned-vs-actual bars one level below zones (the areas / subzones). Same
     look as the zone chart; capped so it stays legible with many areas."""
     areas = ctx.get("areas") or []
     if not areas:
         return None
-    return _unit_bars(cfg, areas[:AREA_CHART_MAX], width, labels)
+    return _unit_bars(cfg, areas[:AREA_CHART_MAX], width, labels, height)
 
 
-def _completion_histogram(cfg, children, width, labels):
+def _completion_histogram(cfg, children, width, labels, height=None):
     """How a zone's sub-units are spread across completion bands — readable at
     any unit count (a per-unit bar chart isn't, past ~15 units). Bar height is
     the number of units in each band; the value label prints that count."""
@@ -170,7 +170,7 @@ def _completion_histogram(cfg, children, width, labels):
             bands[3] += 1
         else:
             bands[4] += 1
-    height = 70 * mm
+    height = height or 70 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 26, 24
@@ -195,7 +195,7 @@ def _completion_histogram(cfg, children, width, labels):
     return d
 
 
-def area_units_chart(cfg, area, width, labels):
+def area_units_chart(cfg, area, width, labels, height=None):
     """A zone's sub-units visualised for its dashboard page: per-unit bars when
     there are few enough to read, otherwise a completion histogram so the page
     stays informative for zones with dozens/hundreds of units (the old version
@@ -204,14 +204,14 @@ def area_units_chart(cfg, area, width, labels):
     if not children:
         return None
     if len(children) <= 15:
-        return _unit_bars(cfg, children, width, labels)
-    return _completion_histogram(cfg, children, width, labels)
+        return _unit_bars(cfg, children, width, labels, height)
+    return _completion_histogram(cfg, children, width, labels, height)
 
 
-def _duration_pie_for(cfg, dur, width, labels):
+def _duration_pie_for(cfg, dur, width, labels, height=None):
     if not dur:
         return None
-    height = 60 * mm
+    height = height or 60 * mm
     pw = 40 * mm
     d = Drawing(width, height)
     pie = Pie()
@@ -231,20 +231,20 @@ def _duration_pie_for(cfg, dur, width, labels):
     return d
 
 
-def duration_pie(cfg, ctx, width, labels):
+def duration_pie(cfg, ctx, width, labels, height=None):
     """Project duration vs delay days (reference duration pie)."""
-    return _duration_pie_for(cfg, ctx.get("duration"), width, labels)
+    return _duration_pie_for(cfg, ctx.get("duration"), width, labels, height)
 
 
-def zone_duration_pie(cfg, dur, width, labels):
+def zone_duration_pie(cfg, dur, width, labels, height=None):
     """Same pie, for one zone's own duration (the per-area dashboard)."""
-    return _duration_pie_for(cfg, dur, width, labels)
+    return _duration_pie_for(cfg, dur, width, labels, height)
 
 
-def overall_donut(cfg, ctx, width, labels):
+def overall_donut(cfg, ctx, width, labels, height=None):
     """Overall completion donut with the % in the centre."""
     overall = float(ctx["overall"])
-    height = 56 * mm
+    height = height or 56 * mm
     pw = 42 * mm
     d = Drawing(width, height)
     pie = Pie()
@@ -264,12 +264,12 @@ def overall_donut(cfg, ctx, width, labels):
     return d
 
 
-def scurve_chart(cfg, ctx, width, labels):
+def scurve_chart(cfg, ctx, width, labels, height=None):
     """Time Performance S-curve: planned vs actual cumulative progress."""
     series = [p for p in ctx.get("scurve", []) if p.get("planned") is not None]
     if len(series) < 2:
         return None
-    height = 72 * mm
+    height = height or 72 * mm
     d = Drawing(width, height)
     chart = HorizontalLineChart()
     chart.x, chart.y = 26, 26
@@ -292,13 +292,13 @@ def scurve_chart(cfg, ctx, width, labels):
     return d
 
 
-def cashflow_chart(cfg, rows, width, labels):
+def cashflow_chart(cfg, rows, width, labels, height=None):
     """Monthly planned-vs-actual cash bars (the values the user typed in the
     Finances tab — no derivation)."""
     rows = rows[:24]
     if not rows:
         return None
-    height = 80 * mm
+    height = height or 80 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 32, 28
@@ -323,11 +323,11 @@ def cashflow_chart(cfg, rows, width, labels):
     return d
 
 
-def cashflow_curve(cfg, rows, width, labels):
+def cashflow_curve(cfg, rows, width, labels, height=None):
     """Cumulative cash S-curve (planned vs actual added up month over month)."""
     if len(rows) < 2:
         return None
-    height = 78 * mm
+    height = height or 78 * mm
     d = Drawing(width, height)
     chart = HorizontalLineChart()
     chart.x, chart.y = 32, 26
@@ -356,13 +356,19 @@ def _add_month(d, months):
     return d.replace(year=y, month=m)
 
 
-def gantt_chart(cfg, rows, width, labels):
+def gantt_chart(cfg, rows, width, labels, height=None):
     """Simple Gantt-style schedule printout: one bar per zone/phase row, gray
     baseline = its own planned span, blue fill = its rolled-up actual %
     complete, a red tick marks the revised finish when it slipped past the
     baseline. No predecessor/float/critical-path computation — just the dates
     and % we already have. Capped to a sane row count so a huge project still
-    fits on one readable page."""
+    fits on one readable page.
+
+    `height`: when omitted, the drawing grows to fit every row at a fixed
+    7mm row height (legacy behaviour). When given (a fixed canvas box), rows
+    are compressed to fit — and if that would make them illegible (<4mm),
+    rows are dropped instead of squeezed further, same as the too-small-box
+    fallback used elsewhere."""
     rows = rows[:25]
     if not rows:
         return None
@@ -370,10 +376,19 @@ def gantt_chart(cfg, rows, width, labels):
     label_w = 52 * mm
     chart_x = label_w
     chart_w = width - label_w - 4 * mm
-    row_h = 7 * mm
     top_pad = 11 * mm
     bottom_pad = 6 * mm
-    height = top_pad + row_h * len(rows) + bottom_pad
+    min_row_h = 4 * mm
+    if height is None:
+        row_h = 7 * mm
+        height = top_pad + row_h * len(rows) + bottom_pad
+    else:
+        available = height - top_pad - bottom_pad
+        row_h = available / len(rows)
+        if row_h < min_row_h:
+            max_rows = max(1, int(available / min_row_h))
+            rows = rows[:max_rows]
+            row_h = available / len(rows)
     chart_top = height - top_pad
 
     min_d = min(r["start"] for r in rows)
