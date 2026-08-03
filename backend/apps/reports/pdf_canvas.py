@@ -20,6 +20,7 @@ from .constants import merged_config
 from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
 from .pdf_charts import (
     area_progress_chart,
+    area_units_chart,
     cashflow_chart,
     cashflow_curve,
     duration_pie,
@@ -27,6 +28,7 @@ from .pdf_charts import (
     overall_donut,
     planned_actual_chart,
     scurve_chart,
+    zone_duration_pie,
 )
 from .pdf_layout import _draw_contained_image, _period_str
 from .pdf_tables import _data_table, _fmt_date, _hierarchy_table, _info_table, _pct_or_dash, _styles, draw_table_in_box
@@ -244,12 +246,32 @@ def _draw_logo(c, props, x, y, w, h, ctx):
         _draw_contained_image(c, reader, x, y, w, h)
 
 
+_CAPTION_H = 8 * mm
+
+
 def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
-    """Phase 0: no repeat-item slot yet (phase 2) and no per-report image
-    picking (deferred — see plan §7.5). Nothing to draw yet, safe no-op."""
-    if props.get("source") == "repeat.item":
-        return  # phase 2: scope["items"][props["slot"]]
-    return
+    """`repeat.item` binds this box to one photo/attachment in the current
+    repeat chunk (props["slot"] indexes inst.scope["items"]) — this is what
+    lets a 4-slot "Site Photos" page turn into N real pages. Per-report image
+    picking into an arbitrary non-repeat box is deferred (see plan §7.5)."""
+    if props.get("source") != "repeat.item":
+        return
+    items = inst.scope.get("items") or []
+    slot = int(props.get("slot", 0) or 0)
+    if slot >= len(items):
+        return
+    item = items[slot] or {}
+    show_caption = bool(props.get("show_caption"))
+    caption_h = _CAPTION_H if show_caption else 0
+    reader = storage_image_reader(item.get("image"))
+    if reader:
+        _draw_contained_image(c, reader, x, y + caption_h, w, h - caption_h)
+    if show_caption and item.get("caption"):
+        style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
+                               textColor=hexcolor("#595959"), alignment=TA_CENTER)
+        para = Paragraph(shape(item["caption"]), style)
+        para.wrap(w, caption_h)
+        para.drawOn(c, x, y)
 
 
 def _draw_placeholder(c, x, y, w, h, label):
@@ -319,7 +341,23 @@ def resolve_field(source: str, ctx: dict, scope: dict, page_no: int) -> str:
 
 
 def _resolve_item_field(source: str, scope: dict) -> str:
-    """Phase 2 fills this in (repeat-page item.* bindings)."""
+    """Repeat-page item.* bindings — resolved against whatever the current
+    repeat source's item shape carries (zones/areas/area_dashboards have
+    different key names for the same idea, e.g. "progress" vs "actual")."""
+    key = source.split(".", 1)[1] if "." in source else ""
+    if key == "index":
+        return str((scope.get("index") or 0) + 1)  # 1-based, matches page.number
+    if key == "count":
+        return str(scope.get("count") or 0)
+    item = scope.get("item") or {}
+    if key == "name":
+        return str(item.get("name") or "")
+    if key == "caption":
+        return str(item.get("caption") or "")
+    if key in ("progress", "planned", "previous"):
+        # zones use "progress"; areas/area_dashboards use "actual" for the same idea.
+        value = item.get(key) if key != "progress" else (item.get("progress") if "progress" in item else item.get("actual"))
+        return f"{value:.1f}%" if value is not None else ""
     return ""
 
 
@@ -327,15 +365,25 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 
 def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
     """Build a ready-to-draw Table flowable for one of reportElements.ts's
-    TABLE_SOURCES, reusing the exact row-construction logic and labels the
-    legacy renderer uses (pdf.py) — or None when there's nothing to show.
-    `item.*` sources (repeat pages) are phase 2."""
-    if source.startswith("item."):
-        return None
+    TABLE_SOURCES (plus the item-scoped `item.children`, available on a
+    repeating page), reusing the exact row-construction logic and labels the
+    legacy renderer uses (pdf.py) — or None when there's nothing to show."""
     styles = _styles(cfg)
     labels = cfg["labels"]
     rtl = bool(ctx.get("arabic"))
     p = ctx.get("project") or {}
+
+    if source == "item.children":
+        children = (scope.get("item") or {}).get("children") or []
+        if not children:
+            return None
+        rows = [[c["name"],
+                 f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
+                 f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
+        return _data_table(cfg, styles, [labels["col_zone"], labels["col_actual"], labels["col_planned"]],
+                            rows, col_widths=[None, 30 * mm, 30 * mm])
+    if source.startswith("item."):
+        return None  # no other item-scoped table source defined
 
     if source == "project_info":
         dur = ctx.get("duration") or {}
@@ -462,11 +510,19 @@ def _resolve_detailed_progress_table(cfg, ctx, styles):
 
 def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float):
     """Build a ready-to-draw Drawing for one of reportElements.ts's
-    CHART_SOURCES, at the given box size (points) — or None with nothing to
-    show. `item.*`-scoped sources (repeat pages) are phase 2."""
-    if isinstance(source, str) and source.startswith("item."):
-        return None
+    CHART_SOURCES (plus the item-scoped `item.units`/`item.duration`,
+    available on a repeating page), at the given box size (points) — or None
+    with nothing to show."""
     labels = cfg["labels"]
+
+    if source == "item.units":
+        item = scope.get("item") or {}
+        return area_units_chart(cfg, item, w, labels, height=h)
+    if source == "item.duration":
+        item = scope.get("item") or {}
+        return zone_duration_pie(cfg, item.get("duration"), w, labels, height=h)
+    if isinstance(source, str) and source.startswith("item."):
+        return None  # no other item-scoped chart source defined
 
     if source == "zone_progress":
         return planned_actual_chart(cfg, ctx, w, labels, height=h)
@@ -519,7 +575,18 @@ def expand_pages(cfg, ctx, report) -> list:
     return out
 
 
+_REPEAT_SOURCES = {
+    "photos": "photos",
+    "attachments": "attachments",
+    "area_dashboards": "area_dashboards",
+    "zones": "zones",
+    "areas": "areas",
+}
+
+
 def _repeat_items(source, ctx, report) -> list:
-    """Phase 2 fills this in — maps a repeat source to its ctx list
-    (photos/attachments/area_dashboards/zones/areas)."""
-    return []
+    """Map a repeat source to its ctx list. `report` isn't needed today (every
+    source is already computed onto ctx by build_report_context) but is kept
+    in the signature in case a future source needs a fresh query."""
+    key = _REPEAT_SOURCES.get(source)
+    return list(ctx.get(key) or []) if key else []

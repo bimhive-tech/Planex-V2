@@ -44,7 +44,8 @@ export type IconName =
   | "alignRight"
   | "sparkles"
   | "paperclip"
-  | "send";
+  | "send"
+  | "refresh";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -282,6 +283,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   send: (
     <>
       <path d="m3 11 18-8-8 18-2.5-7.5L3 11Z" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M21 12a9 9 0 0 1-15.3 6.4M3 12a9 9 0 0 1 15.3-6.4" />
+      <path d="M21 4v5h-5M3 20v-5h5" />
     </>
   ),
 };

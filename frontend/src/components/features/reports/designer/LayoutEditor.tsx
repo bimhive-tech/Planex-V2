@@ -33,10 +33,13 @@ interface Props {
   /** Master elements drawn as ghosts behind the editable ones. */
   masterElements?: LayoutElement[];
   emptyHint?: string;
+  /** True when the active page is set to repeat — unlocks item-scoped
+   * field/table/chart sources in the inspector (Report Configuration only). */
+  repeating?: boolean;
 }
 
 export function LayoutEditor({
-  design, elements, onElementsChange, leftHeader, masterElements, emptyHint,
+  design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -178,7 +181,7 @@ export function LayoutEditor({
         )}
       </main>
 
-      <ElementInspector el={selected} onChange={updateElement} />
+      <ElementInspector el={selected} onChange={updateElement} repeating={repeating} />
     </div>
   );
 }

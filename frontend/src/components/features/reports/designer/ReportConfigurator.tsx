@@ -6,10 +6,12 @@
 import { useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
-import { newElementId } from "@/lib/reportLayout";
-import type { LayoutElement, LayoutPage, PageDesign } from "@/lib/reportLayout";
+import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
+import type { LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource } from "@/lib/reportLayout";
 import { LayoutEditor } from "./LayoutEditor";
 import styles from "./designer.module.css";
+
+const DEFAULT_REPEAT: PageRepeat = { source: "photos", mode: "chunk", chunk_size: 4 };
 
 interface Props {
   design: PageDesign;
@@ -70,6 +72,21 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
     });
   }
 
+  function toggleRepeat(id: string) {
+    onChange((prev) => prev.map((p) => {
+      if (p.id !== id) return p;
+      if (!p.repeat) return { ...p, repeat: DEFAULT_REPEAT };
+      const next = { ...p };
+      delete next.repeat;
+      return next;
+    }));
+  }
+
+  function setRepeat(id: string, patch: Partial<PageRepeat>) {
+    onChange((prev) => prev.map((p) =>
+      p.id === id && p.repeat ? { ...p, repeat: { ...p.repeat, ...patch } } : p));
+  }
+
   const pageList = (
     <section className={styles.setupPanel} aria-label="Report pages">
       <div className={styles.pagesHead}>
@@ -92,6 +109,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
               onDoubleClick={() => setRenamingId(page.id)}
             >
               <span className={styles.pageIndex}>{index + 1}</span>
+              {page.repeat && <Icon name="refresh" size={12} className={styles.repeatBadge} />}
               {renamingId === page.id ? (
                 <input
                   className={styles.pageNameInput}
@@ -121,6 +139,12 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
               >
                 <Icon name="chevronDown" size={12} />
               </button>
+              <button
+                type="button" onClick={() => toggleRepeat(page.id)} aria-label="Repeat this page per item"
+                className={page.repeat ? styles.repeatActive : undefined}
+              >
+                <Icon name="refresh" size={12} />
+              </button>
               <button type="button" onClick={() => duplicatePage(page.id)} aria-label="Duplicate page">
                 <Icon name="copy" size={12} />
               </button>
@@ -135,6 +159,43 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
         ))}
       </div>
       <p className={styles.panelHint}>Double-click a page name to rename it.</p>
+
+      {active.repeat && (
+        <div className={styles.repeatPanel}>
+          <h3 className={styles.repeatPanelTitle}>Repeat this page</h3>
+          <p className={styles.panelHint}>
+            One page becomes many — cloned once per {active.repeat.mode === "chunk" ? "chunk of" : ""} item below.
+          </p>
+          <label className={styles.propField}>
+            <span>Source</span>
+            <select
+              value={active.repeat.source}
+              onChange={(e) => setRepeat(active.id, { source: e.target.value as RepeatSource })}
+            >
+              {REPEAT_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </label>
+          <label className={styles.propField}>
+            <span>Mode</span>
+            <select
+              value={active.repeat.mode}
+              onChange={(e) => setRepeat(active.id, { mode: e.target.value as "one_per_item" | "chunk" })}
+            >
+              <option value="one_per_item">One page per item</option>
+              <option value="chunk">Group N items per page</option>
+            </select>
+          </label>
+          {active.repeat.mode === "chunk" && (
+            <label className={styles.propField}>
+              <span>Items per page</span>
+              <input
+                type="number" min={1} value={active.repeat.chunk_size ?? 4}
+                onChange={(e) => setRepeat(active.id, { chunk_size: Number(e.target.value) })}
+              />
+            </label>
+          )}
+        </div>
+      )}
     </section>
   );
 
@@ -147,6 +208,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
       masterElements={design.master_elements}
       leftHeader={pageList}
       emptyHint="Drag an element from the left onto the page to start building this page."
+      repeating={Boolean(active.repeat)}
     />
   );
 }

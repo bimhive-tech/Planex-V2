@@ -77,6 +77,28 @@ export const CHART_SOURCES = [
   { value: "gantt", label: "Gantt schedule" },
 ];
 
+// Only offered on a page marked "repeat" — resolved against the item the
+// current clone is showing, not the whole project (e.g. "item.name" on a
+// per-zone page reads THAT zone's name, not the first one's).
+export const ITEM_FIELD_SOURCES = [
+  { value: "item.name", label: "Item: name" },
+  { value: "item.progress", label: "Item: progress %" },
+  { value: "item.planned", label: "Item: planned %" },
+  { value: "item.previous", label: "Item: previous %" },
+  { value: "item.caption", label: "Item: caption" },
+  { value: "item.index", label: "Item: number (1, 2, 3…)" },
+  { value: "item.count", label: "Item: total count" },
+];
+
+export const ITEM_TABLE_SOURCES = [
+  { value: "item.children", label: "Item: sub-areas" },
+];
+
+export const ITEM_CHART_SOURCES = [
+  { value: "item.units", label: "Item: unit progress" },
+  { value: "item.duration", label: "Item: duration & delay" },
+];
+
 export const ELEMENT_CATALOG: ElementCategory[] = [
   {
     key: "general",
@@ -88,6 +110,9 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
         props: { text: "Section heading", size: 16, color: "#1F4E79", align: "left", bold: true } },
       { key: "image", label: "Image", type: "image", icon: "image", w: 60, h: 45,
         props: { fit: "cover" }, hint: "Placeholder until a photo is picked per report." },
+      { key: "photo_slot", label: "Photo slot", type: "image", icon: "image", w: 75, h: 55,
+        props: { source: "repeat.item", slot: 0, show_caption: true, fit: "contain" },
+        hint: "Only fills in on a repeating page (e.g. Site Photos) — pick which slot in the Properties panel." },
       { key: "rect", label: "Rectangle", type: "rect", icon: "table", w: 60, h: 30,
         props: { fill: "#eef3f8", stroke: "#1F4E79", stroke_width: 0.5, radius: 0 } },
       { key: "ellipse", label: "Ellipse", type: "ellipse", icon: "clock", w: 40, h: 40,

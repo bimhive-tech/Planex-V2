@@ -33,10 +33,34 @@ export interface LayoutElement {
   props: Record<string, unknown>;
 }
 
+/** Data sources a repeating page can clone itself against — mirrors
+ * apps/reports/pdf_canvas.py's _REPEAT_SOURCES. */
+export type RepeatSource = "photos" | "attachments" | "area_dashboards" | "zones" | "areas";
+
+export const REPEAT_SOURCES: { value: RepeatSource; label: string }[] = [
+  { value: "photos", label: "Site photos" },
+  { value: "attachments", label: "Attachments" },
+  { value: "area_dashboards", label: "Area dashboards (per zone)" },
+  { value: "zones", label: "Zones" },
+  { value: "areas", label: "Areas" },
+];
+
+export interface PageRepeat {
+  source: RepeatSource;
+  mode: "one_per_item" | "chunk";
+  /** Items per page when mode is "chunk" (e.g. 4 photos per page). */
+  chunk_size?: number;
+  /** Safety cap so a huge project can't emit hundreds of pages. */
+  max_pages?: number;
+}
+
 export interface LayoutPage {
   id: string;
   name: string;
   elements: LayoutElement[];
+  /** Absent = a single fixed page (default). Set to clone this page once per
+   * item (or per chunk of items) from a live data source. */
+  repeat?: PageRepeat;
 }
 
 export interface PageDesign {

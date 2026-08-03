@@ -350,9 +350,7 @@ class ResolveChartTests(SimpleTestCase):
 
 
 class ExpandPagesTests(SimpleTestCase):
-    """`expand_pages` for fixed (non-repeat) pages — repeat expansion itself
-    lands in phase 2, but the no-repeat path is real now and must stay
-    correct once repeat is added alongside it."""
+    """`expand_pages` for both fixed (non-repeat) and repeating pages."""
 
     def test_fixed_pages_yield_one_instance_each_in_order(self):
         cfg = {"layout": {"pages": [
@@ -367,13 +365,119 @@ class ExpandPagesTests(SimpleTestCase):
     def test_no_pages_yields_no_instances(self):
         self.assertEqual(expand_pages({"layout": {"pages": []}}, _sample_ctx(), report=None), [])
 
-    def test_repeat_page_with_no_items_yet_implemented_is_skipped(self):
-        # _repeat_items is a phase-2 stub returning [] today — a repeating
-        # page must not crash or emit a page in the meantime.
+    def test_repeat_page_with_empty_source_is_skipped(self):
         cfg = {"layout": {"pages": [
             {"id": "a", "name": "Photos", "elements": [], "repeat": {"source": "photos", "mode": "chunk"}},
         ]}}
         self.assertEqual(expand_pages(cfg, _sample_ctx(), report=None), [])
+
+    def test_chunk_mode_splits_photos_four_per_page(self):
+        ctx = _sample_ctx()
+        ctx["photos"] = [{"image": f"k{i}", "caption": f"Photo {i}"} for i in range(9)]
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Photos", "elements": [],
+             "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 4}},
+        ]}}
+        instances = expand_pages(cfg, ctx, report=None)
+        self.assertEqual(len(instances), 3)  # 9 photos / 4 per page -> 3 pages
+        self.assertEqual(len(instances[0].scope["items"]), 4)
+        self.assertEqual(len(instances[1].scope["items"]), 4)
+        self.assertEqual(len(instances[2].scope["items"]), 1)  # last page: the remainder
+        self.assertEqual(instances[0].scope["items"][0]["caption"], "Photo 0")
+        self.assertEqual(instances[2].scope["items"][0]["caption"], "Photo 8")
+        self.assertEqual([i.number for i in instances], [1, 2, 3])
+
+    def test_one_per_item_yields_one_instance_per_zone(self):
+        ctx = _sample_ctx()  # already has 2 zones
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Zone", "elements": [], "repeat": {"source": "zones", "mode": "one_per_item"}},
+        ]}}
+        instances = expand_pages(cfg, ctx, report=None)
+        self.assertEqual(len(instances), 2)
+        self.assertEqual(instances[0].scope["item"]["name"], "المنطقة الأولى")
+        self.assertEqual(instances[1].scope["item"]["name"], "Zone B")
+        self.assertEqual(instances[0].scope["count"], 2)
+
+    def test_max_pages_caps_runaway_expansion(self):
+        ctx = _sample_ctx()
+        ctx["photos"] = [{"image": f"k{i}", "caption": ""} for i in range(500)]
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Photos", "elements": [],
+             "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 4, "max_pages": 5}},
+        ]}}
+        self.assertEqual(len(expand_pages(cfg, ctx, report=None)), 5)
+
+    def test_mixed_fixed_and_repeat_pages_keep_document_order(self):
+        ctx = _sample_ctx()
+        ctx["photos"] = [{"image": "k1", "caption": ""}, {"image": "k2", "caption": ""}]
+        cfg = {"layout": {"pages": [
+            {"id": "cover", "name": "Cover", "elements": []},
+            {"id": "photos", "name": "Photos", "elements": [],
+             "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 1}},
+            {"id": "back", "name": "Back cover", "elements": []},
+        ]}}
+        instances = expand_pages(cfg, ctx, report=None)
+        self.assertEqual([i.page["id"] for i in instances], ["cover", "photos", "photos", "back"])
+        self.assertEqual([i.number for i in instances], [1, 2, 3, 4])
+
+
+class RepeatBindingTests(SimpleTestCase):
+    """Item-scoped bindings (`item.*`) resolved against the current repeat
+    scope — the piece that makes a designed page template show each item's
+    own data instead of repeating the first one."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    def test_item_name_and_progress_from_a_zone(self):
+        scope = {"item": {"name": "Zone A", "progress": 88.5}, "index": 0, "count": 2}
+        self.assertEqual(resolve_field("item.name", {}, scope, page_no=1), "Zone A")
+        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "88.5%")
+
+    def test_item_progress_falls_back_to_actual_for_area_dashboards(self):
+        scope = {"item": {"name": "Zone A", "actual": 72.0}, "index": 0, "count": 1}
+        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "72.0%")
+
+    def test_item_index_is_one_based_and_item_count_reflects_total(self):
+        scope = {"item": {"name": "X"}, "index": 2, "count": 5}
+        self.assertEqual(resolve_field("item.index", {}, scope, page_no=1), "3")
+        self.assertEqual(resolve_field("item.count", {}, scope, page_no=1), "5")
+
+    def test_item_caption_from_a_photo(self):
+        scope = {"item": {"image": "k1", "caption": "Foundation works"}, "index": 0, "count": 1}
+        self.assertEqual(resolve_field("item.caption", {}, scope, page_no=1), "Foundation works")
+
+    def test_item_children_table_from_area_dashboard_item(self):
+        cfg = default_config()
+        scope = {"item": {"name": "Zone A", "children": [
+            {"name": "Sub 1", "actual": 90.0, "planned": 92.0},
+            {"name": "Sub 2", "actual": 60.0, "planned": None},
+        ]}}
+        table = resolve_table("item.children", cfg, _sample_ctx(), scope)
+        self.assertIsNotNone(table)
+
+    def test_item_children_table_none_when_item_has_no_children(self):
+        cfg = default_config()
+        self.assertIsNone(resolve_table("item.children", cfg, _sample_ctx(), {"item": {"name": "Zone A"}}))
+
+    def test_item_units_chart_from_area_dashboard_item(self):
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+        cfg = default_config()
+        scope = {"item": {"name": "Zone A", "children": [
+            {"name": "Unit 1", "actual": 80.0}, {"name": "Unit 2", "actual": 60.0},
+        ]}}
+        drawing = resolve_chart("item.units", "bar", cfg, _sample_ctx(), scope, 100, 70)
+        self.assertIsNotNone(drawing)
+
+    def test_item_duration_chart_from_area_dashboard_item(self):
+        cfg = default_config()
+        scope = {"item": {"name": "Zone A", "duration": {"total": 300, "delay": 10}}}
+        drawing = resolve_chart("item.duration", "pie", cfg, _sample_ctx(), scope, 100, 70)
+        self.assertIsNotNone(drawing)
 
 
 class HierarchyRowsTests(TestCase):
