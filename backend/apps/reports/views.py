@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from apps.accounts.constants import Permission
 
 from .constants import merged_config
+from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf
 from .pdf_canvas import build_canvas_pdf, has_canvas_layout
@@ -44,6 +45,21 @@ class ReportTemplateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company)
+
+    @action(detail=True, methods=["post"], url_path="seed-layout")
+    def seed_layout(self, request, pk=None):
+        """"Start from my current sections" — build a canvas layout from this
+        template's existing Content & Labels config. Overwrites any existing
+        page_design/layout on the template with the seeded starting point."""
+        template = self.get_object()
+        cfg = merged_config(template.config)
+        seeded = seed_layout_from_sections(cfg)
+        config = dict(template.config or {})
+        config["page_design"] = seeded["page_design"]
+        config["layout"] = seeded["layout"]
+        template.config = config
+        template.save(update_fields=["config", "updated_at"])
+        return Response(ReportTemplateSerializer(template).data)
 
 
 class ReportViewSet(viewsets.ModelViewSet):

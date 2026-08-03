@@ -10,6 +10,7 @@ from apps.accounts.models import Company, Membership, Role, User
 from apps.projects.models import Project
 
 from .constants import default_config, merged_config
+from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
 from .pdf_canvas import (
@@ -772,6 +773,79 @@ class FinanceReportTests(TestCase):
         self.assertTrue(data.startswith(b"%PDF"))
 
 
+class LayoutSeedTests(SimpleTestCase):
+    """seed_layout_from_sections is pure config -> config logic (no DB/ctx
+    needed) — the "Start from my current sections" starting point for
+    templates authored before the canvas engine existed."""
+
+    def test_default_config_seeds_a_canvas_layout(self):
+        cfg = default_config()
+        seeded = seed_layout_from_sections(cfg)
+        cfg["page_design"] = seeded["page_design"]
+        cfg["layout"] = seeded["layout"]
+        self.assertTrue(has_canvas_layout(cfg))
+
+    def test_one_page_per_enabled_section_plus_cover(self):
+        cfg = default_config()
+        seeded = seed_layout_from_sections(cfg)
+        names = [p["name"] for p in seeded["layout"]["pages"]]
+        self.assertEqual(names[0], "Cover")  # cover.enabled defaults True
+        # area_progress_chart defaults off — every other default-on section
+        # should have produced exactly one page (repeat pages count as one
+        # entry here; they expand at render time, not at seed time).
+        self.assertNotIn("Planned vs Actual by Area", names)
+        self.assertIn("Project Info", names)
+        self.assertIn("Site Photos", names)
+        self.assertIn("Attachments", names)
+
+    def test_everything_off_yields_one_blank_page(self):
+        cfg = default_config()
+        cfg["cover"]["enabled"] = False
+        for key in cfg["sections"]:
+            cfg["sections"][key] = False
+        seeded = seed_layout_from_sections(cfg)
+        pages = seeded["layout"]["pages"]
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0]["elements"], [])
+
+    def test_repeat_pages_carry_the_right_repeat_rule(self):
+        cfg = default_config()
+        seeded = seed_layout_from_sections(cfg)
+        by_name = {p["name"]: p for p in seeded["layout"]["pages"]}
+        self.assertEqual(by_name["Site Photos"]["repeat"],
+                         {"source": "photos", "mode": "chunk", "chunk_size": 4})
+        self.assertEqual(by_name["Attachments"]["repeat"],
+                         {"source": "attachments", "mode": "chunk", "chunk_size": 1})
+        self.assertEqual(by_name["Area Dashboards"]["repeat"],
+                         {"source": "area_dashboards", "mode": "one_per_item"})
+
+    def test_page_design_follows_page_config(self):
+        cfg = default_config()
+        cfg["page"] = {"size": "A3", "orientation": "landscape", "margin_mm": 20}
+        seeded = seed_layout_from_sections(cfg)
+        design = seeded["page_design"]
+        self.assertEqual(design["size"], "A3")
+        self.assertEqual(design["orientation"], "landscape")
+        self.assertEqual(design["margin_mm"], 20)
+
+    def test_no_element_escapes_the_page_bounds(self):
+        """Every seeded element's box should sit inside the page it belongs
+        to — catches the `_info_table`-in-a-narrow-box overflow class of bug
+        (an element whose declared box exceeds the page, not just a Table's
+        internal auto-sizing quirk)."""
+        cfg = default_config()
+        seeded = seed_layout_from_sections(cfg)
+        design = seeded["page_design"]
+        from .pdf_canvas import _page_size_mm
+        pw, ph = _page_size_mm(design)
+        for page in seeded["layout"]["pages"]:
+            for el in page["elements"] + design["master_elements"]:
+                self.assertGreaterEqual(el["x"], 0)
+                self.assertGreaterEqual(el["y"], 0)
+                self.assertLessEqual(round(el["x"] + el["w"], 1), pw)
+                self.assertLessEqual(round(el["y"] + el["h"], 1), ph)
+
+
 class ReportsApiTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Acme")
@@ -881,3 +955,22 @@ class ReportsApiTests(TestCase):
         res = self.client.get("/api/reports/")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["count"], 0)  # can't see Acme's report
+
+    def test_seed_layout_populates_canvas_from_sections(self):
+        template = ReportTemplate.objects.create(company=self.company, name="Legacy MCG")
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(f"/api/report-templates/{template.id}/seed-layout/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("layout", res.data["config"])
+        self.assertIn("page_design", res.data["config"])
+        template.refresh_from_db()
+        self.assertTrue(has_canvas_layout(merged_config(template.config)))
+        # The template's own labels/colors carry through unchanged — seeding
+        # only adds page_design/layout, it doesn't touch the rest of config.
+        self.assertIn("colors", template.config)
+
+    def test_seed_layout_needs_export_permission(self):
+        template = ReportTemplate.objects.create(company=self.company, name="Legacy MCG")
+        self.client.force_authenticate(self.viewer)
+        res = self.client.post(f"/api/report-templates/{template.id}/seed-layout/")
+        self.assertEqual(res.status_code, 403)

@@ -132,6 +132,26 @@
   min-height: 680px;
 }
 
+.seedBanner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-primary);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-md);
+}
+
+.seedBanner p {
+  flex: 1;
+  min-width: 220px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
 .palette,
 .inspector {
   display: flex;

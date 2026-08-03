@@ -41,6 +41,7 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
 
   const { loading, error, reload } = useFetch(async () => {
     const template = await api.get<ReportTemplate>(`/report-templates/${templateId}/`);
@@ -85,9 +86,25 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
     }
   }
 
+  async function handleSeedLayout() {
+    setSeeding(true);
+    setActionError(null);
+    try {
+      const updated = await api.post<ReportTemplate>(`/report-templates/${templateId}/seed-layout/`);
+      setConfig(updated.config);
+      setMode("layout");
+      setSaved(true); // the endpoint already persisted this layout server-side
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't build a starting layout.");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   const section = BUILDER_SECTIONS.find((s) => s.key === activeKey) ?? BUILDER_SECTIONS[0];
   const design = readPageDesign(config);
   const pages = readPages(config);
+  const canvasIsEmpty = pages.every((p) => p.elements.length === 0 && !p.repeat);
 
   return (
     <div className={styles.page}>
@@ -140,7 +157,20 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
         {mode === "design" && <PageDesigner design={design} onChange={setDesign} />}
 
         {mode === "layout" && (
-          <ReportConfigurator design={design} pages={pages} onChange={setPages} />
+          <>
+            {canvasIsEmpty && (
+              <div className={styles.seedBanner}>
+                <p>
+                  This canvas is empty — the PDF still uses your Content & Labels sections below.
+                  Start from a layout built from those sections instead of from scratch.
+                </p>
+                <Button onClick={handleSeedLayout} disabled={seeding} variant="secondary">
+                  {seeding ? "Building…" : "Start from my current sections"}
+                </Button>
+              </div>
+            )}
+            <ReportConfigurator design={design} pages={pages} onChange={setPages} />
+          </>
         )}
 
         {mode === "content" && (
