@@ -428,6 +428,36 @@ def _area_dashboards(project, hierarchy, as_of):
     return out
 
 
+def _critical_path_rows(project, hierarchy, as_of):
+    """Per-zone baseline finish vs current forecast, for zones carrying their
+    own P6-imported schedule (planned_start/finish) — the "which buildings
+    are slipping and by how much" table. `forecast_finish` reuses
+    `_zone_duration`'s existing delay math (revised_finish if the zone has
+    one, else however far the as-of date has run past the baseline) rather
+    than a fresh calculation, so it stays consistent with the duration pie
+    shown elsewhere for the same zone."""
+    zone_ids = [z["id"] for z in hierarchy]
+    zones_by_id = {str(s.id): s for s in project.scopes.filter(id__in=zone_ids)}
+    rows = []
+    for z in hierarchy:
+        zone = zones_by_id.get(z["id"])
+        if not zone or not (zone.planned_start and zone.planned_finish):
+            continue
+        dur = _zone_duration(zone, project, as_of)
+        if not dur:
+            continue
+        forecast = zone.revised_finish or (
+            zone.planned_finish + datetime.timedelta(days=dur["delay"]) if dur["delay"] else zone.planned_finish
+        )
+        rows.append({
+            "name": z["name"],
+            "planned_finish": zone.planned_finish,
+            "forecast_finish": forecast,
+            "delay_days": dur["delay"],
+        })
+    return rows
+
+
 def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
     """The schedule-style grid per zone: subzones as columns, tasks (grouped by
     phase) as rows, each cell an activity's progress. Honours the scope selection
@@ -521,6 +551,7 @@ def build_report_context(report):
              for z in hierarchy for c in z["children"]]
     discipline = _discipline_rows(project, report.scope_ids, progress)
     area_dashboards = _area_dashboards(project, hierarchy, as_of)
+    critical_path = _critical_path_rows(project, hierarchy, as_of)
     gantt = _gantt_rows(project, report.scope_ids, progress)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
@@ -637,6 +668,7 @@ def build_report_context(report):
         "hierarchy": hierarchy,
         "discipline": discipline,
         "area_dashboards": area_dashboards,
+        "critical_path": critical_path,
         "gantt": gantt,
         "zone_grids": zone_grids,
         # Internal: as-of progress map so the PDF's lazy grid matches the report

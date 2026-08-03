@@ -17,7 +17,8 @@ export type ElementType =
   | "logo"
   | "field"
   | "table"
-  | "chart";
+  | "chart"
+  | "toc";
 
 export interface LayoutElement {
   id: string;

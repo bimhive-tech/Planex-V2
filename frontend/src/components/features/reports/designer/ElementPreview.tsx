@@ -81,6 +81,20 @@ function ChartPreview({ el }: { el: LayoutElement }) {
   );
 }
 
+function TocPreview() {
+  return (
+    <div className={styles.tocPreview}>
+      {["Cover", "Project Info", "Executive Dashboard", "Cash Flow", "Photos"].map((name, i) => (
+        <div key={name} className={styles.tocPreviewRow}>
+          <span>{name}</span>
+          <span className={styles.tocPreviewDots} />
+          <span>{i + 1}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ElementPreview({ el }: { el: LayoutElement }) {
   const p = el.props;
 
@@ -172,6 +186,9 @@ export function ElementPreview({ el }: { el: LayoutElement }) {
 
     case "chart":
       return <ChartPreview el={el} />;
+
+    case "toc":
+      return <TocPreview />;
 
     default:
       return null;

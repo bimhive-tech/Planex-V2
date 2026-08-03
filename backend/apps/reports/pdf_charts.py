@@ -2,12 +2,13 @@
 planned/actual bars, duration pie, overall donut, and Time-Performance S-curve.
 All built from data we already have (actual + derived planned/previous/duration)."""
 import datetime
+import math
 
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.legends import Legend
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
-from reportlab.graphics.shapes import Drawing, Line, Rect, String
+from reportlab.graphics.shapes import Circle, Drawing, Line, Polygon, Rect, String, Wedge
 from reportlab.lib.units import mm
 
 from .pdf_base import BOLD, FONT_NAME, hexcolor, shape
@@ -261,6 +262,48 @@ def overall_donut(cfg, ctx, width, labels, height=None):
     cx, cy = pie.x + pw / 2, pie.y + pw / 2
     d.add(String(cx, cy - 5, f"{overall:.1f}%", fontName=FONT_NAME, fontSize=13,
                  fillColor=hexcolor(cfg["colors"]["heading"]), textAnchor="middle"))
+    return d
+
+
+_GAUGE_BANDS = [(0, 50, "#C0504D"), (50, 80, "#E8B33D"), (80, 100, "#2E9E5B")]
+
+
+def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
+    """Semicircular SPI/completion gauge — red/amber/green bands with a needle
+    at `value` (0..max_value) and the number printed under the hub. `value`
+    is a plain number (not read from ctx) so the same drawing serves the
+    project-level overall % and any per-zone/per-item % a caller has on hand."""
+    if value is None:
+        return None
+    height = height or 45 * mm
+    d = Drawing(width, height)
+    cx, cy = width / 2, height * 0.22
+    r_outer = min(width / 2, height * 0.75) * 0.92
+    r_inner = r_outer * 0.55
+
+    for lo, hi, color in _GAUGE_BANDS:
+        a0 = 180 - (lo / max_value) * 180
+        a1 = 180 - (hi / max_value) * 180
+        d.add(Wedge(cx, cy, r_outer, a1, a0, innerRadius=r_inner,
+                    fillColor=hexcolor(color), strokeColor=hexcolor("#ffffff"), strokeWidth=0.5))
+
+    v = max(0.0, min(max_value, float(value)))
+    angle = math.radians(180 - (v / max_value) * 180)
+    tip_x, tip_y = cx + r_outer * 0.85 * math.cos(angle), cy + r_outer * 0.85 * math.sin(angle)
+    perp = angle + math.pi / 2
+    base_w = r_outer * 0.06
+    base1 = (cx + base_w * math.cos(perp), cy + base_w * math.sin(perp))
+    base2 = (cx - base_w * math.cos(perp), cy - base_w * math.sin(perp))
+    needle_color = hexcolor("#1e2430")
+    d.add(Polygon([base1[0], base1[1], base2[0], base2[1], tip_x, tip_y],
+                  fillColor=needle_color, strokeColor=None))
+    d.add(Circle(cx, cy, base_w * 1.4, fillColor=needle_color, strokeColor=None))
+
+    d.add(String(cx, cy - r_outer * 0.55, f"{v:.0f}%", fontName=BOLD, fontSize=13,
+                 fillColor=hexcolor(cfg["colors"]["heading"]), textAnchor="middle"))
+    if title:
+        d.add(String(cx, height - 8, shape(title), fontName=FONT_NAME, fontSize=8,
+                     fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
     return d
 
 

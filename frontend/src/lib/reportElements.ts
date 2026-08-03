@@ -32,6 +32,7 @@ export const CHART_TYPES = [
   { value: "pie", label: "Pie" },
   { value: "donut", label: "Donut" },
   { value: "stacked", label: "Stacked bar" },
+  { value: "gauge", label: "Gauge" },
 ];
 
 /** Live values a `field` element can bind to — resolved per report at render. */
@@ -42,6 +43,7 @@ export const FIELD_SOURCES = [
   { value: "project.consultant", label: "Consultant" },
   { value: "project.contractor", label: "Contractor" },
   { value: "project.location", label: "Location" },
+  { value: "project.description", label: "Project description" },
   { value: "report.title", label: "Report title" },
   { value: "report.number", label: "Report number" },
   { value: "report.period", label: "Reporting period" },
@@ -58,6 +60,7 @@ export const TABLE_SOURCES = [
   { value: "hierarchy_progress", label: "Zone / area breakdown" },
   { value: "discipline_progress", label: "Progress by trade" },
   { value: "detailed_progress", label: "Detailed activities" },
+  { value: "critical_path_delays", label: "Critical path delays" },
   { value: "progress_compare", label: "Plan vs actual" },
   { value: "milestones", label: "Milestones" },
   { value: "invoices", label: "Invoices" },
@@ -71,6 +74,7 @@ export const CHART_SOURCES = [
   { value: "area_progress", label: "Progress by area" },
   { value: "scurve", label: "S-curve (planned vs actual)" },
   { value: "breakdown", label: "Completion breakdown" },
+  { value: "spi", label: "SPI gauge (overall)" },
   { value: "duration", label: "Duration & delay" },
   { value: "cashflow_monthly", label: "Cash flow — monthly" },
   { value: "cashflow_cumulative", label: "Cash flow — cumulative" },
@@ -97,6 +101,7 @@ export const ITEM_TABLE_SOURCES = [
 export const ITEM_CHART_SOURCES = [
   { value: "item.units", label: "Item: unit progress" },
   { value: "item.duration", label: "Item: duration & delay" },
+  { value: "item.spi", label: "Item: SPI gauge" },
 ];
 
 export const ELEMENT_CATALOG: ElementCategory[] = [
@@ -139,6 +144,9 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
                  label: "", show_label: false } },
       { key: "page_number", label: "Page number", type: "field", icon: "listOrdered", w: 30, h: 8,
         props: { source: "page.number", size: 10, color: "#595959", align: "right" } },
+      { key: "toc", label: "Table of contents", type: "toc", icon: "list", w: 170, h: 120,
+        props: { size: 11, row_height: 8, color: "#1e2430", exclude_cover: true },
+        hint: "Lists every other page in this template with its real page number — resolved at render time, no manual upkeep." },
     ],
   },
   {
@@ -155,6 +163,8 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
         props: { source: "project_info", zebra: false, border: true, header_bg: "#1F4E79", header_text: "#ffffff" } },
       { key: "table_milestones", label: "Milestones", type: "table", icon: "flag", w: 170, h: 50,
         props: { source: "milestones", zebra: true, border: true, header_bg: "#1F4E79", header_text: "#ffffff" } },
+      { key: "table_critical_path", label: "Critical path delays", type: "table", icon: "flag", w: 170, h: 60,
+        props: { source: "critical_path_delays", zebra: true, border: true, header_bg: "#1F4E79", header_text: "#ffffff" } },
     ],
   },
   {
@@ -170,6 +180,8 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
       { key: "chart_breakdown", label: "Completion donut", type: "chart", icon: "clock", w: 70, h: 70,
         props: { source: "breakdown", chart_type: "donut", legend: true,
                  color_a: "#2E74B5", color_b: "#C0504D" } },
+      { key: "chart_spi", label: "SPI gauge", type: "chart", icon: "dashboard", w: 65, h: 45,
+        props: { source: "spi", chart_type: "gauge", legend: false } },
       { key: "chart_cashflow", label: "Cash flow", type: "chart", icon: "money", w: 130, h: 70,
         props: { source: "cashflow_monthly", chart_type: "bar", legend: true,
                  color_a: "#2E74B5", color_b: "#C0504D" } },

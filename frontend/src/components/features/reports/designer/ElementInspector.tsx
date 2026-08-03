@@ -105,6 +105,13 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "color_a", label: "Series A", kind: "color" },
         { path: "color_b", label: "Series B", kind: "color" },
       ];
+    case "toc":
+      return [
+        { path: "size", label: "Size (pt)", kind: "number" },
+        { path: "row_height", label: "Row height (mm)", kind: "number", step: 0.5 },
+        { path: "color", label: "Color", kind: "color" },
+        { path: "exclude_cover", label: "Exclude cover page", kind: "toggle" },
+      ];
     default:
       return [];
   }

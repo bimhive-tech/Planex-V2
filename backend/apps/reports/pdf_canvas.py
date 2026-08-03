@@ -13,6 +13,7 @@ from io import BytesIO
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import Paragraph
 
@@ -28,6 +29,7 @@ from .pdf_charts import (
     overall_donut,
     planned_actual_chart,
     scurve_chart,
+    speedometer_chart,
     zone_duration_pie,
 )
 from .pdf_layout import _draw_contained_image, _period_str
@@ -101,6 +103,20 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     c = _canvas.Canvas(buf, pagesize=(page_w_mm * mm, page_h_mm * mm))
 
     instances = expand_pages(cfg, ctx, report)
+    # Page numbers are fully known before anything is drawn (expand_pages
+    # already assigned them), so a "toc" element can resolve real page
+    # numbers in a single pass — no two-pass render needed. One row per
+    # distinct page id (a repeat page's many clones collapse to its first).
+    toc_map, toc_order, seen = {}, [], set()
+    for inst in instances:
+        pid = inst.page.get("id")
+        if pid not in toc_map:
+            toc_map[pid] = inst.number
+        if pid not in seen:
+            seen.add(pid)
+            toc_order.append((pid, inst.page.get("name") or ""))
+    ctx["_toc_map"], ctx["_toc_order"] = toc_map, toc_order
+
     for inst in instances:
         _render_page(c, design, master_elements, inst, cfg, ctx, page_w_mm, page_h_mm)
         c.showPage()
@@ -163,6 +179,8 @@ def _draw_element(c, el: dict, box, inst: PageInstance, cfg, ctx):
             _draw_table_element(c, props, x, y, w, h, inst, cfg, ctx)
         elif t == "chart":
             _draw_chart_element(c, props, x, y, w, h, inst, cfg, ctx)
+        elif t == "toc":
+            _draw_toc_element(c, props, x, y, w, h, inst, ctx)
     except Exception:
         # One bad element shouldn't fail the whole report — same principle as
         # _draw_contained_image's existing "skip the one unreadable image".
@@ -221,7 +239,11 @@ def _draw_text(c, props, x, y, w, h):
     text = str(props.get("text") or "")
     if not text:
         return
-    para = Paragraph(shape(text), _text_style(props))
+    # Shape each line separately, then join with <br/> — shape() bidi-reorders
+    # per call, and a multi-line field (e.g. project.description) needs each
+    # line reordered on its own, not the whole block as one bidi run.
+    body = "<br/>".join(shape(line) for line in text.splitlines()) or shape(text)
+    para = Paragraph(body, _text_style(props))
     _, needed_h = para.wrap(w, h)
     para.drawOn(c, x, y + h - min(needed_h, h))
 
@@ -272,6 +294,53 @@ def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
         para = Paragraph(shape(item["caption"]), style)
         para.wrap(w, caption_h)
         para.drawOn(c, x, y)
+
+
+def _draw_toc_element(c, props, x, y, w, h, inst: PageInstance, ctx):
+    """Lists every other page in the template with its real, resolved page
+    number and a dotted leader — built from the number map build_canvas_pdf
+    computes up front (see build_canvas_pdf's toc_map/toc_order)."""
+    toc_map, toc_order = ctx.get("_toc_map") or {}, ctx.get("_toc_order") or []
+    own_id = inst.page.get("id")
+    exclude_cover = props.get("exclude_cover", True)
+    size = float(props.get("size", 11))
+    row_h = float(props.get("row_height", 8)) * mm
+    color = hexcolor(props.get("color", "#1e2430"))
+    rtl = bool(ctx.get("arabic"))
+
+    rows = []
+    for pid, name in toc_order:
+        if pid == own_id or pid not in toc_map:
+            continue
+        if exclude_cover and name.strip().lower() in ("cover",):
+            continue
+        rows.append((name, toc_map[pid]))
+
+    c.setFont(FONT_NAME, size)
+    cy = y + h - size
+    for name, number in rows:
+        if cy < y:
+            break
+        numstr = str(number)
+        num_w = stringWidth(numstr, FONT_NAME, size)
+        label = shape(name)
+        label_w = stringWidth(label, FONT_NAME, size)
+        c.setFillColor(color)
+        if rtl:
+            c.drawRightString(x + w, cy, label)
+            c.drawString(x, cy, numstr)
+            dot_x0, dot_x1 = x + num_w + 2, x + w - label_w - 2
+        else:
+            c.drawString(x, cy, label)
+            c.drawRightString(x + w, cy, numstr)
+            dot_x0, dot_x1 = x + label_w + 2, x + w - num_w - 2
+        if dot_x1 > dot_x0:
+            c.saveState()
+            c.setDash(1, 2)
+            c.setStrokeColor(hexcolor("#a0a0a0"))
+            c.line(dot_x0, cy + size * 0.15, dot_x1, cy + size * 0.15)
+            c.restoreState()
+        cy -= row_h
 
 
 def _draw_placeholder(c, x, y, w, h, label):
@@ -330,6 +399,7 @@ def resolve_field(source: str, ctx: dict, scope: dict, page_no: int) -> str:
         "project.consultant": project.get("consultant"),
         "project.contractor": project.get("contractor"),
         "project.location": project.get("location"),
+        "project.description": project.get("description"),
         "report.title": report.get("title"),
         "report.number": report.get("number"),
         "report.date": _fmt_date(report.get("date")) if report.get("date") else "",
@@ -480,6 +550,16 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
     if source == "detailed_progress":
         return _resolve_detailed_progress_table(cfg, ctx, styles)
 
+    if source == "critical_path_delays":
+        rows_data = ctx.get("critical_path") or []
+        if not rows_data:
+            return None
+        rows = [[r["name"], _fmt_date(r["planned_finish"]), _fmt_date(r["forecast_finish"]), str(r["delay_days"])]
+                for r in rows_data]
+        return _data_table(cfg, styles,
+            [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]],
+            rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm])
+
     return None
 
 
@@ -521,9 +601,15 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     if source == "item.duration":
         item = scope.get("item") or {}
         return zone_duration_pie(cfg, item.get("duration"), w, labels, height=h)
+    if source == "item.spi":
+        item = scope.get("item") or {}
+        value = item.get("progress") if "progress" in item else item.get("actual")
+        return speedometer_chart(value, w, cfg, title=labels.get("spi", "SPI"), height=h)
     if isinstance(source, str) and source.startswith("item."):
         return None  # no other item-scoped chart source defined
 
+    if source == "spi":
+        return speedometer_chart(ctx.get("overall"), w, cfg, title=labels.get("spi", "SPI"), height=h)
     if source == "zone_progress":
         return planned_actual_chart(cfg, ctx, w, labels, height=h)
     if source == "area_progress":

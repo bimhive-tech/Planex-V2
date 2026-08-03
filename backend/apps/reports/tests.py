@@ -208,6 +208,20 @@ class CanvasPdfTests(SimpleTestCase):
         report = SimpleNamespace(title="T", template=template)
         self.assertTrue(build_canvas_pdf(report, _sample_ctx()).startswith(b"%PDF"))
 
+    def test_multiline_text_and_description_field_render(self):
+        """project.description is real multi-line text — each line must be
+        shaped (bidi-reordered) on its own, not the whole block as one run."""
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "text", "x": 10, "y": 10, "w": 100, "h": 40, "z": 0,
+             "props": {"text": "Line one\nLine two\nثلاثة"}},
+            {"id": "e2", "type": "field", "x": 10, "y": 60, "w": 100, "h": 30, "z": 1,
+             "props": {"source": "project.description"}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
 
 class ResolveFieldTests(SimpleTestCase):
     """`resolve_field` covers every non-item entry FIELD_SOURCES declares
@@ -216,7 +230,8 @@ class ResolveFieldTests(SimpleTestCase):
 
     NON_ITEM_SOURCES = [
         "project.name", "project.code", "project.client", "project.consultant",
-        "project.contractor", "project.location", "report.title", "report.number",
+        "project.contractor", "project.location", "project.description",
+        "report.title", "report.number",
         "report.period", "report.date", "progress.overall", "progress.planned", "page.number",
     ]
 
@@ -269,6 +284,10 @@ def _full_ctx():
         "summary": [{"status": "Approved", "key": "approved", "count": 1}],
     }
     ctx["delays"] = [{"title": "Late materials", "impact_days": 5, "status": "open"}]
+    ctx["critical_path"] = [
+        {"name": "Zone A", "planned_finish": datetime.date(2026, 6, 1),
+         "forecast_finish": datetime.date(2026, 6, 20), "delay_days": 19},
+    ]
     ctx["gantt"] = [
         {"name": "Zone A", "level": 0, "start": datetime.date(2026, 1, 1), "finish": datetime.date(2026, 6, 1),
          "revised_finish": None, "progress": 60.0},
@@ -295,6 +314,7 @@ class ResolveTableTests(SimpleTestCase):
     SOURCES_WITH_DATA = [
         "project_info", "zone_progress", "hierarchy_progress", "discipline_progress",
         "progress_compare", "milestones", "invoices", "submittals", "delays",
+        "critical_path_delays",
     ]
 
     def test_every_source_with_data_returns_a_table(self):
@@ -307,7 +327,8 @@ class ResolveTableTests(SimpleTestCase):
     def test_missing_data_returns_none_not_a_crash(self):
         cfg = default_config()
         ctx = _sample_ctx()  # no hierarchy/discipline/invoices/submittals/delays
-        for source in ("hierarchy_progress", "discipline_progress", "invoices", "submittals", "delays"):
+        for source in ("hierarchy_progress", "discipline_progress", "invoices", "submittals", "delays",
+                       "critical_path_delays"):
             self.assertIsNone(resolve_table(source, cfg, ctx, {"item": None}), source)
 
     def test_detailed_progress_without_a_real_project_returns_none(self):
@@ -328,8 +349,13 @@ class ResolveChartTests(SimpleTestCase):
 
     SOURCES_WITH_DATA = [
         "zone_progress", "area_progress", "scurve", "breakdown", "duration",
-        "cashflow_monthly", "cashflow_cumulative", "gantt",
+        "cashflow_monthly", "cashflow_cumulative", "gantt", "spi",
     ]
+
+    def test_item_spi_reads_the_current_item(self):
+        drawing = resolve_chart("item.spi", "gauge", default_config(), _full_ctx(),
+                                {"item": {"name": "Zone A", "progress": 62.0}}, 100, 70)
+        self.assertIsNotNone(drawing)
 
     def test_every_source_with_data_returns_a_drawing(self):
         cfg = default_config()
@@ -348,6 +374,66 @@ class ResolveChartTests(SimpleTestCase):
 
     def test_item_scoped_source_returns_none_until_phase_2(self):
         self.assertIsNone(resolve_chart("item.units", "bar", default_config(), _full_ctx(), {"item": None}, 100, 70))
+
+    def test_spi_gauge_returns_none_without_a_value(self):
+        from .pdf_charts import speedometer_chart
+
+        self.assertIsNone(speedometer_chart(None, 100, default_config()))
+
+    def test_spi_gauge_clamps_out_of_range_values(self):
+        from .pdf_charts import speedometer_chart
+
+        # 140% shouldn't push the needle/label past the gauge's 100% end.
+        drawing = speedometer_chart(140, 100, default_config())
+        self.assertIsNotNone(drawing)
+
+
+class TocTests(SimpleTestCase):
+    """The "toc" element needs real page numbers, known only after repeat
+    pages are expanded — build_canvas_pdf computes them up front (one row per
+    distinct page id, so a repeat page's clones collapse to its first
+    occurrence) rather than needing a second render pass."""
+
+    def test_toc_map_collapses_repeat_clones_to_first_occurrence(self):
+        pages = [
+            {"id": "cover", "name": "Cover", "elements": []},
+            {"id": "info", "name": "Project Info", "elements": []},
+            {"id": "photos", "name": "Photos", "elements": [],
+             "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 4}},
+            {"id": "end", "name": "Attachments", "elements": []},
+        ]
+        cfg = default_config()
+        cfg["layout"] = {"pages": pages}
+        ctx = _sample_ctx()
+        ctx["photos"] = [{"image": None, "caption": f"P{i}"} for i in range(9)]  # -> 3 repeat pages
+        template = ReportTemplate(name="T", config=cfg)
+        report = SimpleNamespace(title="T", template=template, scope_ids=[])
+
+        build_canvas_pdf(report, ctx)
+
+        self.assertEqual(ctx["_toc_map"], {"cover": 1, "info": 2, "photos": 3, "end": 6})
+        self.assertEqual(ctx["_toc_order"],
+                         [("cover", "Cover"), ("info", "Project Info"),
+                          ("photos", "Photos"), ("end", "Attachments")])
+
+    def test_toc_element_renders_without_crashing(self):
+        cfg = default_config()
+        cfg["page_design"] = {
+            "size": "A4", "orientation": "portrait", "margin_mm": 10,
+            "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+            "show_border": True, "background": "#ffffff", "master_elements": [],
+        }
+        cfg["layout"] = {"pages": [
+            {"id": "toc", "name": "Contents", "elements": [
+                {"id": "e1", "type": "toc", "x": 10, "y": 10, "w": 150, "h": 200, "z": 0,
+                 "props": {"size": 11, "row_height": 8, "exclude_cover": True}},
+            ]},
+            {"id": "p2", "name": "Project Info", "elements": []},
+        ]}
+        template = ReportTemplate(name="T", config=cfg)
+        report = SimpleNamespace(title="T", template=template, scope_ids=[])
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
 
 
 class ExpandPagesTests(SimpleTestCase):
@@ -678,6 +764,62 @@ class AreaDashboardsTests(TestCase):
         self.assertIn("Bldg 1", names)
         # The chart renders (returns a Drawing, not None) when areas exist.
         self.assertIsNotNone(area_progress_chart(default_config(), ctx, 400, default_config()["labels"]))
+
+
+class CriticalPathRowsTests(TestCase):
+    """`_critical_path_rows` — only zones with their own P6-imported schedule
+    carry a delay figure; a dateless zone is skipped, not zero-filled."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+        self.zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A",
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 6, 1))
+        self.dateless = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone B")
+        # `_hierarchy_rows` (which supplies critical_path's zone list) skips any
+        # zone with zero rolled-up weight — a bare ProjectScope with no
+        # activities never appears, dated or not.
+        Activity.objects.create(company=self.company, project=self.project, scope=self.zone,
+                                name="Task", weight=1, progress_percent=50)
+        Activity.objects.create(company=self.company, project=self.project, scope=self.dateless,
+                                name="Task", weight=1, progress_percent=50)
+
+    def test_zone_with_revised_finish_reports_that_delay(self):
+        from .services import _critical_path_rows, _hierarchy_rows
+
+        self.zone.revised_finish = datetime.date(2026, 6, 20)
+        self.zone.save(update_fields=["revised_finish"])
+        as_of = datetime.date(2026, 5, 1)
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
+        self.assertEqual(rows["Zone A"]["planned_finish"], datetime.date(2026, 6, 1))
+        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 20))
+        self.assertEqual(rows["Zone A"]["delay_days"], 19)
+        self.assertNotIn("Zone B", rows)  # no own schedule -> skipped
+
+    def test_overdue_zone_without_revised_finish_derives_forecast_from_as_of(self):
+        from .services import _critical_path_rows, _hierarchy_rows
+
+        as_of = datetime.date(2026, 6, 11)  # 10 days past Zone A's planned finish
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
+        self.assertEqual(rows["Zone A"]["delay_days"], 10)
+        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 11))
+
+    def test_on_time_zone_has_zero_delay_and_forecast_equals_planned(self):
+        from .services import _critical_path_rows, _hierarchy_rows
+
+        as_of = datetime.date(2026, 3, 1)  # well before Zone A's planned finish
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
+        self.assertEqual(rows["Zone A"]["delay_days"], 0)
+        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 1))
 
 
 class GanttRowsTests(TestCase):
