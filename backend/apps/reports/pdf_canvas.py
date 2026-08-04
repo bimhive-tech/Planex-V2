@@ -140,9 +140,12 @@ def _render_page(c, design, master_elements, inst: PageInstance, cfg, ctx, page_
         c.rect(margin, margin, page_w_mm * mm - 2 * margin, page_h_mm * mm - 2 * margin)
         c.restoreState()
 
-    # Master elements always sit behind page content, in their own z-order.
-    for el in sorted(master_elements, key=lambda e: e.get("z", 0)):
-        _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
+    # Master elements always sit behind page content, in their own z-order —
+    # unless this page opts out (e.g. a bespoke cover that shouldn't show
+    # the running header/footer).
+    if not inst.page.get("skip_master"):
+        for el in sorted(master_elements, key=lambda e: e.get("z", 0)):
+            _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
     for el in sorted(inst.page.get("elements") or [], key=lambda e: e.get("z", 0)):
         _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
 
@@ -260,6 +263,19 @@ def _draw_field(c, props, x, y, w, h, inst: PageInstance, ctx):
 _LOGO_SLOT = {"left": "left", "right": "right", "cover": "cover", "company": "left", "project": "right"}
 
 
+def _draw_image_border(c, props, x, y, w, h):
+    """Opt-in border on an image/logo box — a checkbox in the Properties
+    panel instead of the old workaround of stacking a separate rect element
+    on top by hand."""
+    if not props.get("border"):
+        return
+    c.saveState()
+    c.setStrokeColor(hexcolor(props.get("border_color", "#000000")))
+    c.setLineWidth(float(props.get("border_width", 0.3)) * mm)
+    c.rect(x, y, w, h, fill=0, stroke=1)
+    c.restoreState()
+
+
 def _draw_logo(c, props, x, y, w, h, ctx):
     source = props.get("source", "left")
     logos = ctx.get("logos") or {}
@@ -274,6 +290,7 @@ def _draw_logo(c, props, x, y, w, h, ctx):
     reader = storage_image_reader((entry or {}).get("image"))
     if reader:
         _draw_contained_image(c, reader, x, y, w, h)
+    _draw_image_border(c, props, x, y, w, h)
 
 
 _CAPTION_H = 8 * mm
@@ -296,6 +313,7 @@ def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
     reader = storage_image_reader(item.get("image"))
     if reader:
         _draw_contained_image(c, reader, x, y + caption_h, w, h - caption_h)
+    _draw_image_border(c, props, x, y + caption_h, w, h - caption_h)
     if show_caption and item.get("caption"):
         style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
                                textColor=hexcolor("#595959"), alignment=TA_CENTER)

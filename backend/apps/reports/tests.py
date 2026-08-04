@@ -186,6 +186,20 @@ class CanvasPdfTests(SimpleTestCase):
         data = build_canvas_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_skip_master_page_renders_without_crashing(self):
+        """A bespoke page (e.g. a cover) can opt out of the repeating
+        header/footer row entirely."""
+        master = [{"id": "m1", "type": "field", "x": 5, "y": 5, "w": 30, "h": 8, "z": 0,
+                  "props": {"source": "page.number"}}]
+        pages = [
+            {"id": "cover", "name": "Cover", "elements": [], "skip_master": True},
+            {"id": "p2", "name": "Page 2", "elements": []},
+        ]
+        template = self._template(pages, master_elements=master)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
     def test_table_and_chart_elements_draw_a_placeholder_not_crash(self):
         """Phase 1 fills these in for real — until then they must degrade to a
         visible placeholder, never an exception that kills the whole report."""
@@ -451,6 +465,15 @@ class ExpandPagesTests(SimpleTestCase):
 
     def test_no_pages_yields_no_instances(self):
         self.assertEqual(expand_pages({"layout": {"pages": []}}, _sample_ctx(), report=None), [])
+
+    def test_skip_master_flag_survives_expansion(self):
+        cfg = {"layout": {"pages": [
+            {"id": "cover", "name": "Cover", "elements": [], "skip_master": True},
+            {"id": "b", "name": "B", "elements": []},
+        ]}}
+        instances = expand_pages(cfg, _sample_ctx(), report=None)
+        self.assertTrue(instances[0].page.get("skip_master"))
+        self.assertFalse(instances[1].page.get("skip_master"))
 
     def test_repeat_page_with_empty_source_is_skipped(self):
         cfg = {"layout": {"pages": [
@@ -975,6 +998,31 @@ class LogosContextTests(TestCase):
         data = build_canvas_pdf(report, ctx)
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_image_and_logo_border_props_render_without_crashing(self):
+        """The border is a per-element toggle now (props.border/_color/_width)
+        instead of requiring a separate rect stacked on top by hand."""
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "logo", "x": 10, "y": 10, "w": 30, "h": 15, "z": 0,
+             "props": {"source": "left", "border": True, "border_color": "#000000", "border_width": 0.5}},
+            {"id": "e2", "type": "image", "x": 50, "y": 10, "w": 30, "h": 20, "z": 1,
+             "props": {"source": "repeat.item", "slot": 0, "show_caption": True,
+                       "border": True, "border_color": "#333333", "border_width": 0.3}},
+        ], "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 1}}]
+        cfg = default_config()
+        cfg["page_design"] = {
+            "size": "A4", "orientation": "portrait", "margin_mm": 10,
+            "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+            "show_border": True, "background": "#ffffff", "master_elements": [],
+        }
+        cfg["layout"] = {"pages": pages}
+        template = ReportTemplate(name="T", config=cfg)
+        report = SimpleNamespace(title="T", template=template, scope_ids=[])
+        ctx = _sample_ctx()
+        ctx["logos"] = {"left": None, "right": None, "cover": None, "extra": []}
+        ctx["photos"] = [{"image": None, "caption": "Site"}]
+        data = build_canvas_pdf(report, ctx)
+        self.assertTrue(data.startswith(b"%PDF"))
+
 
 class LayoutSeedTests(SimpleTestCase):
     """seed_layout_from_sections is pure config -> config logic (no DB/ctx
@@ -1000,6 +1048,15 @@ class LayoutSeedTests(SimpleTestCase):
         self.assertIn("Project Info", names)
         self.assertIn("Site Photos", names)
         self.assertIn("Attachments", names)
+
+    def test_cover_skips_master_elements_to_avoid_a_duplicate_logo(self):
+        """The cover has its own logo placement; the master header (which
+        also carries a logo) would otherwise draw a second one on top of it."""
+        cfg = default_config()
+        seeded = seed_layout_from_sections(cfg)
+        cover = seeded["layout"]["pages"][0]
+        self.assertEqual(cover["name"], "Cover")
+        self.assertTrue(cover.get("skip_master"))
 
     def test_everything_off_yields_one_blank_page(self):
         cfg = default_config()

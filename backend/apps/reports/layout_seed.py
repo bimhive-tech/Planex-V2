@@ -73,16 +73,6 @@ def _heading_el(cfg, text, box):
     return [text_el, rule]
 
 
-def _panel(x, y, w, h, cfg, z=5):
-    """A thin outline framing a chart/table quadrant — the boxed-panel look
-    the reference report uses throughout (and the legacy Content & Labels
-    renderer never needed, since Platypus tables/frames draw their own
-    borders). Stroke-only and drawn on top (high z) so it never has to worry
-    about covering the chart underneath — there's nothing to cover."""
-    return _el("rect", x, y, w, h, {"stroke": cfg["colors"].get("table_border", "#d9d9d9"),
-                                     "stroke_width": 0.3}, z=z)
-
-
 def _chart_props(cfg, source, chart_type):
     return {"source": source, "chart_type": chart_type, "legend": True,
             "color_a": cfg["colors"].get("chart_planned", "#2E74B5"),
@@ -131,15 +121,16 @@ def _master_elements(cfg, w, h, margin):
 
 
 def _cover_page(cfg, w, h, margin):
-    """Approximates the reference cover: logo, a bordered cover image, the
-    maroon accent bar + tick near the right edge (drawn in Python on the
-    legacy cover — here as real rect elements so it's editable), title,
-    prepared-by."""
+    """Approximates the reference cover: logo, a cover image (border is a
+    real per-element toggle, not a separately-stacked rect), the maroon
+    accent bar + tick near the right edge, title, prepared-by. Marked
+    skip_master since the reference cover has no recurring header row — the
+    master header's own logo would otherwise duplicate this page's logo."""
     cover, colors = cfg.get("cover", {}), cfg.get("colors", {})
     accent = colors.get("cover_accent", "#963634")
     els = []
     if cover.get("show_logo", True):
-        els.append(_el("logo", margin + 6, margin + 6, 48, 22, {"source": "left"}))
+        els.append(_el("logo", margin + 6, margin + 6, 48, 22, {"source": "left", "border": False}))
 
     bar_w, bar_h_frac, bar_y_frac = 1.4, 0.44, 0.28
     bar_x = w - margin - 6 - bar_w
@@ -150,9 +141,9 @@ def _cover_page(cfg, w, h, margin):
 
     cover_x, cover_y, cover_h = margin + 6, h * 0.30, h * 0.21
     cover_w = bar_x - cover_x - 6  # leave clearance before the accent bar
-    els.append(_el("logo", cover_x, cover_y, cover_w, cover_h, {"source": "cover"}))
-    els.append(_el("rect", cover_x, cover_y, cover_w, cover_h,
-                    {"stroke": colors.get("table_border", "#000000"), "stroke_width": 0.3}, z=1))
+    els.append(_el("logo", cover_x, cover_y, cover_w, cover_h,
+                    {"source": "cover", "border": True,
+                     "border_color": colors.get("table_border", "#000000"), "border_width": 0.3}))
     title = cover.get("title") or ""
     if title:
         els.append(_el("text", margin, h * 0.55, w - 2 * margin, 18,
@@ -165,7 +156,9 @@ def _cover_page(cfg, w, h, margin):
     els.append(_el("field", margin, h * 0.80, w - 2 * margin, 22,
                     {"source": "project.name", "size": cfg["fonts"].get("cover_title_size", 22) + 2,
                      "bold": True, "align": "center", "color": colors.get("cover_accent", "#963634")}))
-    return _page("Cover", els)
+    page = _page("Cover", els)
+    page["skip_master"] = True
+    return page
 
 
 def _field_page(cfg, design, label_key, source, name, size=16):
@@ -217,7 +210,6 @@ def _dual_chart_page(cfg, design, label_key, sources, name):
     for i, (source, chart_type) in enumerate(sources):
         y = sub["y"] + i * (half_h + GAP_MM)
         els.append(_el("chart", sub["x"], y, sub["w"], half_h, _chart_props(cfg, source, chart_type)))
-        els.append(_panel(sub["x"], y, sub["w"], half_h, cfg))
     return _page(name, els)
 
 
@@ -245,10 +237,6 @@ def _dashboard_page(cfg, design):
         _el("chart", sub["x"] + half + GAP_MM, sub["y"], half, pie_h, _chart_props(cfg, "duration", "pie")),
         _el("chart", sub["x"], bottom_y, half, bottom_h, _chart_props(cfg, "zone_progress", "column")),
         _el("chart", sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, _chart_props(cfg, "scurve", "line")),
-        _panel(sub["x"], sub["y"], half, pie_h, cfg),
-        _panel(sub["x"] + half + GAP_MM, sub["y"], half, pie_h, cfg),
-        _panel(sub["x"], bottom_y, half, bottom_h, cfg),
-        _panel(sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, cfg),
     ]
     return _page("Executive Dashboard", els)
 
@@ -270,9 +258,6 @@ def _area_dashboard_page(cfg, design):
         _el("chart", sub["x"], top_y, sub["w"], top_h, _chart_props(cfg, "item.units", "bar")),
         _el("chart", sub["x"], bottom_y, half, pie_h, _chart_props(cfg, "item.duration", "pie")),
         _el("table", sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, _table_props(cfg, "item.children")),
-        _panel(sub["x"], top_y, sub["w"], top_h, cfg),
-        _panel(sub["x"], bottom_y, half, pie_h, cfg),
-        _panel(sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, cfg),
     ]
     page = _page("Area Dashboards", els)
     page["repeat"] = {"source": "area_dashboards", "mode": "one_per_item"}

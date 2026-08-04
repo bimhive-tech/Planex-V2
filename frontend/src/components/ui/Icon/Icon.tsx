@@ -45,7 +45,8 @@ export type IconName =
   | "sparkles"
   | "paperclip"
   | "send"
-  | "refresh";
+  | "refresh"
+  | "eyeOff";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   dashboard: (
@@ -267,6 +268,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
       <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 6.2A9.4 9.4 0 0 1 12 6c6 0 9.5 6 9.5 6a16.4 16.4 0 0 1-3.1 3.9M6.7 7.5C4 9.2 2.5 12 2.5 12s3.5 6 9.5 6a9.4 9.4 0 0 0 3.4-.6" />
+      <path d="M9.9 10c-.4.5-.6 1.2-.6 2a2.7 2.7 0 0 0 2.7 2.7c.8 0 1.5-.3 2-.7" />
     </>
   ),
   sparkles: (

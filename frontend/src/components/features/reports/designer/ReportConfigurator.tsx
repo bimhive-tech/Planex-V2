@@ -87,6 +87,10 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
       p.id === id && p.repeat ? { ...p, repeat: { ...p.repeat, ...patch } } : p));
   }
 
+  function toggleSkipMaster(id: string) {
+    onChange((prev) => prev.map((p) => (p.id === id ? { ...p, skip_master: !p.skip_master } : p)));
+  }
+
   const pageList = (
     <section className={styles.setupPanel} aria-label="Report pages">
       <div className={styles.pagesHead}>
@@ -110,6 +114,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
             >
               <span className={styles.pageIndex}>{index + 1}</span>
               {page.repeat && <Icon name="refresh" size={12} className={styles.repeatBadge} />}
+              {page.skip_master && <Icon name="eyeOff" size={12} className={styles.repeatBadge} />}
               {renamingId === page.id ? (
                 <input
                   className={styles.pageNameInput}
@@ -144,6 +149,13 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
                 className={page.repeat ? styles.repeatActive : undefined}
               >
                 <Icon name="refresh" size={12} />
+              </button>
+              <button
+                type="button" onClick={() => toggleSkipMaster(page.id)}
+                aria-label="Hide the repeating header/footer on this page"
+                className={page.skip_master ? styles.repeatActive : undefined}
+              >
+                <Icon name="eyeOff" size={12} />
               </button>
               <button type="button" onClick={() => duplicatePage(page.id)} aria-label="Duplicate page">
                 <Icon name="copy" size={12} />

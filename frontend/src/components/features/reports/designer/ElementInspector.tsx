@@ -71,11 +71,17 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "show_caption", label: "Show caption", kind: "toggle" },
         { path: "fit", label: "Fit", kind: "select", options: [
           { value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }] },
+        { path: "border", label: "Border", kind: "toggle" },
+        { path: "border_color", label: "Border color", kind: "color" },
+        { path: "border_width", label: "Border width (mm)", kind: "number", step: 0.1 },
       ];
     case "logo":
       return [
         { path: "source", label: "Image", kind: "select", options: LOGO_SOURCES },
         { path: "slot", label: "Additional-logo slot (0, 1, 2…)", kind: "number" },
+        { path: "border", label: "Border", kind: "toggle" },
+        { path: "border_color", label: "Border color", kind: "color" },
+        { path: "border_width", label: "Border width (mm)", kind: "number", step: 0.1 },
       ];
     case "rect":
       return [

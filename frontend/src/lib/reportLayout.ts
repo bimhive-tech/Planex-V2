@@ -62,6 +62,10 @@ export interface LayoutPage {
   /** Absent = a single fixed page (default). Set to clone this page once per
    * item (or per chunk of items) from a live data source. */
   repeat?: PageRepeat;
+  /** Skip drawing master elements (the repeating header/logo/footer row) on
+   * this page — for a bespoke page like a cover that shouldn't show the
+   * running header. */
+  skip_master?: boolean;
 }
 
 export interface PageDesign {
