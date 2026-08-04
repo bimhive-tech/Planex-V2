@@ -915,6 +915,67 @@ class FinanceReportTests(TestCase):
         self.assertTrue(data.startswith(b"%PDF"))
 
 
+class LogosContextTests(TestCase):
+    """A project can carry more than the two fixed left/right header logos —
+    any number of extras, ordered by sort_order, resolved as ctx["logos"]["extra"]
+    and picked in the canvas by index (mirrors a repeat photo slot)."""
+
+    def setUp(self):
+        from apps.projects.models import ProjectImage
+
+        self.ProjectImage = ProjectImage
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+
+    def test_extra_logos_ordered_by_sort_order(self):
+        from .services import build_report_context
+
+        ProjectImage = self.ProjectImage
+        ProjectImage.objects.create(company=self.company, project=self.project,
+                                    image_type=ProjectImage.ImageType.LOGO, caption="Funder", sort_order=1)
+        ProjectImage.objects.create(company=self.company, project=self.project,
+                                    image_type=ProjectImage.ImageType.LOGO, caption="Authority", sort_order=0)
+        ProjectImage.objects.create(company=self.company, project=self.project,
+                                    image_type=ProjectImage.ImageType.LOGO_LEFT, caption="Main")
+
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+        ctx = build_report_context(report)
+
+        extra = ctx["logos"]["extra"]
+        self.assertEqual([e["caption"] for e in extra], ["Authority", "Funder"])  # sort_order, not creation order
+        self.assertEqual(ctx["logos"]["left"]["caption"], "Main")  # fixed slots unaffected
+
+    def test_no_extra_logos_is_an_empty_list_not_none(self):
+        from .services import build_report_context
+
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+        ctx = build_report_context(report)
+        self.assertEqual(ctx["logos"]["extra"], [])
+
+    def test_draw_logo_extra_slot_renders_without_crashing(self):
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "logo", "x": 10, "y": 10, "w": 30, "h": 15, "z": 0,
+             "props": {"source": "extra", "slot": 1}},
+            {"id": "e2", "type": "logo", "x": 50, "y": 10, "w": 30, "h": 15, "z": 1,
+             "props": {"source": "extra", "slot": 99}},  # out of range -> skipped, not fatal
+        ]}]
+        cfg = default_config()
+        cfg["page_design"] = {
+            "size": "A4", "orientation": "portrait", "margin_mm": 10,
+            "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+            "show_border": True, "background": "#ffffff", "master_elements": [],
+        }
+        cfg["layout"] = {"pages": pages}
+        template = ReportTemplate(name="T", config=cfg)
+        report = SimpleNamespace(title="T", template=template, scope_ids=[])
+        ctx = _sample_ctx()
+        ctx["logos"] = {"left": None, "right": None, "cover": None,
+                        "extra": [{"image": None, "caption": "A"}, {"image": None, "caption": "B"}]}
+        data = build_canvas_pdf(report, ctx)
+        self.assertTrue(data.startswith(b"%PDF"))
+
+
 class LayoutSeedTests(SimpleTestCase):
     """seed_layout_from_sections is pure config -> config logic (no DB/ctx
     needed) — the "Start from my current sections" starting point for

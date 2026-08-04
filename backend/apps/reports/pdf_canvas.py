@@ -261,8 +261,16 @@ _LOGO_SLOT = {"left": "left", "right": "right", "cover": "cover", "company": "le
 
 
 def _draw_logo(c, props, x, y, w, h, ctx):
-    slot = _LOGO_SLOT.get(props.get("source", "left"), "left")
-    entry = (ctx.get("logos") or {}).get(slot)
+    source = props.get("source", "left")
+    logos = ctx.get("logos") or {}
+    if source == "extra":
+        # Beyond the fixed left/right slots — any number of uploaded partner
+        # logos, picked by index (same `slot` pattern as a repeat photo box).
+        extra = logos.get("extra") or []
+        idx = int(props.get("slot", 0) or 0)
+        entry = extra[idx] if 0 <= idx < len(extra) else None
+    else:
+        entry = logos.get(_LOGO_SLOT.get(source, "left"))
     reader = storage_image_reader((entry or {}).get("image"))
     if reader:
         _draw_contained_image(c, reader, x, y, w, h)

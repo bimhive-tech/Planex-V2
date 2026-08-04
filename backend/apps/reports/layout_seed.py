@@ -59,9 +59,28 @@ def _below_heading(box):
 
 
 def _heading_el(cfg, text, box):
-    return _el("text", box["x"], box["y"], box["w"], HEADING_H,
-                {"text": text, "size": cfg["fonts"].get("h2_size", 16), "bold": True,
-                 "align": "center", "color": cfg["colors"].get("section_heading", "#1F4E79")})
+    """Section heading + its underline rule — the "blue underlined section
+    titles" look the legacy Content & Labels renderer always had (HRFlowable
+    under every _heading() call) but the canvas seeder skipped, drawing the
+    text alone. Returns a list so callers spread it: `[*_heading_el(...), ...]`."""
+    color = cfg["colors"].get("section_heading", "#1F4E79")
+    text_el = _el("text", box["x"], box["y"], box["w"], HEADING_H,
+                  {"text": text, "size": cfg["fonts"].get("h2_size", 16), "bold": True,
+                   "align": "center", "color": color})
+    rule_w = box["w"] * 0.4
+    rule = _el("line", box["x"] + (box["w"] - rule_w) / 2, box["y"] + HEADING_H - 1, rule_w, 1.2,
+               {"stroke": color, "stroke_width": 0.5})
+    return [text_el, rule]
+
+
+def _panel(x, y, w, h, cfg, z=5):
+    """A thin outline framing a chart/table quadrant — the boxed-panel look
+    the reference report uses throughout (and the legacy Content & Labels
+    renderer never needed, since Platypus tables/frames draw their own
+    borders). Stroke-only and drawn on top (high z) so it never has to worry
+    about covering the chart underneath — there's nothing to cover."""
+    return _el("rect", x, y, w, h, {"stroke": cfg["colors"].get("table_border", "#d9d9d9"),
+                                     "stroke_width": 0.3}, z=z)
 
 
 def _chart_props(cfg, source, chart_type):
@@ -112,13 +131,28 @@ def _master_elements(cfg, w, h, margin):
 
 
 def _cover_page(cfg, w, h, margin):
-    """Approximates the reference cover (logo, cover image, title, prepared-by)
-    — the maroon-accent bespoke composition is a manual pass after this."""
+    """Approximates the reference cover: logo, a bordered cover image, the
+    maroon accent bar + tick near the right edge (drawn in Python on the
+    legacy cover — here as real rect elements so it's editable), title,
+    prepared-by."""
     cover, colors = cfg.get("cover", {}), cfg.get("colors", {})
+    accent = colors.get("cover_accent", "#963634")
     els = []
     if cover.get("show_logo", True):
         els.append(_el("logo", margin + 6, margin + 6, 48, 22, {"source": "left"}))
-    els.append(_el("logo", margin + 6, h * 0.30, w - 2 * margin - 12, h * 0.21, {"source": "cover"}))
+
+    bar_w, bar_h_frac, bar_y_frac = 1.4, 0.44, 0.28
+    bar_x = w - margin - 6 - bar_w
+    bar_y = h - bar_y_frac * h - bar_h_frac * h
+    els.append(_el("rect", bar_x, bar_y, bar_w, bar_h_frac * h, {"fill": accent}))
+    tick_w, tick_h = 12, 1.4
+    els.append(_el("rect", bar_x - tick_w, h * 0.50 - tick_h, tick_w, tick_h, {"fill": accent}))
+
+    cover_x, cover_y, cover_h = margin + 6, h * 0.30, h * 0.21
+    cover_w = bar_x - cover_x - 6  # leave clearance before the accent bar
+    els.append(_el("logo", cover_x, cover_y, cover_w, cover_h, {"source": "cover"}))
+    els.append(_el("rect", cover_x, cover_y, cover_w, cover_h,
+                    {"stroke": colors.get("table_border", "#000000"), "stroke_width": 0.3}, z=1))
     title = cover.get("title") or ""
     if title:
         els.append(_el("text", margin, h * 0.55, w - 2 * margin, 18,
@@ -141,7 +175,7 @@ def _field_page(cfg, design, label_key, source, name, size=16):
     field = _el("field", sub["x"], sub["y"], sub["w"], min(20, sub["h"]),
                 {"source": source, "size": size, "bold": True, "align": "center",
                  "color": cfg["colors"].get("heading", "#1F4E79")})
-    return _page(name, [heading, field])
+    return _page(name, [*heading, field])
 
 
 def _progress_overview_page(cfg, design):
@@ -154,7 +188,7 @@ def _progress_overview_page(cfg, design):
     chart_y = sub["y"] + 16
     chart_h = min(PIE_MAX_H, max(0, sub["h"] - 16))
     chart = _el("chart", sub["x"], chart_y, sub["w"], chart_h, _chart_props(cfg, "breakdown", "donut"))
-    return _page("Overall Progress", [heading, field, chart])
+    return _page("Overall Progress", [*heading, field, chart])
 
 
 def _table_page(cfg, design, label_key, source, name):
@@ -162,7 +196,7 @@ def _table_page(cfg, design, label_key, source, name):
     sub = _below_heading(box)
     heading = _heading_el(cfg, cfg["labels"].get(label_key, label_key), box)
     table = _el("table", sub["x"], sub["y"], sub["w"], sub["h"], _table_props(cfg, source))
-    return _page(name, [heading, table])
+    return _page(name, [*heading, table])
 
 
 def _chart_page(cfg, design, label_key, source, chart_type, name):
@@ -170,7 +204,7 @@ def _chart_page(cfg, design, label_key, source, chart_type, name):
     sub = _below_heading(box)
     heading = _heading_el(cfg, cfg["labels"].get(label_key, label_key), box)
     chart = _el("chart", sub["x"], sub["y"], sub["w"], sub["h"], _chart_props(cfg, source, chart_type))
-    return _page(name, [heading, chart])
+    return _page(name, [*heading, chart])
 
 
 def _dual_chart_page(cfg, design, label_key, sources, name):
@@ -179,10 +213,11 @@ def _dual_chart_page(cfg, design, label_key, sources, name):
     sub = _below_heading(box)
     heading = _heading_el(cfg, cfg["labels"].get(label_key, label_key), box)
     half_h = (sub["h"] - GAP_MM) / 2
-    els = [heading]
+    els = [*heading]
     for i, (source, chart_type) in enumerate(sources):
         y = sub["y"] + i * (half_h + GAP_MM)
         els.append(_el("chart", sub["x"], y, sub["w"], half_h, _chart_props(cfg, source, chart_type)))
+        els.append(_panel(sub["x"], y, sub["w"], half_h, cfg))
     return _page(name, els)
 
 
@@ -205,11 +240,15 @@ def _dashboard_page(cfg, design):
     bottom_y = sub["y"] + top_h + GAP_MM
     pie_h = min(PIE_MAX_H, top_h)
     els = [
-        heading,
+        *heading,
         _el("chart", sub["x"], sub["y"], half, pie_h, _chart_props(cfg, "breakdown", "donut")),
         _el("chart", sub["x"] + half + GAP_MM, sub["y"], half, pie_h, _chart_props(cfg, "duration", "pie")),
         _el("chart", sub["x"], bottom_y, half, bottom_h, _chart_props(cfg, "zone_progress", "column")),
         _el("chart", sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, _chart_props(cfg, "scurve", "line")),
+        _panel(sub["x"], sub["y"], half, pie_h, cfg),
+        _panel(sub["x"] + half + GAP_MM, sub["y"], half, pie_h, cfg),
+        _panel(sub["x"], bottom_y, half, bottom_h, cfg),
+        _panel(sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, cfg),
     ]
     return _page("Executive Dashboard", els)
 
@@ -227,10 +266,13 @@ def _area_dashboard_page(cfg, design):
     half = (sub["w"] - GAP_MM) / 2
     pie_h = min(PIE_MAX_H, bottom_h)
     els = [
-        heading, name_field,
+        *heading, name_field,
         _el("chart", sub["x"], top_y, sub["w"], top_h, _chart_props(cfg, "item.units", "bar")),
         _el("chart", sub["x"], bottom_y, half, pie_h, _chart_props(cfg, "item.duration", "pie")),
         _el("table", sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, _table_props(cfg, "item.children")),
+        _panel(sub["x"], top_y, sub["w"], top_h, cfg),
+        _panel(sub["x"], bottom_y, half, pie_h, cfg),
+        _panel(sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, cfg),
     ]
     page = _page("Area Dashboards", els)
     page["repeat"] = {"source": "area_dashboards", "mode": "one_per_item"}
@@ -242,7 +284,7 @@ def _photos_page(cfg, design):
     sub = _below_heading(box)
     heading = _heading_el(cfg, cfg["labels"].get("photos", "Site Photos"), box)
     cell_w, cell_h = (sub["w"] - GAP_MM) / 2, (sub["h"] - GAP_MM) / 2
-    els = [heading]
+    els = [*heading]
     for slot in range(4):
         row, col = divmod(slot, 2)
         x = sub["x"] + col * (cell_w + GAP_MM)
@@ -260,7 +302,7 @@ def _attachments_page(cfg, design):
     heading = _heading_el(cfg, cfg["labels"].get("attachments", "Attachments"), box)
     image = _el("image", sub["x"], sub["y"], sub["w"], sub["h"],
                 {"source": "repeat.item", "slot": 0, "show_caption": True, "fit": "contain"})
-    page = _page("Attachments", [heading, image])
+    page = _page("Attachments", [*heading, image])
     page["repeat"] = {"source": "attachments", "mode": "chunk", "chunk_size": 1}
     return page
 

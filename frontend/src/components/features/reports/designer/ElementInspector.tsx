@@ -31,6 +31,15 @@ const IMAGE_SOURCES = [
   { value: "repeat.item", label: "Repeat photo slot" },
 ];
 
+/** Logo element source — left/right/cover are the fixed single slots;
+ * "extra" picks one of any number of additional uploaded logos by index. */
+const LOGO_SOURCES = [
+  { value: "left", label: "Left logo" },
+  { value: "right", label: "Right logo" },
+  { value: "cover", label: "Cover image" },
+  { value: "extra", label: "Additional logo (pick slot below)" },
+];
+
 /** Field lists per element type. `repeating` appends the item-scoped sources
  * (only resolvable on a page that clones itself per photo/zone/etc). */
 function typeFields(type: string, repeating: boolean): PropField[] {
@@ -65,9 +74,8 @@ function typeFields(type: string, repeating: boolean): PropField[] {
       ];
     case "logo":
       return [
-        { path: "source", label: "Image", kind: "select", options: [
-          { value: "left", label: "Left logo" }, { value: "right", label: "Right logo" },
-          { value: "cover", label: "Cover image" }] },
+        { path: "source", label: "Image", kind: "select", options: LOGO_SOURCES },
+        { path: "slot", label: "Additional-logo slot (0, 1, 2…)", kind: "number" },
       ];
     case "rect":
       return [

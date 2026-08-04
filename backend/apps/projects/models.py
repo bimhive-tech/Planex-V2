@@ -122,6 +122,10 @@ class ProjectImage(TimestampedModel):
         COVER = "cover", "Cover Image"
         LOGO_LEFT = "logo_left", "Left Logo"
         LOGO_RIGHT = "logo_right", "Right Logo"
+        # Beyond the two fixed header slots — a project can carry any number of
+        # extra partner/funding/authority logos, ordered by sort_order and
+        # picked in the canvas by slot index (mirrors how site photos work).
+        LOGO = "logo", "Additional Logo"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_images")

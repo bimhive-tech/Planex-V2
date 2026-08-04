@@ -620,6 +620,9 @@ def build_report_context(report):
     def proj(kind):
         return next((i for i in proj_images if i["image_type"] == kind), None)
 
+    def proj_many(kind):
+        return [i for i in proj_images if i["image_type"] == kind]
+
     def rep(kind):
         return [i for i in rep_images if i["kind"] == kind]
 
@@ -687,6 +690,9 @@ def build_report_context(report):
             "left": proj(ProjectImage.ImageType.LOGO_LEFT),
             "right": proj(ProjectImage.ImageType.LOGO_RIGHT),
             "cover": (rep_cover[0] if rep_cover else proj(ProjectImage.ImageType.COVER)),
+            # Beyond the two fixed header slots — any number of extra partner/
+            # funding/authority logos, in upload (sort_order) order.
+            "extra": proj_many(ProjectImage.ImageType.LOGO),
         },
         "photos": (selected_photos + rep_photos)
         or [i for i in proj_images if i["image_type"] == ProjectImage.ImageType.SITE_PHOTO],

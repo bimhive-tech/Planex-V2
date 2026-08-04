@@ -251,9 +251,9 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                         projectId={form.project}
                         canManage={canManage}
                         onChanged={bump}
-                        types={["logo_left", "logo_right"]}
+                        types={["logo_left", "logo_right", "logo"]}
                         title="Logos"
-                        subtitle="Left and right logos, shown on the cover of every report for this project."
+                        subtitle="Left and right header logos, plus any number of additional partner logos, shown on every report for this project."
                       />
                     )}
                   </section>

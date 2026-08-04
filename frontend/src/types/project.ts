@@ -95,7 +95,7 @@ export interface ProjectPerms {
   exportReports: boolean;
 }
 
-export type ProjectImageType = "site_photo" | "cover" | "logo_left" | "logo_right";
+export type ProjectImageType = "site_photo" | "cover" | "logo_left" | "logo_right" | "logo";
 
 export interface ProjectImage {
   id: string;

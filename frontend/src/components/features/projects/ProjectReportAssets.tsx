@@ -17,6 +17,7 @@ const IMAGE_TYPES: { value: ProjectImageType; label: string }[] = [
   { value: "cover", label: "Cover image" },
   { value: "logo_left", label: "Left logo" },
   { value: "logo_right", label: "Right logo" },
+  { value: "logo", label: "Additional logo" },
 ];
 const ALL_TYPES: ProjectImageType[] = IMAGE_TYPES.map((t) => t.value);
 
