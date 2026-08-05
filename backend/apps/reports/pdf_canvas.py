@@ -133,11 +133,16 @@ def _render_page(c, design, master_elements, inst: PageInstance, cfg, ctx, page_
     c.rect(0, 0, page_w_mm * mm, page_h_mm * mm, fill=1, stroke=0)
 
     if design.get("show_border", True):
-        margin = float(design.get("margin_mm", 0)) * mm
+        # Independent of the content margin — a template can pull the frame
+        # in tighter to the edge (or push it out) without moving the content.
+        # Falls back to margin_mm so a template saved before this field
+        # existed renders exactly as it always did.
+        offset = design.get("border_offset_mm")
+        offset = float(offset if offset is not None else design.get("margin_mm", 0)) * mm
         c.saveState()
         c.setStrokeColor(hexcolor("#000000"))
         c.setLineWidth(0.6)
-        c.rect(margin, margin, page_w_mm * mm - 2 * margin, page_h_mm * mm - 2 * margin)
+        c.rect(offset, offset, page_w_mm * mm - 2 * offset, page_h_mm * mm - 2 * offset)
         c.restoreState()
 
     # Master elements always sit behind page content, in their own z-order —

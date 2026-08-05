@@ -93,6 +93,16 @@ export function PageDesigner({ design, onChange }: Props) {
         />
         <span>Page border</span>
       </label>
+      {design.show_border && (
+        <label className={styles.propField}>
+          <span>Border offset (mm)</span>
+          <input
+            type="number" min={0} max={60} step={1}
+            value={design.border_offset_mm ?? design.margin_mm}
+            onChange={(e) => set("border_offset_mm", Number(e.target.value))}
+          />
+        </label>
+      )}
 
       <label className={styles.propField}>
         <span>Page background</span>

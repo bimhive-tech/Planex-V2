@@ -95,7 +95,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
     <section className={styles.setupPanel} aria-label="Report pages">
       <div className={styles.pagesHead}>
         <h2 className={styles.panelTitle}>Pages</h2>
-        <button type="button" className={styles.addPageBtn} onClick={addPage}>
+        <button type="button" className={styles.addPageBtn} onClick={addPage} title="Add a new page">
           <Icon name="plus" size={14} /> Add
         </button>
       </div>
@@ -135,17 +135,22 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
             </button>
 
             <div className={styles.pageActions}>
-              <button type="button" onClick={() => movePage(page.id, -1)} aria-label="Move up" disabled={index === 0}>
+              <button
+                type="button" onClick={() => movePage(page.id, -1)}
+                aria-label="Move up" title="Move up" disabled={index === 0}
+              >
                 <Icon name="chevronDown" size={12} className={styles.flipUp} />
               </button>
               <button
-                type="button" onClick={() => movePage(page.id, 1)} aria-label="Move down"
+                type="button" onClick={() => movePage(page.id, 1)}
+                aria-label="Move down" title="Move down"
                 disabled={index === pages.length - 1}
               >
                 <Icon name="chevronDown" size={12} />
               </button>
               <button
-                type="button" onClick={() => toggleRepeat(page.id)} aria-label="Repeat this page per item"
+                type="button" onClick={() => toggleRepeat(page.id)}
+                aria-label="Repeat this page per item" title="Repeat this page per item (photos, zones, etc.)"
                 className={page.repeat ? styles.repeatActive : undefined}
               >
                 <Icon name="refresh" size={12} />
@@ -153,15 +158,20 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
               <button
                 type="button" onClick={() => toggleSkipMaster(page.id)}
                 aria-label="Hide the repeating header/footer on this page"
+                title="Hide the repeating header/footer on this page (e.g. for a cover)"
                 className={page.skip_master ? styles.repeatActive : undefined}
               >
                 <Icon name="eyeOff" size={12} />
               </button>
-              <button type="button" onClick={() => duplicatePage(page.id)} aria-label="Duplicate page">
+              <button
+                type="button" onClick={() => duplicatePage(page.id)}
+                aria-label="Duplicate page" title="Duplicate this page"
+              >
                 <Icon name="copy" size={12} />
               </button>
               <button
-                type="button" onClick={() => deletePage(page.id)} aria-label="Delete page"
+                type="button" onClick={() => deletePage(page.id)}
+                aria-label="Delete page" title="Delete this page"
                 disabled={pages.length === 1} className={styles.pageDelete}
               >
                 <Icon name="trash" size={12} />
@@ -217,7 +227,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
       design={design}
       elements={active.elements}
       onElementsChange={setElements}
-      masterElements={design.master_elements}
+      masterElements={active.skip_master ? [] : design.master_elements}
       leftHeader={pageList}
       emptyHint="Drag an element from the left onto the page to start building this page."
       repeating={Boolean(active.repeat)}

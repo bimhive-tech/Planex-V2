@@ -77,6 +77,10 @@ export interface PageDesign {
   show_header: boolean;
   show_footer: boolean;
   show_border: boolean;
+  /** How far the border sits from the page edge, in mm — independent of
+   * margin_mm (the content inset). Defaults to margin_mm when unset, so
+   * older templates keep rendering exactly as before. */
+  border_offset_mm?: number;
   background: string;
   /** Master elements — drawn on every page, behind page content. */
   master_elements: LayoutElement[];

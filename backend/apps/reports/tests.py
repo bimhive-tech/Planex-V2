@@ -200,6 +200,16 @@ class CanvasPdfTests(SimpleTestCase):
         data = build_canvas_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_border_offset_independent_of_margin_renders_without_crashing(self):
+        """border_offset_mm decouples the frame from the content margin —
+        e.g. a frame pulled in tight to the edge while content keeps its
+        own, larger margin."""
+        pages = [{"id": "p1", "name": "Page 1", "elements": []}]
+        template = self._template(pages, margin_mm=20, border_offset_mm=2)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
     def test_table_and_chart_elements_draw_a_placeholder_not_crash(self):
         """Phase 1 fills these in for real — until then they must degrade to a
         visible placeholder, never an exception that kills the whole report."""

@@ -683,7 +683,7 @@
     align-items: flex-start;
   }
   .leftColumn {
-    width: 250px;
+    width: 320px;
     flex-shrink: 0;
     max-height: calc(100vh - 220px);
     overflow-y: auto;
