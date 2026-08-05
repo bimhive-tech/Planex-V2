@@ -30,6 +30,7 @@ export function CanvasPage({
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
+  const borderOffset = design.border_offset_mm ?? design.margin_mm;
 
   return (
     <div
@@ -38,7 +39,6 @@ export function CanvasPage({
         width: `${w * scale}px`,
         height: `${h * scale}px`,
         background: design.background,
-        border: design.show_border ? "1px solid var(--text-primary)" : "1px solid var(--border)",
       }}
       onPointerDown={() => onSelect(null)}
       onDragOver={(e) => {
@@ -55,6 +55,18 @@ export function CanvasPage({
         onDropSpec(key, (e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
       }}
     >
+      {design.show_border && (
+        <div
+          className={styles.pageBorder}
+          style={{
+            left: `${borderOffset * scale}px`,
+            top: `${borderOffset * scale}px`,
+            width: `${Math.max(0, w - borderOffset * 2) * scale}px`,
+            height: `${Math.max(0, h - borderOffset * 2) * scale}px`,
+          }}
+        />
+      )}
+
       {showGuides && (
         <>
           <div

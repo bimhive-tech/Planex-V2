@@ -166,7 +166,17 @@
   position: relative;
   flex-shrink: 0;
   box-shadow: var(--shadow-pop);
+  border: 1px solid var(--border);
   overflow: hidden;
+}
+
+/* The actual PDF page-border rect, inset by border_offset_mm — not the
+   .paper element's own edge (that's just "this is the paper", always
+   present so you can see the page bounds on screen). */
+.pageBorder {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--text-primary);
 }
 
 .emptyHint {
