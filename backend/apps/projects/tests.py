@@ -673,6 +673,22 @@ class ProjectApiTests(TestCase):
         self.assertNotIn("Depot", active)
         self.assertIn("Depot", archived)
 
+    def test_contract_cost_and_forecast_fields_round_trip(self):
+        """contract_value/approved_value/forecast_cost — added alongside the
+        existing budget/advance_payment KPIs so a report's Project Info table
+        can show contracted vs. approved vs. projected cost distinctly."""
+        p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
+        self.login("admin@acme.com")
+        resp = self.client.patch(
+            f"/api/projects/{p.id}/",
+            {"contract_value": "1000000.00", "approved_value": "1050000.00", "forecast_cost": "1100000.00"},
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.json()
+        self.assertEqual(body["contract_value"], "1000000.00")
+        self.assertEqual(body["approved_value"], "1050000.00")
+        self.assertEqual(body["forecast_cost"], "1100000.00")
+
     def test_duplicate_name_rejected(self):
         Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
         self.login("admin@acme.com")

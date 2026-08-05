@@ -28,7 +28,7 @@ const FIELDS = [
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email",
   "planned_start", "planned_finish", "revised_finish", "forecast_finish",
-  "eot_days", "size_sqm", "notes",
+  "eot_days", "size_sqm", "notes", "contract_value", "approved_value", "forecast_cost",
 ];
 
 const blank = (): Form => {
@@ -101,6 +101,7 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
     for (const k of [
       "planned_start", "planned_finish", "revised_finish", "forecast_finish",
       "size_sqm", "budget", "advance_payment", "eot_days",
+      "contract_value", "approved_value", "forecast_cost",
     ]) {
       if (!payload[k]) payload[k] = null;
     }
@@ -159,6 +160,14 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="EOT (days)" name="eot_days" type="number" step="1"
             value={form.eot_days} onChange={set("eot_days")} />
         </div>
+        <div className={styles.row2}>
+          <Input label="Contract value" name="contract_value" type="number" step="0.01"
+            value={form.contract_value} onChange={set("contract_value")} />
+          <Input label="Approved value" name="approved_value" type="number" step="0.01"
+            value={form.approved_value} onChange={set("approved_value")} />
+        </div>
+        <Input label="Forecast cost" name="forecast_cost" type="number" step="0.01"
+          value={form.forecast_cost} onChange={set("forecast_cost")} />
         <div className={styles.field}>
           <label className={styles.label} htmlFor="description">Description</label>
           <textarea id="description" className={styles.textarea} rows={2}

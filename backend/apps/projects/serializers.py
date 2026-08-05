@@ -11,7 +11,7 @@ STAKEHOLDER_FIELDS = [
     "contractor_name", "contractor_phone", "contractor_email",
 ]
 DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
-CONTRACT_FIELDS = ["advance_payment", "eot_days"]
+CONTRACT_FIELDS = ["advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost"]
 
 
 class ProjectListSerializer(serializers.ModelSerializer):

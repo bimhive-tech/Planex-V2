@@ -41,6 +41,9 @@ export interface ProjectDetail {
   forecast_finish: string | null;
   advance_payment: string | null;
   eot_days: number | null;
+  contract_value: string | null;
+  approved_value: string | null;
+  forecast_cost: string | null;
   size_sqm: string | null;
   notes: string;
   is_archived: boolean;

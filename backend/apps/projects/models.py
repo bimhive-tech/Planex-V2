@@ -67,6 +67,13 @@ class Project(TimestampedModel):
     # Contract KPIs surfaced on the Overview tab (matches the client's dashboard header).
     advance_payment = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     eot_days = models.PositiveIntegerField(null=True, blank=True)  # extension of time granted, in days
+    # Three distinct cost figures a report may need side by side: what was
+    # signed (contract_value), what's approved after variations to date
+    # (approved_value), and where it's projected to land (forecast_cost).
+    # `budget` stays as the general-purpose figure other flows already use.
+    contract_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
 
     # A real P6 schedule states its own actual AND planned % complete for the
     # whole project — Performance % Complete (earned value / budgeted cost) and

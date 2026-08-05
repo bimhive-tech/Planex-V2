@@ -1000,6 +1000,53 @@ class FinanceReportTests(TestCase):
         self.assertTrue(data.startswith(b"%PDF"))
 
 
+class ProjectInfoCostAndDateFieldsTests(TestCase):
+    """contract_value/approved_value/forecast_cost and the now-distinct
+    revised_finish/forecast_finish rows — added because the project_info
+    table used to collapse revised and forecast into a single mislabeled
+    row and had no cost breakdown beyond the general "budget" figure."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+
+    def test_context_carries_the_new_project_fields(self):
+        from .services import build_report_context
+
+        project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            revised_finish=datetime.date(2026, 6, 1), forecast_finish=datetime.date(2026, 8, 1),
+            contract_value=1_000_000, approved_value=1_050_000, forecast_cost=1_100_000)
+        report = Report.objects.create(company=self.company, project=project, title="R")
+        ctx = build_report_context(report)
+
+        self.assertEqual(ctx["project"]["revised_finish"], datetime.date(2026, 6, 1))
+        self.assertEqual(ctx["project"]["forecast_finish"], datetime.date(2026, 8, 1))
+        self.assertEqual(ctx["project"]["contract_value"], 1_000_000)
+        self.assertEqual(ctx["project"]["approved_value"], 1_050_000)
+        self.assertEqual(ctx["project"]["forecast_cost"], 1_100_000)
+
+    def test_project_info_table_grows_a_row_per_field_present(self):
+        from .pdf_base import ensure_fonts
+        from .pdf_canvas import resolve_table
+
+        ensure_fonts()  # normally done by build_canvas_pdf before any Paragraph is built
+        cfg = default_config()
+        base_ctx = {"project": {"name": "Tower", "currency": "EGP"}, "arabic": False, "duration": {}}
+        empty_table = resolve_table("project_info", cfg, base_ctx, {"item": None})
+        empty_rows = len(empty_table._cellvalues) if empty_table else 0
+
+        full_ctx = {
+            "project": {
+                "name": "Tower", "currency": "EGP",
+                "contract_value": 1_000_000, "approved_value": 1_050_000, "forecast_cost": 1_100_000,
+                "revised_finish": datetime.date(2026, 6, 1), "forecast_finish": datetime.date(2026, 8, 1),
+            },
+            "arabic": False, "duration": {},
+        }
+        full_table = resolve_table("project_info", cfg, full_ctx, {"item": None})
+        self.assertEqual(len(full_table._cellvalues), empty_rows + 5)
+
+
 class LogosContextTests(TestCase):
     """A project can carry more than the two fixed left/right header logos —
     any number of extras, ordered by sort_order, resolved as ctx["logos"]["extra"]

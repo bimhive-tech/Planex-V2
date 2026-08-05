@@ -191,10 +191,19 @@ DEFAULT_CONFIG = {
         "info_code": "Project code",
         "info_start": "Project start",
         "info_finish": "Contractual finish",
-        "info_revised": "Forecast finish",
+        # revised_finish (the baseline as last revised) and forecast_finish
+        # (the current best-guess completion date) are two distinct project
+        # fields — keep their rows and labels separate rather than
+        # collapsing them into one, as the legacy "Forecast finish" label
+        # here used to do while actually reading revised_finish.
+        "info_revised": "Revised finish",
+        "info_forecast": "Forecast finish",
         "info_duration": "Contract duration (days)",
         "info_delay": "Delay (days)",
         "info_size": "Built-up area (m²)",
+        "info_contract_value": "Contract value",
+        "info_approved_value": "Approved value",
+        "info_forecast_cost": "Forecast cost",
     },
 }
 
