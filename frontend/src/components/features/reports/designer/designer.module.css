@@ -267,6 +267,57 @@
   white-space: nowrap;
 }
 
+.rotateHandleStem {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  width: 0;
+  height: 20px;
+  border-left: 1.5px dashed var(--border-strong);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.rotateHandle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  cursor: grab;
+  pointer-events: auto;
+}
+.rotateHandle:active {
+  cursor: grabbing;
+}
+
+/* Canva-style alignment guides, shown while dragging. */
+.alignGuideV {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--danger-text);
+  pointer-events: none;
+  z-index: 999;
+}
+.alignGuideH {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--danger-text);
+  pointer-events: none;
+  z-index: 999;
+}
+
 /* ── Element ⋯ menu ──────────────────────────────────────────────────── */
 .elementMenu {
   position: absolute;

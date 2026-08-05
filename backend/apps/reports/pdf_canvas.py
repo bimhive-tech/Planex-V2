@@ -168,6 +168,18 @@ def _draw_element(c, el: dict, box, inst: PageInstance, cfg, ctx):
     x, y, w, h = box
     props = el.get("props") or {}
     t = el.get("type")
+    # Clockwise degrees around the box's own center — rotate the coordinate
+    # system itself so every _draw_* below draws at its normal (x, y, w, h)
+    # and just ends up rotated, instead of each one needing its own rotation
+    # math. ReportLab's rotate() is counter-clockwise, hence the negation to
+    # match the canvas editor's (clockwise, CSS-style) convention.
+    rotation = float(el.get("rotation") or 0)
+    if rotation:
+        c.saveState()
+        cx, cy = x + w / 2, y + h / 2
+        c.translate(cx, cy)
+        c.rotate(-rotation)
+        c.translate(-cx, -cy)
     try:
         if t == "rect":
             _draw_rect(c, props, x, y, w, h)
@@ -193,6 +205,9 @@ def _draw_element(c, el: dict, box, inst: PageInstance, cfg, ctx):
         # One bad element shouldn't fail the whole report — same principle as
         # _draw_contained_image's existing "skip the one unreadable image".
         logger.exception("canvas element failed to draw (type=%s)", t)
+    finally:
+        if rotation:
+            c.restoreState()
 
 
 def _draw_rect(c, props, x, y, w, h):

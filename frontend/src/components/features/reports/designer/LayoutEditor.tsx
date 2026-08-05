@@ -2,8 +2,8 @@
 
 // Shared editing surface for both builder tabs: palette on the left, paper in
 // the middle, inspector on the right — plus all the element CRUD (add, move,
-// resize, duplicate, re-order, delete) and zoom.
-import { useMemo, useState } from "react";
+// resize, rotate, duplicate, re-order, delete, copy/paste, undo) and zoom.
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
@@ -18,6 +18,23 @@ import styles from "./designer.module.css";
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5];
 /** Base pixels-per-mm at 100% — A4 portrait then reads ~460px wide. */
 const BASE_SCALE = 2.2;
+/** How many past states Ctrl+Z can step back through, per editor session. */
+const MAX_HISTORY = 50;
+
+// A single, module-level clipboard: Page Designer and Report Configuration
+// are two separate LayoutEditor mounts (only one visible at a time — see
+// TemplateBuilder), so this is what lets you copy an element on one page (or
+// even the master) and paste it onto another without losing it on unmount.
+let elementClipboard: LayoutElement | null = null;
+
+/** True while focus is in a text field — Delete/Ctrl+Z etc. there should edit
+ * the text, not the canvas selection. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
 
 interface Props {
   design: PageDesign;
@@ -46,10 +63,43 @@ export function LayoutEditor({
   const [showGuides, setShowGuides] = useState(true);
   const scale = BASE_SCALE * zoom;
 
-  const { draft, startMove, startResize } = useCanvasInteraction({
+  // Undo/redo history for this editor instance (Page Designer's master
+  // elements and each Report Configuration page each get their own — a page
+  // switch remounts LayoutEditor, so history doesn't follow you across pages).
+  const undoStack = useRef<LayoutElement[][]>([]);
+  const redoStack = useRef<LayoutElement[][]>([]);
+  const elementsRef = useRef(elements);
+  elementsRef.current = elements;
+
+  /** Every mutation goes through here instead of onElementsChange directly,
+   * so undo has a snapshot of what came before it. */
+  function commit(updater: (prev: LayoutElement[]) => LayoutElement[]) {
+    undoStack.current.push(elementsRef.current);
+    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
+    redoStack.current = [];
+    onElementsChange(updater);
+  }
+
+  function undo() {
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    redoStack.current.push(elementsRef.current);
+    onElementsChange(() => previous);
+  }
+
+  function redo() {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push(elementsRef.current);
+    onElementsChange(() => next);
+  }
+
+  const { draft, guides, startMove, startResize, startRotate } = useCanvasInteraction({
     scale,
     design,
-    onCommit: (el) => onElementsChange((prev) => prev.map((e) => (e.id === el.id ? el : e))),
+    elements,
+    masterElements,
+    onCommit: (el) => commit((prev) => prev.map((e) => (e.id === el.id ? el : e))),
   });
 
   // While a gesture is live the draft stands in for the real element so the
@@ -71,7 +121,7 @@ export function LayoutEditor({
     // Id is generated up front so selection can target it; position and z are
     // resolved against the freshest list inside the updater.
     const id = newElementId();
-    onElementsChange((prev) => {
+    commit((prev) => {
       // Dropped: centre on the cursor. Clicked: land in the content box, but
       // cascade so repeated clicks don't stack invisibly on one another.
       const step = dropped ? 0 : (prev.length % 8) * 4;
@@ -89,20 +139,34 @@ export function LayoutEditor({
   }
 
   function updateElement(next: LayoutElement) {
-    onElementsChange((prev) =>
+    commit((prev) =>
       prev.map((e) => (e.id === next.id ? clampToPage(next, design) : e)),
     );
   }
 
+  function pasteElement() {
+    if (!elementClipboard) return;
+    const copyId = newElementId();
+    const source = elementClipboard;
+    commit((prev) => [
+      ...prev,
+      clampToPage(
+        { ...source, id: copyId, x: source.x + 5, y: source.y + 5, z: topZ(prev) + 1, props: { ...source.props } },
+        design,
+      ),
+    ]);
+    setSelectedId(copyId);
+  }
+
   function runAction(action: ElementAction, id: string) {
     if (action === "delete") {
-      onElementsChange((prev) => prev.filter((e) => e.id !== id));
+      commit((prev) => prev.filter((e) => e.id !== id));
       setSelectedId(null);
       return;
     }
     if (action === "duplicate") {
       const copyId = newElementId();
-      onElementsChange((prev) => {
+      commit((prev) => {
         const el = prev.find((e) => e.id === id);
         if (!el) return prev;
         return [
@@ -118,10 +182,42 @@ export function LayoutEditor({
     }
     // Re-order: nudge z past the neighbour in that direction.
     const delta = action === "forward" ? 1 : -1;
-    onElementsChange((prev) =>
+    commit((prev) =>
       prev.map((e) => (e.id === id ? { ...e, z: Math.max(0, e.z + delta) } : e)),
     );
   }
+
+  // Keyboard shortcuts: Delete/Backspace, Ctrl/Cmd+C/V, Ctrl/Cmd+Z (+Shift for redo).
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) return;
+      const mod = event.ctrlKey || event.metaKey;
+
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+        event.preventDefault();
+        runAction("delete", selectedId);
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "c" && selectedId) {
+        const el = elementsRef.current.find((e) => e.id === selectedId);
+        if (el) elementClipboard = { ...el, props: { ...el.props } };
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        pasteElement();
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedId, design, elements, onElementsChange]);
 
   return (
     <div className={styles.editor}>
@@ -168,9 +264,11 @@ export function LayoutEditor({
             scale={scale}
             selectedId={selectedId}
             showGuides={showGuides}
+            alignGuides={guides}
             onSelect={setSelectedId}
             onStartMove={startMove}
             onStartResize={startResize}
+            onStartRotate={startRotate}
             onAction={runAction}
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
           />

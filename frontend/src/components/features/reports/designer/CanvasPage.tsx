@@ -4,7 +4,7 @@
 // non-interactive ghosts, then this page's own elements on top.
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
-import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
+import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { CanvasElementView } from "./CanvasElementView";
 import type { ElementAction } from "./CanvasElementView";
 import styles from "./designer.module.css";
@@ -16,17 +16,20 @@ interface Props {
   scale: number;
   selectedId: string | null;
   showGuides: boolean;
+  /** Alignment guide lines while dragging (Canva-style snap-to-content). */
+  alignGuides?: AlignGuides | null;
   onSelect: (id: string | null) => void;
   onStartMove: (e: React.PointerEvent, el: LayoutElement) => void;
   onStartResize: (e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) => void;
+  onStartRotate?: (e: React.PointerEvent, el: LayoutElement) => void;
   onAction: (action: ElementAction, id: string) => void;
   /** Drop from the palette — coordinates arrive in mm, already page-relative. */
   onDropSpec?: (specKey: string, xMm: number, yMm: number) => void;
 }
 
 export function CanvasPage({
-  design, elements, masterElements = [], scale, selectedId, showGuides,
-  onSelect, onStartMove, onStartResize, onAction, onDropSpec,
+  design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
+  onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -139,8 +142,16 @@ export function CanvasPage({
           onSelect={onSelect}
           onStartMove={onStartMove}
           onStartResize={onStartResize}
+          onStartRotate={onStartRotate}
           onAction={onAction}
         />
+      ))}
+
+      {alignGuides?.x.map((x) => (
+        <div key={`vg-${x}`} className={styles.alignGuideV} style={{ left: `${x * scale}px` }} />
+      ))}
+      {alignGuides?.y.map((y) => (
+        <div key={`hg-${y}`} className={styles.alignGuideH} style={{ top: `${y * scale}px` }} />
       ))}
     </div>
   );

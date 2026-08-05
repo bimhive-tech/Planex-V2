@@ -217,6 +217,24 @@ class CanvasPdfTests(SimpleTestCase):
         data = build_canvas_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_rotated_elements_render_without_crashing_or_leaking_canvas_state(self):
+        """rotation rotates the coordinate system around the element's own
+        center via saveState/rotate/restoreState, paired in a finally so an
+        unbalanced save/restore stack (which ReportLab errors on at c.save())
+        can't leak the rotation onto whatever draws after it."""
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "e1", "type": "rect", "x": 20, "y": 20, "w": 30, "h": 15, "z": 0, "rotation": 45,
+             "props": {"fill": "#ff0000"}},
+            {"id": "e2", "type": "text", "x": 60, "y": 20, "w": 30, "h": 15, "z": 1, "rotation": 315,
+             "props": {"text": "tilted"}},
+            {"id": "e3", "type": "text", "x": 20, "y": 60, "w": 60, "h": 10, "z": 2,
+             "props": {"text": "unrotated, drawn after a rotated element"}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
     def test_border_offset_independent_of_margin_renders_without_crashing(self):
         """border_offset_mm decouples the frame from the content margin —
         e.g. a frame pulled in tight to the edge while content keeps its

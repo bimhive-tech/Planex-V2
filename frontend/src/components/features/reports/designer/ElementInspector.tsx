@@ -159,6 +159,12 @@ export function ElementInspector({ el, onChange, repeating = false }: Props) {
     onChange({ ...el!, [key]: value });
   }
 
+  function setRotation(value: number) {
+    // Keep it in [0, 360) so it always matches what the drag handle shows.
+    const normalized = ((value % 360) + 360) % 360;
+    onChange({ ...el!, rotation: normalized });
+  }
+
   return (
     <aside className={styles.inspector} aria-label="Element properties">
       <h2 className={styles.panelTitle}>{el.type} properties</h2>
@@ -175,6 +181,15 @@ export function ElementInspector({ el, onChange, repeating = false }: Props) {
             />
           </label>
         ))}
+        <label className={styles.geomField}>
+          <span>Rotation (°)</span>
+          <input
+            type="number"
+            step={1}
+            value={el.rotation ?? 0}
+            onChange={(e) => setRotation(Number(e.target.value))}
+          />
+        </label>
       </div>
 
       <div className={styles.propFields}>

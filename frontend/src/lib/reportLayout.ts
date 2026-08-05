@@ -30,6 +30,8 @@ export interface LayoutElement {
   h: number;
   /** Higher renders on top. */
   z: number;
+  /** Clockwise degrees, 0-360, rotated around the element's own center. */
+  rotation?: number;
   /** Type-specific settings — see ELEMENT_CATALOG for what each type uses. */
   props: Record<string, unknown>;
 }

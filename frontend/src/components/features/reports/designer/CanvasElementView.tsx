@@ -22,11 +22,12 @@ interface Props {
   onSelect: (id: string) => void;
   onStartMove: (e: React.PointerEvent, el: LayoutElement) => void;
   onStartResize: (e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) => void;
+  onStartRotate?: (e: React.PointerEvent, el: LayoutElement) => void;
   onAction: (action: ElementAction, id: string) => void;
 }
 
 export function CanvasElementView({
-  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onAction,
+  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -46,6 +47,7 @@ export function CanvasElementView({
     width: `${el.w * scale}px`,
     height: `${el.h * scale}px`,
     zIndex: el.z,
+    transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
   };
 
   if (ghost) {
@@ -58,6 +60,7 @@ export function CanvasElementView({
 
   return (
     <div
+      data-canvas-element
       className={`${styles.element} ${selected ? styles.elementSelected : ""}`}
       style={style}
       onPointerDown={(e) => {
@@ -90,6 +93,25 @@ export function CanvasElementView({
               }}
             />
           ))}
+
+          {onStartRotate && (
+            <span
+              className={styles.rotateHandleStem}
+              aria-hidden="true"
+            >
+              <span
+                className={styles.rotateHandle}
+                role="button"
+                aria-label="Rotate element"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  onStartRotate(e, el);
+                }}
+              >
+                <Icon name="refresh" size={11} />
+              </span>
+            </span>
+          )}
 
           <div className={styles.elementMenu} ref={menuRef}>
             <button
