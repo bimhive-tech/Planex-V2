@@ -95,6 +95,23 @@ class PdfTests(SimpleTestCase):
         self.assertEqual(shape(None), "")
         self.assertTrue(shape("مشروع"))  # returns a non-empty reshaped string
 
+    def test_resolve_arabic_language_setting_overrides_the_auto_guess(self):
+        from .pdf_base import resolve_arabic
+
+        cfg = default_config()
+        arabic_project = {"name": "مشروع"}
+        english_project = {"name": "Tower"}
+
+        # "auto" (the default) keeps guessing from the project name.
+        self.assertTrue(resolve_arabic(cfg, arabic_project))
+        self.assertFalse(resolve_arabic(cfg, english_project))
+
+        # An explicit setting wins even when it contradicts the guess.
+        cfg["language"] = "en"
+        self.assertFalse(resolve_arabic(cfg, arabic_project))
+        cfg["language"] = "ar"
+        self.assertTrue(resolve_arabic(cfg, english_project))
+
     def test_builds_pdf_bytes_with_arabic_data(self):
         template = ReportTemplate(name="T", config=default_config())
         report = SimpleNamespace(title="Monthly Progress Report", template=template)
@@ -410,6 +427,23 @@ class ResolveChartTests(SimpleTestCase):
         # 140% shouldn't push the needle/label past the gauge's 100% end.
         drawing = speedometer_chart(140, 100, default_config())
         self.assertIsNotNone(drawing)
+
+    def test_spi_gauge_bands_come_from_config_not_a_hardcoded_constant(self):
+        from reportlab.graphics.shapes import Wedge
+
+        from .pdf_base import hexcolor
+        from .pdf_charts import speedometer_chart
+
+        cfg = default_config()
+        cfg["gauge_thresholds"] = {"low": 20, "high": 40}
+        cfg["colors"]["gauge_bad"] = "#111111"
+        cfg["colors"]["gauge_warn"] = "#222222"
+        cfg["colors"]["gauge_good"] = "#333333"
+
+        drawing = speedometer_chart(90, 100, cfg)
+        wedges = [el for el in drawing.contents if isinstance(el, Wedge)]
+        self.assertEqual([w.fillColor for w in wedges],
+                          [hexcolor("#111111"), hexcolor("#222222"), hexcolor("#333333")])
 
 
 class TocTests(SimpleTestCase):

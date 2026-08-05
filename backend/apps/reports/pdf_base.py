@@ -35,6 +35,20 @@ def has_arabic(text) -> bool:
     return bool(text) and bool(_ARABIC_RE.search(str(text)))
 
 
+def resolve_arabic(cfg, project) -> bool:
+    """Is this report Arabic (RTL, Arabic month names, etc.)? cfg["language"]
+    pins it explicitly ("ar"/"en"); "auto" (the default, for templates saved
+    before this setting existed) falls back to guessing from the project
+    name or the "summary" label — the guess can be wrong for a template that
+    mixes languages, which is exactly why the explicit setting exists."""
+    language = cfg.get("language", "auto")
+    if language == "ar":
+        return True
+    if language == "en":
+        return False
+    return has_arabic(project.get("name")) or has_arabic(cfg["labels"].get("summary"))
+
+
 def shape(text) -> str:
     """Reshape + bidi-reorder so Arabic renders correctly; safe for Latin too."""
     if text is None:

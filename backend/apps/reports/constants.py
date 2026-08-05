@@ -7,6 +7,10 @@ underlined section headings, bordered info table, and planned/actual charts."""
 import copy
 
 DEFAULT_CONFIG = {
+    # "auto" guesses Arabic/English from the project name and labels (the old,
+    # implicit behavior — kept as the default so existing templates render
+    # unchanged); "ar"/"en" pin it explicitly instead of guessing.
+    "language": "auto",
     "page": {"size": "A4", "orientation": "portrait", "margin_mm": 16},
     "colors": {
         "primary": "#1F4E79",
@@ -25,7 +29,13 @@ DEFAULT_CONFIG = {
         "cover_accent": "#963634",       # maroon bar + project title on the cover
         "chart_planned": "#2E74B5",
         "chart_actual": "#C0504D",
+        "gauge_bad": "#C0504D",          # SPI/completion gauge bands
+        "gauge_warn": "#E8B33D",
+        "gauge_good": "#2E9E5B",
     },
+    # SPI/completion gauge band cutoffs, in percent (0-100): below `low` is
+    # gauge_bad, between low/high is gauge_warn, above `high` is gauge_good.
+    "gauge_thresholds": {"low": 50, "high": 80},
     "fonts": {
         "base_size": 11,
         "h1_size": 22,

@@ -31,7 +31,7 @@ from reportlab.platypus.tableofcontents import TableOfContents
 from .constants import merged_config
 from .richtext import html_to_flowables
 from .services import _zone_grids
-from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, shape
+from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, resolve_arabic, shape
 from .pdf_charts import (
     area_units_chart,
     cashflow_chart,
@@ -438,7 +438,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
     ensure_fonts()
     if cfg is None:
         cfg = merged_config(report.template.config if report.template else None)
-    ctx["arabic"] = has_arabic(ctx["project"]["name"]) or has_arabic(cfg["labels"].get("summary"))
+    ctx["arabic"] = resolve_arabic(cfg, ctx["project"])
     rtl = ctx["arabic"]
     styles = _styles(cfg)
     labels, sections = cfg["labels"], cfg["sections"]

@@ -265,14 +265,13 @@ def overall_donut(cfg, ctx, width, labels, height=None):
     return d
 
 
-_GAUGE_BANDS = [(0, 50, "#C0504D"), (50, 80, "#E8B33D"), (80, 100, "#2E9E5B")]
-
-
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
     """Semicircular SPI/completion gauge — red/amber/green bands with a needle
     at `value` (0..max_value) and the number printed under the hub. `value`
     is a plain number (not read from ctx) so the same drawing serves the
-    project-level overall % and any per-zone/per-item % a caller has on hand."""
+    project-level overall % and any per-zone/per-item % a caller has on hand.
+    Band cutoffs and colors come from cfg (gauge_thresholds, colors.gauge_*)
+    so a template can move "at risk"/"on track" away from the 50/80 default."""
     if value is None:
         return None
     height = height or 45 * mm
@@ -281,7 +280,15 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     r_outer = min(width / 2, height * 0.75) * 0.92
     r_inner = r_outer * 0.55
 
-    for lo, hi, color in _GAUGE_BANDS:
+    thresholds = cfg.get("gauge_thresholds") or {}
+    low, high = float(thresholds.get("low", 50)), float(thresholds.get("high", 80))
+    colors = cfg["colors"]
+    gauge_bands = [
+        (0, low, colors.get("gauge_bad", "#C0504D")),
+        (low, high, colors.get("gauge_warn", "#E8B33D")),
+        (high, max_value, colors.get("gauge_good", "#2E9E5B")),
+    ]
+    for lo, hi, color in gauge_bands:
         a0 = 180 - (lo / max_value) * 180
         a1 = 180 - (hi / max_value) * 180
         d.add(Wedge(cx, cy, r_outer, a1, a0, innerRadius=r_inner,

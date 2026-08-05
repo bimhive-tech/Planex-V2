@@ -18,7 +18,7 @@ from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import Paragraph
 
 from .constants import merged_config
-from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
+from .pdf_base import BOLD, FONT_NAME, ensure_fonts, hexcolor, resolve_arabic, shape, storage_image_reader
 from .pdf_charts import (
     area_progress_chart,
     area_units_chart,
@@ -92,7 +92,7 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     ensure_fonts()
     if cfg is None:
         cfg = merged_config(report.template.config if report.template else None)
-    ctx.setdefault("arabic", has_arabic(ctx["project"]["name"]) or has_arabic(cfg["labels"].get("summary")))
+    ctx.setdefault("arabic", resolve_arabic(cfg, ctx["project"]))
     ctx.setdefault("_report", report)  # detailed_progress's lazy zone_grids needs report.project/scope_ids
 
     design = cfg.get("page_design") or {}

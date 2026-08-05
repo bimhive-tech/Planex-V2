@@ -25,6 +25,11 @@ const ORIENTATIONS = [
   { value: "portrait", label: "Portrait" },
   { value: "landscape", label: "Landscape" },
 ];
+const LANGUAGES = [
+  { value: "auto", label: "Auto-detect (from project name / labels)" },
+  { value: "ar", label: "Arabic (RTL)" },
+  { value: "en", label: "English (LTR)" },
+];
 
 // Tabs mirror the report's page types (matches the reference monthly report).
 // Each non-Design page has an `enablePath` so it can be shown/hidden.
@@ -153,6 +158,11 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "labels.actual", label: 'Word: "Actual"', type: "text" },
       { path: "colors.chart_planned", label: "Chart: planned", type: "color" },
       { path: "colors.chart_actual", label: "Chart: actual", type: "color" },
+      { path: "colors.gauge_bad", label: "SPI gauge: at risk", type: "color" },
+      { path: "colors.gauge_warn", label: "SPI gauge: caution", type: "color" },
+      { path: "colors.gauge_good", label: "SPI gauge: on track", type: "color" },
+      { path: "gauge_thresholds.low", label: "SPI gauge: caution threshold (%)", type: "number" },
+      { path: "gauge_thresholds.high", label: "SPI gauge: on-track threshold (%)", type: "number" },
     ],
   },
   {
@@ -215,6 +225,7 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
     key: "design",
     hint: "Global styling applied across every page.",
     fields: [
+      { path: "language", label: "Language", type: "select", options: LANGUAGES },
       { path: "page.size", label: "Page size", type: "select", options: PAGE_SIZES },
       { path: "page.orientation", label: "Orientation", type: "select", options: ORIENTATIONS },
       { path: "page.margin_mm", label: "Margin (mm)", type: "number" },
