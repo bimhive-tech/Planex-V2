@@ -9,7 +9,7 @@ from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, Seede
 from apps.accounts.models import Company, Membership, Role, User
 from apps.projects.models import Project
 
-from .constants import default_config, merged_config
+from .constants import apply_report_layout_override, default_config, merged_config
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
@@ -1131,6 +1131,78 @@ class LogosContextTests(TestCase):
         ctx["photos"] = [{"image": None, "caption": "Site"}]
         data = build_canvas_pdf(report, ctx)
         self.assertTrue(data.startswith(b"%PDF"))
+
+
+class ReportLayoutOverrideTests(TestCase):
+    """A report can diverge from its template's pages/content (added a page,
+    dropped a photo somewhere the template doesn't have one, etc.) via
+    Report.layout_override — without that override, it renders identically
+    to every other report on the same template, as always."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+        self.template = ReportTemplate.objects.create(company=self.company, name="T", config=default_config())
+
+    def test_no_override_leaves_cfg_untouched(self):
+        report = Report.objects.create(company=self.company, project=self.project, template=self.template)
+        cfg = merged_config(self.template.config)
+        result = apply_report_layout_override(cfg, report)
+        self.assertIs(result, cfg)  # no copy made when there's nothing to override
+
+    def test_override_replaces_only_page_design_and_layout(self):
+        report = Report.objects.create(
+            company=self.company, project=self.project, template=self.template,
+            layout_override={
+                "page_design": {"size": "A3", "orientation": "landscape", "margin_mm": 5,
+                                "master_elements": []},
+                "layout": {"pages": [{"id": "extra", "name": "Extra Page", "elements": []}]},
+            })
+        cfg = merged_config(self.template.config)
+        original_colors = cfg["colors"]
+        result = apply_report_layout_override(cfg, report)
+
+        self.assertEqual(result["page_design"]["size"], "A3")
+        self.assertEqual(result["layout"]["pages"][0]["name"], "Extra Page")
+        # Styling stays template-controlled — the report only overrides content.
+        self.assertEqual(result["colors"], original_colors)
+        # Original cfg dict must not be mutated (deepcopy, not in-place) —
+        # default_config() has no page_design at all until something sets one.
+        self.assertNotIn("page_design", cfg)
+
+    def test_pdf_endpoint_renders_the_report_override_not_the_template(self):
+        role = Role.objects.create(
+            company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        user = User.objects.create_user(email="admin@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=user, role=role)
+
+        override_pages = [{"id": "only", "name": "Only Page", "elements": [
+            {"id": "e1", "type": "text", "x": 10, "y": 10, "w": 100, "h": 20, "z": 0,
+             "props": {"text": "from the report override, not the template"}},
+        ]}]
+        report = Report.objects.create(
+            company=self.company, project=self.project, template=self.template, title="M",
+            layout_override={
+                "page_design": {
+                    "size": "A4", "orientation": "portrait", "margin_mm": 10,
+                    "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+                    "show_border": False, "background": "#ffffff", "master_elements": [],
+                },
+                "layout": {"pages": override_pages},
+            })
+
+        client = APIClient()
+        client.force_authenticate(user)
+        resp = client.get(f"/api/reports/{report.id}/pdf/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.content.startswith(b"%PDF"))
+        # One page, matching the override — not the template's multi-section
+        # default (cover, dashboard, tables, ...) — a real signal the override
+        # drove the render rather than merely not crashing.
+        import fitz
+        doc = fitz.open(stream=resp.content, filetype="pdf")
+        self.assertEqual(doc.page_count, 1)
 
 
 class LayoutSeedTests(SimpleTestCase):

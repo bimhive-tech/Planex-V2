@@ -1,8 +1,18 @@
 // Report + template shapes shared across the Reports module.
+import type { LayoutPage, PageDesign } from "@/lib/reportLayout";
 
 // The template config is deeply nested and fully editable; treat it as an
 // open record and read/write via dot-paths (see lib/reportTemplate).
 export type ReportConfig = Record<string, unknown>;
+
+/** A report's own page/content override — same shape as a template's canvas
+ * config, minus colors/fonts/labels (those stay template-controlled). null
+ * until the report's own editor is saved for the first time, at which point
+ * the report renders from this instead of the template's layout. */
+export interface ReportLayoutOverride {
+  page_design?: PageDesign;
+  layout?: { pages: LayoutPage[] };
+}
 
 export interface ReportTemplate {
   id: string;
@@ -30,6 +40,7 @@ export interface ReportRow {
   description: string;
   description_html: string;
   scope_ids: string[];
+  layout_override: ReportLayoutOverride | null;
   created_at: string;
 }
 

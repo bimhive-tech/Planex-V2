@@ -60,6 +60,13 @@ class Report(TimestampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     created_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="created_reports")
 
+    # None = render exactly from the template, as every report always has.
+    # Once set (by saving in the report's own "Customize this report" editor)
+    # it's {"page_design": {...}, "layout": {"pages": [...]}} — same shape as
+    # a template's canvas config — and overrides just those two keys; colors/
+    # fonts/labels and the repeating header/footer stay template-controlled.
+    layout_override = models.JSONField(null=True, blank=True)
+
     class Meta:
         indexes = [models.Index(fields=["company", "project", "status"])]
         ordering = ["-created_at"]

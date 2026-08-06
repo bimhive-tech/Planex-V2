@@ -14,7 +14,7 @@ from rest_framework.response import Response
 
 from apps.accounts.constants import Permission
 
-from .constants import merged_config
+from .constants import apply_report_layout_override, merged_config
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf
@@ -104,6 +104,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         report = self.get_object()
         ctx = build_report_context(report)
         cfg = merged_config(report.template.config if report.template else None)
+        cfg = apply_report_layout_override(cfg, report)
         pages = {}
         engine = request.query_params.get("engine") or cfg.get("render_engine")
         if engine == "canvas" or (engine is None and has_canvas_layout(cfg)):

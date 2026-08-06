@@ -18,8 +18,9 @@ import { api, ApiError, type Paginated } from "@/lib/api";
 import { ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
 import type { ProjectListRow } from "@/types/project";
-import type { ReportData, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
+import type { ReportData, ReportLayoutOverride, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
+import { ReportLayoutEditor } from "./ReportLayoutEditor";
 import { ProgressImagePicker } from "./ProgressImagePicker";
 import { ProjectReportAssets } from "@/components/features/projects/ProjectReportAssets";
 import { ScopeTree } from "./ScopeTree";
@@ -45,6 +46,7 @@ const TABS = [
   { key: "progress", label: "Progress Report" },
   { key: "photos", label: "Progress Images" },
   { key: "attachments", label: "Attachments" },
+  { key: "layout", label: "Customize" },
 ] as const;
 
 // Maps a builder tab to the PDF section anchor it scrolls the preview to.
@@ -97,6 +99,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedOverride, setSavedOverride] = useState<ReportLayoutOverride | null>(null);
 
   const { loading, error, reload } = useFetch(async () => {
     const [r, ps, ts] = await Promise.all([
@@ -107,6 +110,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     setProjects(ps.results);
     setTemplates(ts.results);
     setScopeIds(r.scope_ids ?? []);
+    setSavedOverride(r.layout_override ?? null);
     setForm({
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
@@ -175,6 +179,10 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const templateOptions = useMemo(
     () => [{ value: "", label: "Default styling" }, ...templates.map((t) => ({ value: t.id, label: t.name }))],
     [templates],
+  );
+  const selectedTemplate = useMemo(
+    () => templates.find((t) => t.id === form?.template) ?? null,
+    [templates, form?.template],
   );
 
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -339,6 +347,17 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                 )}
                 {tab === "attachments" && (
                   <ReportAssets reportId={reportId} canManage={canManage} only="attachment" onChanged={bump} />
+                )}
+
+                {tab === "layout" && (
+                  <ReportLayoutEditor
+                    key={`${reportId}-${form.template}`}
+                    reportId={reportId}
+                    template={selectedTemplate}
+                    savedOverride={savedOverride}
+                    canManage={canManage}
+                    onSaved={() => { reload(); bump(); }}
+                  />
                 )}
 
                 {saveError && <p className="formError">{saveError}</p>}
