@@ -28,6 +28,10 @@ interface Props {
 export function ReportConfigurator({ design, pages, onChange, liveData }: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // Repeat/skip-master are template-authoring concepts — a report's pages
+  // are already real, concrete pages (see expandRepeatingPages), so those
+  // controls are just noise here. Template Builder (no liveData) keeps them.
+  const isReportContext = Boolean(liveData);
 
   const active = pages.find((p) => p.id === activeId) ?? pages[0];
 
@@ -125,8 +129,8 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
               onDoubleClick={() => setRenamingId(page.id)}
             >
               <span className={styles.pageIndex}>{index + 1}</span>
-              {page.repeat && <Icon name="refresh" size={12} className={styles.repeatBadge} />}
-              {page.skip_master && <Icon name="eyeOff" size={12} className={styles.repeatBadge} />}
+              {!isReportContext && page.repeat && <Icon name="refresh" size={12} className={styles.repeatBadge} />}
+              {!isReportContext && page.skip_master && <Icon name="eyeOff" size={12} className={styles.repeatBadge} />}
               {renamingId === page.id ? (
                 <input
                   className={styles.pageNameInput}
@@ -160,21 +164,25 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
               >
                 <Icon name="chevronDown" size={12} />
               </button>
-              <button
-                type="button" onClick={() => toggleRepeat(page.id)}
-                aria-label="Repeat this page per item" title="Repeat this page per item (photos, zones, etc.)"
-                className={page.repeat ? styles.repeatActive : undefined}
-              >
-                <Icon name="refresh" size={12} />
-              </button>
-              <button
-                type="button" onClick={() => toggleSkipMaster(page.id)}
-                aria-label="Hide the repeating header/footer on this page"
-                title="Hide the repeating header/footer on this page (e.g. for a cover)"
-                className={page.skip_master ? styles.repeatActive : undefined}
-              >
-                <Icon name="eyeOff" size={12} />
-              </button>
+              {!isReportContext && (
+                <button
+                  type="button" onClick={() => toggleRepeat(page.id)}
+                  aria-label="Repeat this page per item" title="Repeat this page per item (photos, zones, etc.)"
+                  className={page.repeat ? styles.repeatActive : undefined}
+                >
+                  <Icon name="refresh" size={12} />
+                </button>
+              )}
+              {!isReportContext && (
+                <button
+                  type="button" onClick={() => toggleSkipMaster(page.id)}
+                  aria-label="Hide the repeating header/footer on this page"
+                  title="Hide the repeating header/footer on this page (e.g. for a cover)"
+                  className={page.skip_master ? styles.repeatActive : undefined}
+                >
+                  <Icon name="eyeOff" size={12} />
+                </button>
+              )}
               <button
                 type="button" onClick={() => duplicatePage(page.id)}
                 aria-label="Duplicate page" title="Duplicate this page"
@@ -194,7 +202,7 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
       </div>
       <p className={styles.panelHint}>Double-click a page name to rename it.</p>
 
-      {active.repeat && (
+      {!isReportContext && active.repeat && (
         <div className={styles.repeatPanel}>
           <h3 className={styles.repeatPanelTitle}>Repeat this page</h3>
           <p className={styles.panelHint}>
