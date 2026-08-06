@@ -460,6 +460,19 @@
   opacity: 0.6;
 }
 
+/* Real project data inside a table preview (Report Customize tab only) —
+   actual text instead of the generic gray placeholder bars above. */
+.tablePreviewCell {
+  font-size: 8px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tablePreviewCell[data-align="right"] {
+  text-align: right;
+}
+
 .tocPreview {
   display: flex;
   flex-direction: column;

@@ -89,7 +89,10 @@ class ReportViewSet(viewsets.ModelViewSet):
         builder can show what's pulled from the chosen project, live."""
         report = self.get_object()
         ctx = build_report_context(report)
-        for key in ("logos", "photos", "attachments", "images"):
+        # logos/photos/attachments/images are binary-ish and the builder's own
+        # asset pickers already cover them; _progress is an internal per-
+        # activity map (can be tens of thousands of entries) nothing here reads.
+        for key in ("logos", "photos", "attachments", "images", "_progress", "zone_grids"):
             ctx.pop(key, None)
         return Response(ctx)
 

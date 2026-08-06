@@ -5,6 +5,7 @@
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
+import type { ReportData } from "@/types/report";
 import { CanvasElementView } from "./CanvasElementView";
 import type { ElementAction } from "./CanvasElementView";
 import styles from "./designer.module.css";
@@ -25,11 +26,13 @@ interface Props {
   onAction: (action: ElementAction, id: string) => void;
   /** Drop from the palette — coordinates arrive in mm, already page-relative. */
   onDropSpec?: (specKey: string, xMm: number, yMm: number) => void;
+  /** Present only in the report-level "Customize" tab. */
+  liveData?: ReportData | null;
 }
 
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
-  onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec,
+  onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -130,6 +133,7 @@ export function CanvasPage({
           onStartMove={() => {}}
           onStartResize={() => {}}
           onAction={() => {}}
+          liveData={liveData}
         />
       ))}
 
@@ -144,6 +148,7 @@ export function CanvasPage({
           onStartResize={onStartResize}
           onStartRotate={onStartRotate}
           onAction={onAction}
+          liveData={liveData}
         />
       ))}
 

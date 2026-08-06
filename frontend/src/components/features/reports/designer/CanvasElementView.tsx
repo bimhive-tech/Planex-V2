@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import type { LayoutElement } from "@/lib/reportLayout";
+import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
 import styles from "./designer.module.css";
 
@@ -24,10 +25,12 @@ interface Props {
   onStartResize: (e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) => void;
   onStartRotate?: (e: React.PointerEvent, el: LayoutElement) => void;
   onAction: (action: ElementAction, id: string) => void;
+  /** Present only in the report-level "Customize" tab. */
+  liveData?: ReportData | null;
 }
 
 export function CanvasElementView({
-  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction,
+  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -53,7 +56,7 @@ export function CanvasElementView({
   if (ghost) {
     return (
       <div className={`${styles.element} ${styles.elementGhost}`} style={style} aria-hidden="true">
-        <ElementPreview el={el} />
+        <ElementPreview el={el} liveData={liveData} />
       </div>
     );
   }
@@ -79,7 +82,7 @@ export function CanvasElementView({
         }
       }}
     >
-      <ElementPreview el={el} />
+      <ElementPreview el={el} liveData={liveData} />
 
       {selected && (
         <>

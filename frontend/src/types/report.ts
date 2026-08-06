@@ -44,18 +44,61 @@ export interface ReportRow {
   created_at: string;
 }
 
-// Computed report data pulled from the chosen project (for the builder's
-// read-only Project Info + Progress Report tabs).
+// Computed report data pulled from the chosen project — the builder's
+// read-only Project Info + Progress Report tabs, and (see ElementPreview)
+// what the Customize tab's canvas shows inside table/chart/field elements
+// instead of generic placeholder content. Mirrors build_report_context()'s
+// full return dict (minus binary-ish keys the asset pickers already cover).
+export interface ReportZoneRow {
+  id?: string; name: string; progress: number; previous?: number | null; planned?: number | null;
+}
+export interface ReportHierarchyRow {
+  name: string; actual: number | null; previous: number | null; planned: number | null;
+  children: { name: string; actual: number | null; previous: number | null; planned: number | null }[];
+}
+export interface ReportDisciplineRow {
+  name: string; concrete: number | null; architecture: number | null;
+  electrical: number | null; mechanical: number | null; other: number | null;
+}
+export interface ReportCriticalPathRow {
+  name: string; planned_finish: string | null; forecast_finish: string | null; delay_days: number;
+}
 export interface ReportData {
+  report: {
+    title: string; number: string; date: string | null;
+    period_start: string | null; period_finish: string | null; status: string;
+  };
   overall: number;
+  planned: number | null;
+  previous_overall: number | null;
+  duration: { total: number; elapsed: number; remaining: number; delay: number } | null;
   breakdown: { total: number; completed: number; in_progress: number; not_started: number };
-  zones: { name: string; progress: number }[];
+  zones: ReportZoneRow[];
+  areas: { name: string; planned: number | null; actual: number | null }[];
+  hierarchy: ReportHierarchyRow[];
+  discipline: ReportDisciplineRow[];
+  critical_path: ReportCriticalPathRow[];
+  cashflow: { month: string; planned: number; actual: number; cum_planned: number; cum_actual: number }[];
+  cashflow_totals: { planned: number; actual: number };
+  invoices: { name: string; value: number; date: string | null }[];
+  invoices_total: number;
+  submittals: {
+    rows: { title: string; type: string; discipline: string; status: string; status_key: string;
+             reference: string; date: string | null }[];
+    summary: { status: string; key: string; count: number }[];
+  };
+  delays: { title: string; description: string; impact_days: number; status: string; date: string | null }[];
+  scurve: { date: string | null; actual: number; planned: number | null }[];
   milestones: { title: string; date: string | null; status: string }[];
   snapshots: { date: string | null; overall_progress: number; source: string }[];
   project: {
-    name: string; type: string; location: string; client: string;
-    consultant: string; contractor: string; planned_start: string | null;
-    planned_finish: string | null; size_sqm: string | null; budget: string | null; currency: string;
+    name: string; code?: string; type: string; location: string; description?: string;
+    client: string; consultant: string; contractor: string;
+    planned_start: string | null; planned_finish: string | null;
+    revised_finish?: string | null; forecast_finish?: string | null;
+    size_sqm: string | null; budget: string | null;
+    contract_value?: string | null; approved_value?: string | null; forecast_cost?: string | null;
+    currency: string;
   };
 }
 

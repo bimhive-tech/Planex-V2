@@ -9,6 +9,7 @@ import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
+import type { ReportData } from "@/types/report";
 import { CanvasPage } from "./CanvasPage";
 import type { ElementAction } from "./CanvasElementView";
 import { ElementInspector } from "./ElementInspector";
@@ -53,10 +54,12 @@ interface Props {
   /** True when the active page is set to repeat — unlocks item-scoped
    * field/table/chart sources in the inspector (Report Configuration only). */
   repeating?: boolean;
+  /** Present only in the report-level "Customize" tab. */
+  liveData?: ReportData | null;
 }
 
 export function LayoutEditor({
-  design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false,
+  design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -271,6 +274,7 @@ export function LayoutEditor({
             onStartRotate={startRotate}
             onAction={runAction}
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
+            liveData={liveData}
           />
         </div>
 

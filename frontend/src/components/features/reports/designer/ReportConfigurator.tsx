@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type { LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource } from "@/lib/reportLayout";
+import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
 import styles from "./designer.module.css";
 
@@ -18,9 +19,12 @@ interface Props {
   pages: LayoutPage[];
   /** Updater form so rapid successive edits can't clobber each other. */
   onChange: (updater: (prev: LayoutPage[]) => LayoutPage[]) => void;
+  /** Present only in the report-level "Customize" tab — undefined in the
+   * project-agnostic Template Builder, where placeholders are all there is. */
+  liveData?: ReportData | null;
 }
 
-export function ReportConfigurator({ design, pages, onChange }: Props) {
+export function ReportConfigurator({ design, pages, onChange, liveData }: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
@@ -231,6 +235,7 @@ export function ReportConfigurator({ design, pages, onChange }: Props) {
       leftHeader={pageList}
       emptyHint="Drag an element from the left onto the page to start building this page."
       repeating={Boolean(active.repeat)}
+      liveData={liveData}
     />
   );
 }

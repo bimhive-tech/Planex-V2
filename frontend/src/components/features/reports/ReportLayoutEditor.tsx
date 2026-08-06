@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
 import type { LayoutPage } from "@/lib/reportLayout";
-import type { ReportLayoutOverride, ReportTemplate } from "@/types/report";
+import type { ReportData, ReportLayoutOverride, ReportTemplate } from "@/types/report";
 import { ReportConfigurator } from "./designer/ReportConfigurator";
 import styles from "./reports.module.css";
 
@@ -21,12 +21,15 @@ interface Props {
   reportId: string;
   template: ReportTemplate | null;
   savedOverride: ReportLayoutOverride | null;
+  /** This report's live project data — shown inside table/chart/field
+   * elements on the canvas instead of generic placeholder content. */
+  liveData: ReportData | null;
   canManage: boolean;
   /** Refreshes the report row + the PDF preview after a save/reset. */
   onSaved: () => void;
 }
 
-export function ReportLayoutEditor({ reportId, template, savedOverride, canManage, onSaved }: Props) {
+export function ReportLayoutEditor({ reportId, template, savedOverride, liveData, canManage, onSaved }: Props) {
   const design = template ? readPageDesign(template.config) : null;
   const templatePages = template ? readPages(template.config) : [];
   const isCustomized = Boolean(savedOverride?.layout?.pages?.length);
@@ -104,7 +107,7 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, canManag
         )}
       </div>
       {error && <p className="formError">{error}</p>}
-      <ReportConfigurator design={design} pages={pages} onChange={updatePages} />
+      <ReportConfigurator design={design} pages={pages} onChange={updatePages} liveData={liveData} />
     </section>
   );
 }
