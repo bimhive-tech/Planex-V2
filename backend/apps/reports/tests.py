@@ -1202,6 +1202,23 @@ class ReportLayoutOverrideTests(TestCase):
         # default_config() has no page_design at all until something sets one.
         self.assertNotIn("page_design", cfg)
 
+    def test_page_design_override_merges_not_replaces(self):
+        """The Customize tab only ever lets a report override its own
+        master_elements (header/footer content) — margins/page size/etc.
+        must keep tracking the template live, not freeze at whatever they
+        were the moment the report got its own header."""
+        template = ReportTemplate.objects.create(
+            company=self.company, name="WithDesign",
+            config={"page_design": {"size": "A4", "margin_mm": 15, "master_elements": [{"id": "orig"}]}})
+        report = Report.objects.create(
+            company=self.company, project=self.project, template=template,
+            layout_override={"page_design": {"master_elements": [{"id": "x", "type": "text"}]}})
+        cfg = merged_config(template.config)
+        result = apply_report_layout_override(cfg, report)
+
+        self.assertEqual(result["page_design"]["master_elements"], [{"id": "x", "type": "text"}])
+        self.assertEqual(result["page_design"]["margin_mm"], 15)
+
     def test_pdf_endpoint_renders_the_report_override_not_the_template(self):
         role = Role.objects.create(
             company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
@@ -1359,6 +1376,25 @@ class ReportsApiTests(TestCase):
         self.assertEqual(pdf.status_code, 200)
         self.assertEqual(pdf["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(pdf.streaming_content if hasattr(pdf, "streaming_content") else [pdf.content]).startswith(b"%PDF"))
+
+    def test_page_images_action_rasterizes_every_pdf_page(self):
+        """The Customize tab's real-page background — rasterized server-side
+        (PyMuPDF) so the browser never has to render the PDF itself."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        resp = self.client.get(f"/api/reports/{report_id}/page-images/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(len(resp.data["pages"]), 1)
+        self.assertEqual(resp.data["dpi"], 144)
+        # Each entry decodes to a real PNG (magic bytes), not just any bytes.
+        import base64
+        png = base64.b64decode(resp.data["pages"][0])
+        self.assertTrue(png.startswith(b"\x89PNG"))
 
     def test_data_action_trims_repeat_sources_to_light_metadata(self):
         """photos/attachments/logos only need a caption and an authed

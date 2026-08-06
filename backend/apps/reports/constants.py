@@ -231,16 +231,19 @@ def merged_config(config):
 def apply_report_layout_override(cfg: dict, report) -> dict:
     """A report can diverge from its template's pages/content without
     touching the template (Report.layout_override, set once the report's own
-    "Customize this report" editor is saved). Only page_design/layout are
-    replaced — colors, fonts, and labels stay whatever the template says, and
-    the repeating header/footer master_elements travel with page_design so
-    they still apply unless the report's own page_design says otherwise."""
+    "Customize this report" editor is saved). Colors, fonts, and labels stay
+    whatever the template says either way. layout.pages is a full swap (a
+    report's pages are independently edited once customized at all).
+    page_design is merged key-by-key rather than swapped wholesale — the
+    Customize tab only ever lets a report override master_elements (its own
+    header/footer content), never margins/page size/etc., so those keep
+    tracking the template live even after a report has its own header."""
     override = getattr(report, "layout_override", None)
     if not override:
         return cfg
     cfg = copy.deepcopy(cfg)
     if override.get("page_design"):
-        cfg["page_design"] = override["page_design"]
+        cfg["page_design"] = {**(cfg.get("page_design") or {}), **override["page_design"]}
     if override.get("layout"):
         cfg["layout"] = override["layout"]
     return cfg

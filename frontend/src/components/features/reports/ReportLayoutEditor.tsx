@@ -2,17 +2,19 @@
 
 // Report Builder's "Customize" tab — this one report's own pages, layered on
 // top of its template (add a page, drop an extra photo somewhere the
-// template doesn't have one) without ever touching the template. Reuses the
-// exact page-list + canvas + palette + inspector from the Template Builder's
-// Report Configuration tab, bound to this report's layout_override instead
-// of a template's config. Page setup (margins, master header/footer) stays
-// template-controlled — only page content is editable here.
+// template doesn't have one, move the header logo) without ever touching the
+// template. Reuses the exact page-list + canvas + palette + inspector from
+// the Template Builder's Report Configuration tab, bound to this report's
+// layout_override instead of a template's config. Margins/page size stay
+// template-controlled; page content AND the header/footer master content are
+// both editable here.
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { useReportPageImages } from "@/hooks/useReportPageImages";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
-import type { LayoutPage } from "@/lib/reportLayout";
+import type { LayoutElement, LayoutPage } from "@/lib/reportLayout";
 import { expandRepeatingPages } from "@/lib/reportRepeat";
 import type { ReportData, ReportLayoutOverride, ReportTemplate } from "@/types/report";
 import { ReportConfigurator } from "./designer/ReportConfigurator";
@@ -45,12 +47,34 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
   const [pages, setPages] = useState<LayoutPage[]>(
     isCustomized ? savedOverride!.layout!.pages : startingPages,
   );
+  const [masterElements, setMasterElements] = useState<LayoutElement[]>(
+    savedOverride?.page_design?.master_elements ?? design?.master_elements ?? [],
+  );
+  // A snapshot of "page id -> its position in the real PDF" (1-based), taken
+  // once from the starting pages — matches pageImages 1:1 since the PDF was
+  // rendered from this exact template/override just before this tab opened.
+  // Deliberately never recomputed as pages are added/reordered during the
+  // session: each page keeps showing the real image it started with, and a
+  // brand-new page has no entry until the next save regenerates the set.
+  const [pageNumberMap] = useState<Map<string, number>>(() => {
+    const base = isCustomized ? savedOverride!.layout!.pages : startingPages;
+    return new Map(base.map((p, i) => [p.id, i + 1]));
+  });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped only after a save/reset actually changes what the PDF looks like —
+  // regenerating it (10-20s) on every keystroke would make editing unusable.
+  const [imagesKey, setImagesKey] = useState(0);
+  const { images: pageImages, loading: imagesLoading } = useReportPageImages(reportId, imagesKey);
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);
+    setDirty(true);
+  }
+
+  function updateMasterElements(updater: (prev: LayoutElement[]) => LayoutElement[]) {
+    setMasterElements(updater);
     setDirty(true);
   }
 
@@ -58,8 +82,11 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/reports/${reportId}/`, { layout_override: { layout: { pages } } });
+      await api.patch(`/reports/${reportId}/`, {
+        layout_override: { layout: { pages }, page_design: { master_elements: masterElements } },
+      });
       setDirty(false);
+      setImagesKey((k) => k + 1);
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't save this report's layout.");
@@ -74,7 +101,9 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
     try {
       await api.patch(`/reports/${reportId}/`, { layout_override: null });
       setPages(startingPages);
+      setMasterElements(design?.master_elements ?? []);
       setDirty(false);
+      setImagesKey((k) => k + 1);
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't reset this report's layout.");
@@ -113,7 +142,17 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
         )}
       </div>
       {error && <p className="formError">{error}</p>}
-      <ReportConfigurator design={design} pages={pages} onChange={updatePages} liveData={liveData} />
+      <ReportConfigurator
+        design={design}
+        pages={pages}
+        onChange={updatePages}
+        liveData={liveData}
+        masterElements={masterElements}
+        onMasterElementsChange={updateMasterElements}
+        pageImages={pageImages}
+        pageImagesLoading={imagesLoading}
+        pageNumberMap={pageNumberMap}
+      />
     </section>
   );
 }

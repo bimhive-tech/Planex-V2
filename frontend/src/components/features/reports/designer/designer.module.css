@@ -170,6 +170,20 @@
   overflow: hidden;
 }
 
+/* The report Customize tab's real page — a server-rasterized PNG of the
+   actual PDF page, pixel-identical to it. Sits behind everything else;
+   elements already baked into it render as invisible hit-boxes on top
+   (see CanvasElementView's hideContent) instead of a second, abstract copy. */
+.pageBackgroundImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* The actual PDF page-border rect, inset by border_offset_mm — not the
    .paper element's own edge (that's just "this is the paper", always
    present so you can see the page bounds on screen). */
@@ -439,13 +453,14 @@
 
 .tablePreview {
   width: 100%;
-  height: 100%;
+  /* A PDF table isn't a scrolling widget — it just takes the vertical space
+     its rows need. min-height keeps it filling a short/empty box; height:auto
+     lets it grow past the box (rather than clip or scroll) when the real
+     table has more rows than the box was sized for. */
+  min-height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
-  /* A real table can carry far more rows than the placeholder's fixed 4 —
-     scroll internally rather than squashing every row unreadably thin or
-     spilling text outside the element's own box on the canvas. */
-  overflow-y: auto;
   background: #fff;
   border: 1px solid var(--border-strong);
 }
@@ -634,6 +649,31 @@
   font-size: 13px;
   color: var(--text-primary);
   margin-top: var(--space-3);
+}
+
+/* ── Edit mode tabs (report Customize tab: page content vs header/footer) ── */
+.editModeTabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-canvas);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+}
+.editModeTab,
+.editModeTabActive {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+.editModeTabActive {
+  background: #fff;
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ── Page list (Report Configuration) ────────────────────────────────── */

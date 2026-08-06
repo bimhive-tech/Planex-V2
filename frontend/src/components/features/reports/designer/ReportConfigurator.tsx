@@ -23,11 +23,31 @@ interface Props {
   /** Present only in the report-level "Customize" tab — undefined in the
    * project-agnostic Template Builder, where placeholders are all there is. */
   liveData?: ReportData | null;
+  /** This report's own header/footer content — present only alongside
+   * liveData. Undefined in the Template Builder, where the master is edited
+   * on its own dedicated Page Designer tab instead. */
+  masterElements?: LayoutElement[];
+  onMasterElementsChange?: (updater: (prev: LayoutElement[]) => LayoutElement[]) => void;
+  /** Every page of the report's current real PDF, rasterized — see
+   * useReportPageImages. null while template-builder (never fetched) or
+   * still loading. */
+  pageImages?: string[] | null;
+  pageImagesLoading?: boolean;
+  /** page id -> 1-based position in pageImages — see ReportLayoutEditor. */
+  pageNumberMap?: Map<string, number>;
 }
 
-export function ReportConfigurator({ design, pages, onChange, liveData }: Props) {
+export function ReportConfigurator({
+  design, pages, onChange, liveData, masterElements, onMasterElementsChange,
+  pageImages, pageImagesLoading, pageNumberMap,
+}: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // Whether you're moving this page's own content around, or the shared
+  // header/footer (only offered where onMasterElementsChange exists — the
+  // report Customize tab; the Template Builder edits the master on its own
+  // separate Page Designer tab instead).
+  const [editMode, setEditMode] = useState<"page" | "header">("page");
   // Repeat/skip-master are template-authoring concepts — a report's pages
   // are already real, concrete pages (see expandRepeatingPages), so those
   // controls are just noise here. Template Builder (no liveData) keeps them.
@@ -109,6 +129,28 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
 
   const pageList = (
     <section className={styles.setupPanel} aria-label="Report pages">
+      {pageImagesLoading && (
+        <p className={styles.panelHint}>Loading the real page previews (this can take a bit)…</p>
+      )}
+      {onMasterElementsChange && (
+        <div className={styles.editModeTabs} role="tablist" aria-label="What to edit">
+          <button
+            type="button" role="tab" aria-selected={editMode === "page"}
+            className={editMode === "page" ? styles.editModeTabActive : styles.editModeTab}
+            onClick={() => setEditMode("page")}
+          >
+            Page content
+          </button>
+          <button
+            type="button" role="tab" aria-selected={editMode === "header"}
+            className={editMode === "header" ? styles.editModeTabActive : styles.editModeTab}
+            onClick={() => setEditMode("header")}
+          >
+            Header &amp; footer
+          </button>
+        </div>
+      )}
+
       <div className={styles.pagesHead}>
         <h2 className={styles.panelTitle}>Pages</h2>
         <button type="button" className={styles.addPageBtn} onClick={addPage} title="Add a new page">
@@ -242,19 +284,32 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
   );
 
   const pinnedItem = liveData ? resolvePinnedItem(active, liveData) : null;
+  const editingHeader = editMode === "header" && Boolean(onMasterElementsChange);
+  const backgroundPageNumber = pageNumberMap?.get(active.id);
+  const backgroundImage =
+    pageImages && backgroundPageNumber ? pageImages[backgroundPageNumber - 1] ?? null : null;
 
   return (
     <LayoutEditor
-      key={active.id}
+      // Mode is part of the key (not just the page) — switching between
+      // "Page content" and "Header & footer" is a different editable set
+      // entirely, so it should get its own fresh undo history and bornIds
+      // snapshot rather than inheriting the page's.
+      key={`${active.id}-${editMode}`}
       design={design}
-      elements={active.elements}
-      onElementsChange={setElements}
-      masterElements={active.skip_master ? [] : design.master_elements}
+      elements={editingHeader ? (masterElements ?? []) : active.elements}
+      onElementsChange={editingHeader ? onMasterElementsChange! : setElements}
+      masterElements={editingHeader || active.skip_master ? [] : (masterElements ?? design.master_elements)}
       leftHeader={pageList}
-      emptyHint="Drag an element from the left onto the page to start building this page."
+      emptyHint={
+        editingHeader
+          ? "Drag an element from the left to add to the header/footer."
+          : "Drag an element from the left onto the page to start building this page."
+      }
       repeating={Boolean(active.repeat)}
       liveData={liveData}
-      pinnedItem={pinnedItem}
+      pinnedItem={editingHeader ? null : pinnedItem}
+      backgroundImage={backgroundImage}
     />
   );
 }

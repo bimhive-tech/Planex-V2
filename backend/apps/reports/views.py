@@ -36,6 +36,21 @@ class ReportsAccess(BasePermission):
         return Permission.EXPORT_REPORTS in user.effective_permissions()
 
 
+def _render_report_pdf(report, engine):
+    """Shared by the `pdf` and `page-images` actions — same cfg/context
+    assembly and canvas-vs-legacy dispatch either way. Returns (bytes,
+    section->page map)."""
+    ctx = build_report_context(report)
+    cfg = merged_config(report.template.config if report.template else None)
+    cfg = apply_report_layout_override(cfg, report)
+    pages = {}
+    if engine == "canvas" or (engine is None and has_canvas_layout(cfg)):
+        data = build_canvas_pdf(report, ctx, cfg=cfg, out_pages=pages)
+    else:
+        data = build_report_pdf(report, ctx, out_pages=pages, cfg=cfg)
+    return data, pages
+
+
 class ReportTemplateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ReportsAccess]
     serializer_class = ReportTemplateSerializer
@@ -129,15 +144,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         with real Page Designer / Report Configuration content uses the new
         canvas engine and everything else keeps using Content & Labels."""
         report = self.get_object()
-        ctx = build_report_context(report)
-        cfg = merged_config(report.template.config if report.template else None)
-        cfg = apply_report_layout_override(cfg, report)
-        pages = {}
-        engine = request.query_params.get("engine") or cfg.get("render_engine")
-        if engine == "canvas" or (engine is None and has_canvas_layout(cfg)):
-            data = build_canvas_pdf(report, ctx, cfg=cfg, out_pages=pages)
-        else:
-            data = build_report_pdf(report, ctx, out_pages=pages, cfg=cfg)
+        data, pages = _render_report_pdf(report, request.query_params.get("engine"))
         resp = HttpResponse(data, content_type="application/pdf")
         safe = (report.report_number or report.title or "report").replace("/", "-")
         resp["Content-Disposition"] = f'inline; filename="report-{safe}.pdf"'
@@ -145,3 +152,31 @@ class ReportViewSet(viewsets.ModelViewSet):
         resp["X-Section-Pages"] = json.dumps(pages)
         resp["Access-Control-Expose-Headers"] = "X-Section-Pages"
         return resp
+
+    @action(detail=True, methods=["get"], url_path="page-images")
+    def page_images(self, request, pk=None):
+        """Every page of the report's current PDF, rasterized to PNG.
+
+        The Customize tab's canvas uses these as each page's real background
+        — pixel-identical to the actual PDF — instead of trying to render
+        the PDF in the browser (pdf.js's own network-stream fetcher hangs
+        mid-render against this app's PDF route; see lib/pdfWorker.ts on the
+        frontend for the same issue in the plain preview panel). Rasterizing
+        server-side with PyMuPDF, which already ships for the P6 export
+        pipeline, sidesteps that entirely. Generated once per request (same
+        "regenerate on save, not on every edit" model as the PDF endpoint),
+        not cached — a report's layout_override changes between calls.
+        """
+        import base64
+
+        import fitz
+
+        report = self.get_object()
+        data, _ = _render_report_pdf(report, request.query_params.get("engine"))
+        doc = fitz.open(stream=data, filetype="pdf")
+        dpi = 144
+        pages = []
+        for page in doc:
+            pix = page.get_pixmap(dpi=dpi)
+            pages.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
+        return Response({"pages": pages, "dpi": dpi})

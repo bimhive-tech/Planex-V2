@@ -33,11 +33,18 @@ interface Props {
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
+  /** This page's real, rasterized PDF page — see LayoutEditor. */
+  backgroundImage?: string | null;
+  /** Element ids that existed before this mount — already baked into
+   * backgroundImage, so their own preview renders invisible (see
+   * CanvasElementView) rather than duplicating what the image shows. */
+  bornIds?: Set<string>;
 }
 
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
   onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData, pinnedItem,
+  backgroundImage, bornIds,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -67,6 +74,11 @@ export function CanvasPage({
         onDropSpec(key, (e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
       }}
     >
+      {backgroundImage && (
+        // eslint-disable-next-line @next/next/no-img-element -- a data URI, not an optimizable public asset
+        <img src={backgroundImage} alt="" className={styles.pageBackgroundImage} draggable={false} />
+      )}
+
       {design.show_border && (
         <div
           className={styles.pageBorder}
@@ -128,7 +140,9 @@ export function CanvasPage({
         </>
       )}
 
-      {masterElements.map((el) => (
+      {/* The real page image already shows the true header/footer pixel-for-
+          pixel — the ghost approximation would just sit on top of it. */}
+      {!backgroundImage && masterElements.map((el) => (
         <CanvasElementView
           key={`master-${el.id}`}
           el={el}
@@ -150,6 +164,7 @@ export function CanvasPage({
           el={el}
           scale={scale}
           selected={el.id === selectedId}
+          hideContent={Boolean(backgroundImage) && (bornIds?.has(el.id) ?? false)}
           onSelect={onSelect}
           onStartMove={onStartMove}
           onStartResize={onStartResize}

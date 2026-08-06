@@ -29,10 +29,15 @@ interface Props {
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
+  /** This element is already baked into a real background image behind it —
+   * render an invisible hit-box (still selectable/draggable) instead of a
+   * second, visible copy of its content. */
+  hideContent?: boolean;
 }
 
 export function CanvasElementView({
   el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData, pinnedItem,
+  hideContent,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,7 +93,7 @@ export function CanvasElementView({
         }
       }}
     >
-      <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />
+      {!hideContent && <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />}
 
       {selected && (
         <>
