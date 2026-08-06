@@ -34,51 +34,73 @@ function singleItem(pinnedItem: RepeatItem | RepeatItem[] | null | undefined): R
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—");
 const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(0)}%`);
 
+const money = (v: string | number | null | undefined, currency: string) =>
+  v ? `${Number(v).toLocaleString()} ${currency}` : "";
+
+/** Every row apps/reports/pdf_canvas.py's resolve_table() draws for
+ * "project_info", in the same order — this preview should show the same
+ * fields the real PDF does, not a shortened summary of them. */
+function projectInfoRows(data: ReportData): string[][] {
+  const p = data.project;
+  const dur = data.duration;
+  const rows: [string, string][] = [
+    ["Name", p.name], ["Code", p.code ?? ""], ["Client", p.client],
+    ["Consultant", p.consultant], ["Contractor", p.contractor], ["Type", p.type],
+    ["Location", p.location], ["Value", money(p.budget, p.currency)],
+    ["Contract value", money(p.contract_value, p.currency)],
+    ["Approved value", money(p.approved_value, p.currency)],
+    ["Forecast cost", money(p.forecast_cost, p.currency)],
+    ["Duration", dur?.total ? `${dur.total} days` : ""],
+    ["Start", fmtDate(p.planned_start)], ["Finish", fmtDate(p.planned_finish)],
+    ["Revised finish", p.revised_finish ? fmtDate(p.revised_finish) : ""],
+    ["Forecast finish", p.forecast_finish ? fmtDate(p.forecast_finish) : ""],
+    ["Delay", dur?.delay ? `${dur.delay} days` : ""],
+    ["Size", p.size_sqm ? `${Number(p.size_sqm).toLocaleString()} m²` : ""],
+  ];
+  return rows.filter(([, v]) => v);
+}
+
 /** Real row cells for a table source, or null when there's no live data (or
- * nothing to show) for it — the caller falls back to placeholder bars. */
+ * nothing to show) for it — the caller falls back to placeholder bars. Shows
+ * every real row the actual PDF would, not a shortened preview of them. */
 function realTableRows(source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string[][] | null {
   if (source === "item.children") {
     const children = (singleItem(pinnedItem)?.children as { name: string; actual: number | null }[]) || [];
-    return children.length ? children.slice(0, 4).map((c) => [c.name, fmtPct(c.actual)]) : null;
+    return children.length ? children.map((c) => [c.name, fmtPct(c.actual)]) : null;
   }
   if (!data) return null;
   switch (source) {
     case "project_info": {
-      const p = data.project;
-      const rows: [string, string][] = [
-        ["Name", p.name], ["Client", p.client], ["Location", p.location],
-        ["Value", p.budget ? `${Number(p.budget).toLocaleString()} ${p.currency}` : ""],
-      ];
-      const filtered = rows.filter(([, v]) => v);
-      return filtered.length ? filtered.slice(0, 4) : null;
+      const rows = projectInfoRows(data);
+      return rows.length ? rows : null;
     }
     case "zone_progress":
-      return data.zones.length ? data.zones.slice(0, 4).map((z) => [z.name, fmtPct(z.progress)]) : null;
+      return data.zones.length ? data.zones.map((z) => [z.name, fmtPct(z.progress)]) : null;
     case "hierarchy_progress":
       return data.hierarchy.length
-        ? data.hierarchy.slice(0, 4).map((h) => [h.name, fmtPct(h.actual)]) : null;
+        ? data.hierarchy.map((h) => [h.name, fmtPct(h.actual)]) : null;
     case "discipline_progress":
       return data.discipline.length
-        ? data.discipline.slice(0, 4).map((d) => [d.name, fmtPct(d.concrete)]) : null;
+        ? data.discipline.map((d) => [d.name, fmtPct(d.concrete)]) : null;
     case "progress_compare": {
       const rows = data.zones.filter((z) => z.planned != null);
-      return rows.length ? rows.slice(0, 4).map((z) => [z.name, fmtPct(z.planned), fmtPct(z.progress)]) : null;
+      return rows.length ? rows.map((z) => [z.name, fmtPct(z.planned), fmtPct(z.progress)]) : null;
     }
     case "critical_path_delays":
       return data.critical_path.length
-        ? data.critical_path.slice(0, 4).map((r) => [r.name, `${r.delay_days}d`]) : null;
+        ? data.critical_path.map((r) => [r.name, `${r.delay_days}d`]) : null;
     case "milestones":
       return data.milestones.length
-        ? data.milestones.slice(0, 4).map((m) => [m.title, fmtDate(m.date)]) : null;
+        ? data.milestones.map((m) => [m.title, fmtDate(m.date)]) : null;
     case "invoices":
       return data.invoices.length
-        ? data.invoices.slice(0, 4).map((i) => [i.name, i.value.toLocaleString()]) : null;
+        ? data.invoices.map((i) => [i.name, i.value.toLocaleString()]) : null;
     case "submittals":
       return data.submittals.rows.length
-        ? data.submittals.rows.slice(0, 4).map((s) => [s.title, s.status]) : null;
+        ? data.submittals.rows.map((s) => [s.title, s.status]) : null;
     case "delays":
       return data.delays.length
-        ? data.delays.slice(0, 4).map((d) => [d.title, `${d.impact_days}d`]) : null;
+        ? data.delays.map((d) => [d.title, `${d.impact_days}d`]) : null;
     default:
       return null; // detailed_progress — the real grid is heavy and not sent to the builder
   }

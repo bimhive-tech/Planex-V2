@@ -436,12 +436,16 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* A real table can carry far more rows than the placeholder's fixed 4 —
+     scroll internally rather than squashing every row unreadably thin or
+     spilling text outside the element's own box on the canvas. */
+  overflow-y: auto;
   background: #fff;
   border: 1px solid var(--border-strong);
 }
 
 .tablePreviewHead {
+  flex: 0 0 auto;
   font-size: 9px;
   padding: 2px 4px;
   white-space: nowrap;
@@ -450,19 +454,22 @@
 }
 
 .tablePreviewRow {
-  flex: 1;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
   gap: 4px;
   align-items: center;
-  padding: 0 4px;
+  padding: 2px 4px;
   border-top: 1px solid var(--border);
-  min-height: 6px;
+  min-height: 14px;
 }
 .tablePreviewRow[data-zebra="on"] {
   background: var(--bg-canvas);
 }
-.tablePreviewRow span {
+/* :not(.tablePreviewCell) keeps this scoped to the placeholder bars only —
+   a bare, class-less <span> (Template Builder, no live data). Real-data
+   cells carry the .tablePreviewCell class instead of being bare spans. */
+.tablePreviewRow span:not(.tablePreviewCell) {
   height: 3px;
   border-radius: 2px;
   background: var(--border-strong);
@@ -470,8 +477,15 @@
 }
 
 /* Real project data inside a table preview (Report Customize tab only) —
-   actual text instead of the generic gray placeholder bars above. */
+   actual text instead of the generic gray placeholder bars above. Needs no
+   extra specificity now that the rule above excludes this class, but kept
+   explicit (height/opacity/background) so it can never silently regress
+   back to inheriting the placeholder look if that rule changes again. */
 .tablePreviewCell {
+  height: auto;
+  opacity: 1;
+  background: none;
+  border-radius: 0;
   font-size: 8px;
   color: var(--text-primary);
   white-space: nowrap;
