@@ -134,7 +134,13 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   }, [reportId, refreshKey]);
 
   // Real-time preview: fetch the PDF as a blob (bypasses X-Frame-Options).
+  // Skipped on the Customize tab — PdfViewer isn't rendered there (see the
+  // detailGridFull branch below), and ReportLayoutEditor's own <Document>
+  // already fetches pdfUrl for its page backgrounds; fetching it here too
+  // would mean generating this report's PDF twice (10-17s each) just to
+  // open that tab.
   useEffect(() => {
+    if (tab === "layout") return;
     let revoked = false;
     let objectUrl = "";
     setPreviewLoading(true);
@@ -149,7 +155,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       .catch(() => setPreviewUrl(""))
       .finally(() => !revoked && setPreviewLoading(false));
     return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [pdfUrl, refreshKey]);
+  }, [pdfUrl, refreshKey, tab]);
 
   const save = useCallback(async () => {
     if (!form) return;
@@ -359,6 +365,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     template={selectedTemplate}
                     savedOverride={savedOverride}
                     liveData={data}
+                    pdfUrl={pdfUrl}
                     canManage={canManage}
                     onSaved={() => { reload(); bump(); }}
                   />

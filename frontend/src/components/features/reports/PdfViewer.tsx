@@ -2,17 +2,13 @@
 
 // Custom PDF preview (pdf.js via react-pdf): pages rendered as clean white
 // sheets on a soft background, with a slim toolbar. Replaces the native iframe.
-import { useEffect, useRef, useState } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Document, Page } from "react-pdf";
 
 import { Icon } from "@/components/ui/Icon";
+import { usePdfBytes } from "@/hooks/usePdfBytes";
+import { PDF_DOCUMENT_OPTIONS } from "@/lib/pdfWorker";
 import styles from "./pdfViewer.module.css";
-
-// Self-hosted worker (bundled by webpack — no external CDN).
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 interface Props {
   url: string;
@@ -27,6 +23,13 @@ export function PdfViewer({ url, loading, onDownload, scrollToPage, scrollNonce 
   const [width, setWidth] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // pdf.js's own network-stream fetch (used when <Document file> is a URL,
+  // including this blob: one) hangs mid-render in this environment — see
+  // usePdfBytes. Fetching the bytes ourselves and handing them over directly
+  // skips that code path.
+  const bytes = usePdfBytes(url || null);
+  const file = useMemo(() => (bytes ? { data: bytes } : null), [bytes]);
 
   // Render pages at the container's width (responsive), capped for readability.
   useEffect(() => {
@@ -62,9 +65,10 @@ export function PdfViewer({ url, loading, onDownload, scrollToPage, scrollNonce 
       </div>
 
       <div className={styles.scroll}>
-        {url ? (
+        {file ? (
           <Document
-            file={url}
+            file={file}
+            options={PDF_DOCUMENT_OPTIONS}
             onLoadSuccess={({ numPages: n }) => setNumPages(n)}
             loading={<div className={styles.msg}>Loading preview…</div>}
             error={<div className={styles.msg}>Couldn&apos;t render the preview — use Download.</div>}
