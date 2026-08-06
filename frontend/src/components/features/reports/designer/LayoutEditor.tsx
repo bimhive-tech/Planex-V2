@@ -61,14 +61,11 @@ interface Props {
    * item.* field/table/chart elements resolve real data instead of the
    * generic placeholder. null on a fixed page or an un-expanded template. */
   pinnedItem?: RepeatItem | RepeatItem[] | null;
-  /** This page's real page number in the PDF a <Document> ancestor (see
-   * ReportConfigurator) is showing — renders it as the canvas background. */
-  backgroundPageNumber?: number;
 }
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, backgroundPageNumber,
+  pinnedItem,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -285,7 +282,6 @@ export function LayoutEditor({
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
             liveData={liveData}
             pinnedItem={pinnedItem}
-            backgroundPageNumber={backgroundPageNumber}
           />
         </div>
 

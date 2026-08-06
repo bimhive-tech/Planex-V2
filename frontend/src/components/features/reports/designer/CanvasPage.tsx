@@ -1,11 +1,10 @@
 "use client";
 
-// The paper: the real rendered PDF page as a background image when one's
-// available (Report Customize tab — see ReportConfigurator's <Document>),
-// guides (margin box, header/footer bands), master elements as non-
-// interactive ghosts, then this page's own elements on top.
-import { Page } from "react-pdf";
-
+// The paper: guides (margin box, header/footer bands), master elements as
+// non-interactive ghosts, then this page's own elements on top — each
+// showing this report's real data (see ElementPreview) inside its box, not
+// a rendered PDF image. A page is an editable "layer" of positioned
+// elements, closer to Photoshop frames than a pixel-perfect page preview.
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
@@ -34,15 +33,11 @@ interface Props {
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
-  /** This page's real page number in a <Document> ancestor — renders it as
-   * the background instead of a flat color, like editing directly on the PDF. */
-  backgroundPageNumber?: number;
 }
 
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
   onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData, pinnedItem,
-  backgroundPageNumber,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -72,19 +67,6 @@ export function CanvasPage({
         onDropSpec(key, (e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
       }}
     >
-      {backgroundPageNumber != null && (
-        <div className={styles.pdfBackground} aria-hidden="true">
-          <Page
-            pageNumber={backgroundPageNumber}
-            width={pxWidth}
-            loading={null}
-            error={null}
-            renderTextLayer={false}
-            renderAnnotationLayer={false}
-          />
-        </div>
-      )}
-
       {design.show_border && (
         <div
           className={styles.pageBorder}
@@ -146,9 +128,7 @@ export function CanvasPage({
         </>
       )}
 
-      {/* The real page image already shows the true header/footer pixel-for-
-          pixel — the ghost approximation would just sit on top of it. */}
-      {backgroundPageNumber == null && masterElements.map((el) => (
+      {masterElements.map((el) => (
         <CanvasElementView
           key={`master-${el.id}`}
           el={el}

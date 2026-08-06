@@ -25,15 +25,12 @@ interface Props {
   /** This report's live project data — shown inside table/chart/field
    * elements on the canvas instead of generic placeholder content. */
   liveData: ReportData | null;
-  /** The already-rendered PDF (same one PdfViewer shows) — used as the real
-   * page image behind each page's editable boxes, like an "edit PDF" tool. */
-  pdfUrl: string;
   canManage: boolean;
   /** Refreshes the report row + the PDF preview after a save/reset. */
   onSaved: () => void;
 }
 
-export function ReportLayoutEditor({ reportId, template, savedOverride, liveData, pdfUrl, canManage, onSaved }: Props) {
+export function ReportLayoutEditor({ reportId, template, savedOverride, liveData, canManage, onSaved }: Props) {
   const design = template ? readPageDesign(template.config) : null;
   const templatePages = template ? readPages(template.config) : [];
   // A repeating page (e.g. "one per zone") is one row in the template but N
@@ -48,16 +45,6 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
   const [pages, setPages] = useState<LayoutPage[]>(
     isCustomized ? savedOverride!.layout!.pages : startingPages,
   );
-  // A snapshot of "page id -> real PDF page number", taken once from the
-  // starting pages (which match pdfUrl's current render 1:1 — the PDF was
-  // rendered from this same template/override). Deliberately never
-  // recomputed as you add/delete/reorder pages during the session: each
-  // page keeps showing the real page it started as, and a brand-new page has
-  // no entry (no background image) until the next save regenerates pdfUrl.
-  const [pageNumberMap] = useState<Map<string, number>>(() => {
-    const base = isCustomized ? savedOverride!.layout!.pages : startingPages;
-    return new Map(base.map((p, i) => [p.id, i + 1]));
-  });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,8 +113,7 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
         )}
       </div>
       {error && <p className="formError">{error}</p>}
-      <ReportConfigurator design={design} pages={pages} onChange={updatePages} liveData={liveData}
-        pdfUrl={pdfUrl} pageNumberMap={pageNumberMap} />
+      <ReportConfigurator design={design} pages={pages} onChange={updatePages} liveData={liveData} />
     </section>
   );
 }

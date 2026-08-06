@@ -3,14 +3,11 @@
 // Tab 2 — Report Configuration. The Canva-style surface: a page list on the
 // left, drag/drop/resize on the paper, and the master page showing through as
 // a ghost so you can see what's already reserved.
-import { useMemo, useState } from "react";
-import { Document } from "react-pdf";
+import { useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
-import { usePdfBytes } from "@/hooks/usePdfBytes";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type { LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource } from "@/lib/reportLayout";
-import { PDF_DOCUMENT_OPTIONS } from "@/lib/pdfWorker";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
@@ -26,22 +23,11 @@ interface Props {
   /** Present only in the report-level "Customize" tab — undefined in the
    * project-agnostic Template Builder, where placeholders are all there is. */
   liveData?: ReportData | null;
-  /** The already-rendered PDF, shown as each page's real background image
-   * (see CanvasPage) — like editing directly on top of the actual PDF. */
-  pdfUrl?: string;
-  /** page id -> real PDF page number, a snapshot taken when editing started
-   * (see ReportLayoutEditor) — absent for a page added since then. */
-  pageNumberMap?: Map<string, number>;
 }
 
-export function ReportConfigurator({ design, pages, onChange, liveData, pdfUrl, pageNumberMap }: Props) {
+export function ReportConfigurator({ design, pages, onChange, liveData }: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
-
-  // pdf.js's own network-stream fetch hangs mid-render in this environment
-  // (see usePdfBytes) — fetch the bytes ourselves and hand them over directly.
-  const pdfBytes = usePdfBytes(pdfUrl ?? null);
-  const pdfFile = useMemo(() => (pdfBytes ? { data: pdfBytes } : null), [pdfBytes]);
 
   const active = pages.find((p) => p.id === activeId) ?? pages[0];
 
@@ -249,7 +235,7 @@ export function ReportConfigurator({ design, pages, onChange, liveData, pdfUrl, 
 
   const pinnedItem = liveData ? resolvePinnedItem(active, liveData) : null;
 
-  const editor = (
+  return (
     <LayoutEditor
       key={active.id}
       design={design}
@@ -261,18 +247,6 @@ export function ReportConfigurator({ design, pages, onChange, liveData, pdfUrl, 
       repeating={Boolean(active.repeat)}
       liveData={liveData}
       pinnedItem={pinnedItem}
-      backgroundPageNumber={pdfFile ? pageNumberMap?.get(active.id) : undefined}
     />
   );
-
-  // <Document> just provides PDF-page context to any <Page> rendered inside
-  // it (in CanvasPage) — wrapping the whole editor, not only the canvas, is
-  // what lets that context reach through LayoutEditor/CanvasPage regardless
-  // of the `key`-driven remount above. Undefined in the Template Builder
-  // (no real report/PDF to show) and while pdfBytes is still fetching.
-  return pdfFile ? (
-    <Document file={pdfFile} options={PDF_DOCUMENT_OPTIONS} loading={null} error={null}>
-      {editor}
-    </Document>
-  ) : editor;
 }

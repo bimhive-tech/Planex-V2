@@ -365,7 +365,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     template={selectedTemplate}
                     savedOverride={savedOverride}
                     liveData={data}
-                    pdfUrl={pdfUrl}
                     canManage={canManage}
                     onSaved={() => { reload(); bump(); }}
                   />
