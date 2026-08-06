@@ -5,6 +5,7 @@
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
+import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasElementView } from "./CanvasElementView";
 import type { ElementAction } from "./CanvasElementView";
@@ -28,11 +29,12 @@ interface Props {
   onDropSpec?: (specKey: string, xMm: number, yMm: number) => void;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  pinnedItem?: RepeatItem | RepeatItem[] | null;
 }
 
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
-  onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData,
+  onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData, pinnedItem,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -134,6 +136,7 @@ export function CanvasPage({
           onStartResize={() => {}}
           onAction={() => {}}
           liveData={liveData}
+          pinnedItem={pinnedItem}
         />
       ))}
 
@@ -149,6 +152,7 @@ export function CanvasPage({
           onStartRotate={onStartRotate}
           onAction={onAction}
           liveData={liveData}
+          pinnedItem={pinnedItem}
         />
       ))}
 

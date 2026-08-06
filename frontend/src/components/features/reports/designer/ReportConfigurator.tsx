@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type { LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource } from "@/lib/reportLayout";
+import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
 import styles from "./designer.module.css";
@@ -232,6 +233,8 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
     </section>
   );
 
+  const pinnedItem = liveData ? resolvePinnedItem(active, liveData) : null;
+
   return (
     <LayoutEditor
       key={active.id}
@@ -243,6 +246,7 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
       emptyHint="Drag an element from the left onto the page to start building this page."
       repeating={Boolean(active.repeat)}
       liveData={liveData}
+      pinnedItem={pinnedItem}
     />
   );
 }

@@ -1361,9 +1361,12 @@ class ReportsApiTests(TestCase):
         self.assertTrue(b"".join(pdf.streaming_content if hasattr(pdf, "streaming_content") else [pdf.content]).startswith(b"%PDF"))
 
     def test_data_action_trims_repeat_sources_to_light_metadata(self):
-        """The Customize tab's page-expansion only needs enough to count and
-        label a repeating page's real instances (caption/name) — not the
-        underlying image storage key, which this endpoint never exposed."""
+        """photos/attachments/logos only need a caption and an authed
+        streaming URL to render on the Customize tab's canvas — never the
+        underlying storage path, which this endpoint never exposed.
+        area_dashboards keeps everything an item-scoped element needs
+        (name/actual/planned/children/duration) except its own nested
+        per-zone photos."""
         photo = self._progress_image("Poured slab", "2026-01-01")
         report = Report.objects.create(
             company=self.company, project=self.project, title="R", progress_image_ids=[str(photo.id)])
@@ -1371,14 +1374,17 @@ class ReportsApiTests(TestCase):
         self.client.force_authenticate(self.admin)
         data = self.client.get(f"/api/reports/{report.id}/data/")
         self.assertEqual(data.status_code, 200)
-        self.assertEqual(data.data["photos"], [{"caption": "Poured slab"}])
-        self.assertNotIn("logos", data.data)
+        self.assertEqual(len(data.data["photos"]), 1)
+        self.assertEqual(data.data["photos"][0]["caption"], "Poured slab")
+        self.assertTrue(data.data["photos"][0]["url"].startswith(f"/api/projects/{self.project.id}/progress-images/"))
+        self.assertIn("logos", data.data)
+        self.assertEqual(set(data.data["logos"].keys()), {"left", "right", "cover", "extra"})
         self.assertNotIn("_progress", data.data)
         self.assertNotIn("zone_grids", data.data)
         for attachment in data.data["attachments"]:
-            self.assertEqual(set(attachment.keys()), {"caption"})
+            self.assertEqual(set(attachment.keys()), {"caption", "url"})
         for area in data.data["area_dashboards"]:
-            self.assertEqual(set(area.keys()), {"name"})
+            self.assertNotIn("photos", area)
 
     def _progress_image(self, caption, when):
         import datetime as _dt

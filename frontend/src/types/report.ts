@@ -63,6 +63,11 @@ export interface ReportDisciplineRow {
 export interface ReportCriticalPathRow {
   name: string; planned_finish: string | null; forecast_finish: string | null; delay_days: number;
 }
+export interface ReportAreaDashboard {
+  name: string; actual: number | null; planned: number | null;
+  children: { name: string; actual: number | null; planned: number | null }[];
+  duration: { total: number; elapsed: number; remaining: number; delay: number } | null;
+}
 export interface ReportData {
   report: {
     title: string; number: string; date: string | null;
@@ -78,12 +83,22 @@ export interface ReportData {
   hierarchy: ReportHierarchyRow[];
   discipline: ReportDisciplineRow[];
   critical_path: ReportCriticalPathRow[];
-  // Trimmed to caption/name only (see the `data` action) — enough to count
-  // and label a repeating page's real instances for expandRepeatingPages()
-  // without shipping image storage keys to the browser.
-  photos: { caption: string }[];
-  attachments: { caption: string }[];
-  area_dashboards: { name: string }[];
+  // photos/attachments/logos carry a caption and an authed streaming `url`
+  // (never the raw storage path — see the `data` action) — enough to count
+  // and label a repeating page's real instances and show the actual image
+  // on the Customize tab's canvas.
+  photos: { caption: string; url: string }[];
+  attachments: { caption: string; url: string }[];
+  logos: {
+    left: { caption: string; url: string } | null;
+    right: { caption: string; url: string } | null;
+    cover: { caption: string; url: string } | null;
+    extra: { caption: string; url: string }[];
+  };
+  // area_dashboards keeps everything an item-scoped element on an expanded
+  // "one per zone" page needs (item.duration/item.units/item.children),
+  // minus its own nested per-zone photos.
+  area_dashboards: ReportAreaDashboard[];
   cashflow: { month: string; planned: number; actual: number; cum_planned: number; cum_actual: number }[];
   cashflow_totals: { planned: number; actual: number };
   invoices: { name: string; value: number; date: string | null }[];

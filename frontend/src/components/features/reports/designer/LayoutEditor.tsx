@@ -9,6 +9,7 @@ import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
 import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
+import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasPage } from "./CanvasPage";
 import type { ElementAction } from "./CanvasElementView";
@@ -56,10 +57,15 @@ interface Props {
   repeating?: boolean;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  /** The real item (or chunk group) this page was expanded from — lets
+   * item.* field/table/chart elements resolve real data instead of the
+   * generic placeholder. null on a fixed page or an un-expanded template. */
+  pinnedItem?: RepeatItem | RepeatItem[] | null;
 }
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
+  pinnedItem,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -275,6 +281,7 @@ export function LayoutEditor({
             onAction={runAction}
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
             liveData={liveData}
+            pinnedItem={pinnedItem}
           />
         </div>
 

@@ -391,7 +391,8 @@ def _selected_progress_photos(report, project):
     rows = ProgressImage.objects.filter(entry__project=project, id__in=ids).values(
         "id", "image", "caption", "entry__date", "created_at")
     ordered = sorted(rows, key=lambda p: (p["entry__date"] or datetime.date.min, p["created_at"]))
-    return [{"image": p["image"], "caption": p["caption"]} for p in ordered]
+    return [{"image": p["image"], "caption": p["caption"],
+             "url": f"/api/projects/{project.id}/progress-images/{p['id']}/file/"} for p in ordered]
 
 
 def _area_dashboards(project, hierarchy, as_of):
@@ -611,11 +612,19 @@ def build_report_context(report):
     # are per-report content that overrides any project-level fallback.
     proj_images = list(
         project.images.order_by("image_type", "sort_order", "created_at")
-        .values("image_type", "caption", "image")
+        .values("id", "image_type", "caption", "image")
     )
     rep_images = list(
-        report.images.order_by("kind", "sort_order", "created_at").values("kind", "caption", "image")
+        report.images.order_by("kind", "sort_order", "created_at").values("id", "kind", "caption", "image")
     )
+    # `image` stays the raw FieldFile path the PDF renderer embeds directly;
+    # `url` is the private, authed streaming endpoint (see ProjectImageFileView/
+    # ReportImageViewSet) the Customize tab's canvas can put in an <img src>
+    # without exposing a public bucket URL.
+    for i in proj_images:
+        i["url"] = f"/api/projects/{project.id}/images/{i['id']}/file/"
+    for i in rep_images:
+        i["url"] = f"/api/reports/{report.id}/images/{i['id']}/file/"
 
     def proj(kind):
         return next((i for i in proj_images if i["image_type"] == kind), None)

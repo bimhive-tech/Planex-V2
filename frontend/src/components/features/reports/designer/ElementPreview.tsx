@@ -1,18 +1,34 @@
 "use client";
 
 // How each element type looks on the canvas. When liveData is available (the
-// report-level "Customize" tab — see ReportLayoutEditor), tables/charts/fields
-// show this project's actual numbers instead of generic placeholder content,
-// so editing looks like editing the real thing. In the project-agnostic
-// Template Builder liveData is undefined and every element falls back to the
-// representative placeholder it always showed.
+// report-level "Customize" tab — see ReportLayoutEditor), tables/charts/
+// fields/images show this project's actual content instead of generic
+// placeholders, so editing looks like editing the real thing. pinnedItem is
+// the specific zone/photo/etc. an expanded repeating page was pinned to (see
+// reportRepeat.ts), letting item.* bindings resolve too. In the project-
+// agnostic Template Builder both are undefined and every element falls back
+// to the representative placeholder it always showed.
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
 import type { LayoutElement } from "@/lib/reportLayout";
+import { resolveItemField } from "@/lib/reportRepeat";
+import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import styles from "./designer.module.css";
 
+interface PreviewProps {
+  el: LayoutElement;
+  liveData?: ReportData | null;
+  pinnedItem?: RepeatItem | RepeatItem[] | null;
+}
+
 function label(list: { value: string; label: string }[], value: unknown, fallback: string) {
   return list.find((o) => o.value === value)?.label ?? fallback;
+}
+
+/** item.* sources bind to one item, never a chunk group. */
+function singleItem(pinnedItem: RepeatItem | RepeatItem[] | null | undefined): RepeatItem | null {
+  if (!pinnedItem) return null;
+  return Array.isArray(pinnedItem) ? (pinnedItem[0] ?? null) : pinnedItem;
 }
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—");
@@ -20,7 +36,11 @@ const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFix
 
 /** Real row cells for a table source, or null when there's no live data (or
  * nothing to show) for it — the caller falls back to placeholder bars. */
-function realTableRows(source: unknown, data: ReportData | null | undefined): string[][] | null {
+function realTableRows(source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string[][] | null {
+  if (source === "item.children") {
+    const children = (singleItem(pinnedItem)?.children as { name: string; actual: number | null }[]) || [];
+    return children.length ? children.slice(0, 4).map((c) => [c.name, fmtPct(c.actual)]) : null;
+  }
   if (!data) return null;
   switch (source) {
     case "project_info": {
@@ -64,11 +84,11 @@ function realTableRows(source: unknown, data: ReportData | null | undefined): st
   }
 }
 
-function TablePreview({ el, liveData }: { el: LayoutElement; liveData?: ReportData | null }) {
+function TablePreview({ el, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
   const headerBg = String(p.header_bg ?? "#1F4E79");
   const headerText = String(p.header_text ?? "#ffffff");
-  const real = realTableRows(p.source, liveData);
+  const real = realTableRows(p.source, liveData, pinnedItem);
   return (
     <div className={styles.tablePreview}>
       <div className={styles.tablePreviewHead} style={{ background: headerBg, color: headerText }}>
@@ -92,7 +112,11 @@ function TablePreview({ el, liveData }: { el: LayoutElement; liveData?: ReportDa
 }
 
 /** Bar heights (0-100) for a bar/column chart source, or null to fall back. */
-function realBarHeights(source: unknown, data: ReportData | null | undefined): number[] | null {
+function realBarHeights(source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): number[] | null {
+  if (source === "item.units") {
+    const children = (singleItem(pinnedItem)?.children as { actual: number | null }[]) || [];
+    return children.length ? children.slice(0, 5).map((c) => c.actual ?? 0) : null;
+  }
   if (!data) return null;
   if (source === "zone_progress" && data.zones.length) return data.zones.slice(0, 5).map((z) => z.progress);
   if (source === "area_progress" && data.areas.length) return data.areas.slice(0, 5).map((a) => a.actual ?? 0);
@@ -155,23 +179,29 @@ function DonutSvg({ frac, colorA, colorB, hollow }: { frac: number; colorA: stri
   );
 }
 
-function ChartPreview({ el, liveData }: { el: LayoutElement; liveData?: ReportData | null }) {
+function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
   const source = p.source;
   const a = String(p.color_a ?? "#2E74B5");
   const b = String(p.color_b ?? "#C0504D");
+  const item = singleItem(pinnedItem);
 
   let body: React.ReactNode;
   if (type === "gauge") {
-    const value = source === "spi" && liveData ? liveData.overall : 65;
+    const value = source === "item.spi"
+      ? Number((item?.progress ?? item?.actual) ?? 65)
+      : source === "spi" && liveData ? liveData.overall : 65;
     body = <GaugeSvg value={value} color={a} track={b} />;
   } else if (type === "pie" || type === "donut") {
-    const frac = source === "breakdown" && liveData?.breakdown.total
-      ? liveData.breakdown.completed / liveData.breakdown.total
-      : source === "duration" && liveData?.duration?.total
-        ? liveData.duration.elapsed / liveData.duration.total
-        : 0.25;
+    const dur = source === "item.duration" ? (item?.duration as { elapsed: number; total: number } | null) : null;
+    const frac = dur?.total
+      ? dur.elapsed / dur.total
+      : source === "breakdown" && liveData?.breakdown.total
+        ? liveData.breakdown.completed / liveData.breakdown.total
+        : source === "duration" && liveData?.duration?.total
+          ? liveData.duration.elapsed / liveData.duration.total
+          : 0.25;
     body = <DonutSvg frac={frac} colorA={a} colorB={b} hollow={type === "donut"} />;
   } else if (type === "line" || type === "area") {
     const real = realLinePoints(source, liveData);
@@ -193,7 +223,7 @@ function ChartPreview({ el, liveData }: { el: LayoutElement; liveData?: ReportDa
     );
   } else {
     // bar / column / stacked all read as grouped bars at preview size.
-    const real = realBarHeights(source, liveData);
+    const real = realBarHeights(source, liveData, pinnedItem);
     const heights = real && real.length ? real : [60, 80, 45, 90, 70];
     body = (
       <div className={styles.barRow}>
@@ -230,7 +260,10 @@ function TocPreview() {
 }
 
 /** Real text for a field source, or null to fall back to the generic token. */
-function resolveField(source: unknown, data: ReportData | null | undefined): string | null {
+function resolveField(source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string | null {
+  if (typeof source === "string" && source.startsWith("item.")) {
+    return resolveItemField(source, singleItem(pinnedItem));
+  }
   if (!data) return null;
   const p = data.project;
   switch (source) {
@@ -253,7 +286,36 @@ function resolveField(source: unknown, data: ReportData | null | undefined): str
   }
 }
 
-export function ElementPreview({ el, liveData }: { el: LayoutElement; liveData?: ReportData | null }) {
+// "company"/"project" are the pre-relabel keys (see reportElements.ts's own
+// note) — kept so a template saved before that fix still resolves sensibly.
+const LOGO_SLOT: Record<string, "left" | "right" | "cover"> = {
+  left: "left", right: "right", cover: "cover", company: "left", project: "right",
+};
+
+/** This logo element's real image URL, or null to fall back to the label. */
+function resolveLogoUrl(props: Record<string, unknown>, data: ReportData | null | undefined): string | null {
+  if (!data) return null;
+  const source = String(props.source ?? "left");
+  if (source === "extra") {
+    const idx = Number(props.slot ?? 0);
+    return data.logos.extra[idx]?.url || null;
+  }
+  const slot = LOGO_SLOT[source];
+  return slot ? data.logos[slot]?.url || null : null;
+}
+
+/** A "Photo slot" image element's real URL — bound to one photo/attachment
+ * in the current repeat chunk (props.slot indexes the pinned group), same as
+ * apps/reports/pdf_canvas.py's _draw_image. Non-repeat image boxes (a plain
+ * "Image" element with no source) have no per-report binding yet. */
+function resolveRepeatImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string | null {
+  if (props.source !== "repeat.item" || !Array.isArray(pinnedItem)) return null;
+  const slot = Number(props.slot ?? 0);
+  const item = pinnedItem[slot];
+  return (item?.url as string) || null;
+}
+
+export function ElementPreview({ el, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
 
   switch (el.type) {
@@ -274,7 +336,7 @@ export function ElementPreview({ el, liveData }: { el: LayoutElement; liveData?:
       );
 
     case "field": {
-      const real = resolveField(p.source, liveData);
+      const real = resolveField(p.source, liveData, pinnedItem);
       return (
         <div
           className={styles.fieldPreview}
@@ -291,19 +353,29 @@ export function ElementPreview({ el, liveData }: { el: LayoutElement; liveData?:
       );
     }
 
-    case "image":
-      return (
+    case "image": {
+      const url = resolveRepeatImageUrl(p, pinnedItem);
+      return url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
+        <img className={styles.imagePreviewReal} src={url} alt="" />
+      ) : (
         <div className={styles.imagePreview}>
           <span>Image</span>
         </div>
       );
+    }
 
-    case "logo":
-      return (
+    case "logo": {
+      const url = resolveLogoUrl(p, liveData);
+      return url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
+        <img className={styles.imagePreviewReal} src={url} alt="" />
+      ) : (
         <div className={styles.logoPreview}>
           <span>{p.source === "project" ? "Project logo" : "Company logo"}</span>
         </div>
       );
+    }
 
     case "rect":
       return (
@@ -342,10 +414,10 @@ export function ElementPreview({ el, liveData }: { el: LayoutElement; liveData?:
       );
 
     case "table":
-      return <TablePreview el={el} liveData={liveData} />;
+      return <TablePreview el={el} liveData={liveData} pinnedItem={pinnedItem} />;
 
     case "chart":
-      return <ChartPreview el={el} liveData={liveData} />;
+      return <ChartPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />;
 
     case "toc":
       return <TocPreview />;

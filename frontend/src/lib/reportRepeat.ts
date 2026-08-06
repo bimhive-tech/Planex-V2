@@ -6,15 +6,25 @@ import { newElementId } from "./reportLayout";
 import type { LayoutPage, RepeatSource } from "./reportLayout";
 import type { ReportData } from "@/types/report";
 
-function itemLabels(source: RepeatSource, data: ReportData): string[] {
+/** A repeat source's real items, as loosely-typed records — the various
+ * sources use different keys for the same idea (zones: "progress",
+ * areas/area_dashboards: "actual"), mirrored by resolveItemField below,
+ * same as apps/reports/pdf_canvas.py's _resolve_item_field does server-side. */
+export type RepeatItem = Record<string, unknown>;
+
+function itemsFor(source: RepeatSource, data: ReportData): RepeatItem[] {
   switch (source) {
-    case "zones": return data.zones.map((z) => z.name);
-    case "areas": return data.areas.map((a) => a.name);
-    case "area_dashboards": return data.area_dashboards.map((a) => a.name);
-    case "photos": return data.photos.map((p, i) => p.caption || `Photo ${i + 1}`);
-    case "attachments": return data.attachments.map((a, i) => a.caption || `Attachment ${i + 1}`);
+    case "zones": return data.zones as unknown as RepeatItem[];
+    case "areas": return data.areas as unknown as RepeatItem[];
+    case "area_dashboards": return data.area_dashboards as unknown as RepeatItem[];
+    case "photos": return data.photos as unknown as RepeatItem[];
+    case "attachments": return data.attachments as unknown as RepeatItem[];
     default: return [];
   }
+}
+
+function labelOf(item: RepeatItem, fallback: string): string {
+  return String(item.name ?? item.caption ?? fallback);
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -37,15 +47,16 @@ export function expandRepeatingPages(pages: LayoutPage[], data: ReportData): Lay
       out.push(page);
       continue;
     }
-    const labels = itemLabels(rep.source, data);
-    if (!labels.length) continue;
+    const items = itemsFor(rep.source, data);
+    if (!items.length) continue;
     const cap = rep.max_pages ?? 60;
     const groups = rep.mode === "chunk"
-      ? chunk(labels, Math.max(1, rep.chunk_size ?? 4)).slice(0, cap)
-      : labels.slice(0, cap).map((l) => [l]);
+      ? chunk(items, Math.max(1, rep.chunk_size ?? 4)).slice(0, cap)
+      : items.slice(0, cap).map((it) => [it]);
 
     groups.forEach((group, i) => {
-      const label = group.length > 1 ? `${group[0]} – ${group[group.length - 1]}` : group[0];
+      const first = labelOf(group[0], `Item ${i + 1}`);
+      const label = group.length > 1 ? `${first} – ${labelOf(group[group.length - 1], "")}` : first;
       out.push({
         id: newElementId(),
         name: `${page.name} — ${label}`,
@@ -56,4 +67,35 @@ export function expandRepeatingPages(pages: LayoutPage[], data: ReportData): Lay
     });
   }
   return out;
+}
+
+/** The specific item (or chunk group) an expanded page is pinned to, so its
+ * item.* field/table/chart elements can resolve real data instead of the
+ * generic placeholder. null for a page that isn't pinned (a fixed page, or
+ * still the abstract un-expanded repeating page from the Template Builder). */
+export function resolvePinnedItem(page: LayoutPage, data: ReportData): RepeatItem | RepeatItem[] | null {
+  const rep = page.repeat;
+  if (!rep || rep.pin_index == null) return null;
+  const items = itemsFor(rep.source, data);
+  if (rep.mode === "chunk") {
+    const size = Math.max(1, rep.chunk_size ?? 4);
+    const groups = chunk(items, size);
+    return groups[rep.pin_index] ?? null;
+  }
+  return items[rep.pin_index] ?? null;
+}
+
+/** Mirrors apps/reports/pdf_canvas.py's _resolve_item_field: reads an
+ * item.* FIELD_SOURCES key off one resolved item (never a chunk group —
+ * item.name/progress/etc. only make sense for a single item). */
+export function resolveItemField(source: string, item: RepeatItem | null): string | null {
+  if (!item) return null;
+  const key = source.startsWith("item.") ? source.slice(5) : source;
+  if (key === "name") return item.name != null ? String(item.name) : null;
+  if (key === "caption") return item.caption != null ? String(item.caption) : null;
+  if (key === "progress" || key === "planned" || key === "previous") {
+    const value = key === "progress" ? (item.progress ?? item.actual) : item[key];
+    return typeof value === "number" ? `${value.toFixed(1)}%` : null;
+  }
+  return null;
 }

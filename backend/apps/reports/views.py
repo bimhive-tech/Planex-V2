@@ -89,18 +89,35 @@ class ReportViewSet(viewsets.ModelViewSet):
         builder can show what's pulled from the chosen project, live."""
         report = self.get_object()
         ctx = build_report_context(report)
-        # logos/images are pure branding assets, already covered by the
-        # builder's own asset pickers; _progress is an internal per-activity
-        # map (can be tens of thousands of entries) nothing here reads.
-        for key in ("logos", "images", "_progress", "zone_grids"):
+        # `images` (the detailed-progress zone grids' inline photos) and
+        # _progress (an internal per-activity map, can be tens of thousands
+        # of entries) are only ever read at PDF-render time.
+        for key in ("images", "_progress", "zone_grids"):
             ctx.pop(key, None)
-        # photos/attachments/area_dashboards carry real image file keys — trim
-        # to just caption/name so the Customize tab can count and label a
-        # repeating page's real instances (see reportLayout's expandRepeat)
-        # without shipping storage paths to the browser.
-        ctx["photos"] = [{"caption": p.get("caption") or ""} for p in ctx.get("photos") or []]
-        ctx["attachments"] = [{"caption": a.get("caption") or ""} for a in ctx.get("attachments") or []]
-        ctx["area_dashboards"] = [{"name": a.get("name") or ""} for a in ctx.get("area_dashboards") or []]
+
+        def light(entry):
+            """Caption/url only — never the raw storage path — so the
+            Customize tab's canvas can render <img src={url}> (an authed,
+            tenant-scoped streaming endpoint, not a public bucket URL) and
+            count/label a repeating page's real instances without the
+            browser ever seeing where the file actually lives."""
+            return {"caption": entry.get("caption") or "", "url": entry.get("url") or ""} if entry else None
+
+        logos = ctx.get("logos") or {}
+        ctx["logos"] = {
+            "left": light(logos.get("left")),
+            "right": light(logos.get("right")),
+            "cover": light(logos.get("cover")),
+            "extra": [light(e) for e in logos.get("extra") or []],
+        }
+        ctx["photos"] = [light(p) for p in ctx.get("photos") or []]
+        ctx["attachments"] = [light(a) for a in ctx.get("attachments") or []]
+        # area_dashboards keeps everything an item-scoped element
+        # (item.duration/item.units/item.children) needs to resolve real
+        # data, minus its own nested per-zone photos (a separate concern).
+        ctx["area_dashboards"] = [
+            {k: v for k, v in a.items() if k != "photos"} for a in ctx.get("area_dashboards") or []
+        ]
         return Response(ctx)
 
     @action(detail=True, methods=["get"])

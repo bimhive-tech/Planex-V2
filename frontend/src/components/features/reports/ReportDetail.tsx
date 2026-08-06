@@ -222,7 +222,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
               </div>
             </header>
 
-            <div className={styles.detailGrid}>
+            <div className={`${styles.detailGrid} ${tab === "layout" ? styles.detailGridFull : ""}`}>
               <div className={styles.builderCol}>
                 <nav className={styles.tabs}>
                   {TABS.map((t) => (
@@ -367,9 +367,11 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                 {saveError && <p className="formError">{saveError}</p>}
               </div>
 
-              <PdfViewer url={previewUrl} loading={previewLoading}
-                scrollToPage={sectionPages[TAB_ANCHOR[tab]]} scrollNonce={scrollNonce}
-                onDownload={() => window.open(pdfUrl, "_blank", "noopener")} />
+              {tab !== "layout" && (
+                <PdfViewer url={previewUrl} loading={previewLoading}
+                  scrollToPage={sectionPages[TAB_ANCHOR[tab]]} scrollNonce={scrollNonce}
+                  onDownload={() => window.open(pdfUrl, "_blank", "noopener")} />
+              )}
             </div>
           </>
         )}

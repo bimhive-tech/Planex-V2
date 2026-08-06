@@ -406,6 +406,15 @@
   font-size: 10px;
 }
 
+/* The real image (Report Customize tab, once a logo/photo-slot resolves to
+   an actual uploaded file) — replaces the dashed placeholder box above. */
+.imagePreviewReal {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .shapePreview {
   width: 100%;
   height: 100%;

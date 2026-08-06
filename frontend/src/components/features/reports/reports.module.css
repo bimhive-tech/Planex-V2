@@ -196,6 +196,12 @@
     grid-template-columns: 1.4fr 1fr;
     align-items: start;
   }
+  /* Customize tab: the canvas is its own preview (real project data inside
+     the boxes) — showing the rendered PDF alongside it too would just be a
+     second, disconnected preview of the same thing. */
+  .detailGridFull {
+    grid-template-columns: 1fr;
+  }
 }
 
 .previewFrame {

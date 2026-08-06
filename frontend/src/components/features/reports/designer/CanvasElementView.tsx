@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import type { LayoutElement } from "@/lib/reportLayout";
+import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
 import styles from "./designer.module.css";
@@ -27,10 +28,11 @@ interface Props {
   onAction: (action: ElementAction, id: string) => void;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  pinnedItem?: RepeatItem | RepeatItem[] | null;
 }
 
 export function CanvasElementView({
-  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData,
+  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData, pinnedItem,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export function CanvasElementView({
   if (ghost) {
     return (
       <div className={`${styles.element} ${styles.elementGhost}`} style={style} aria-hidden="true">
-        <ElementPreview el={el} liveData={liveData} />
+        <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />
       </div>
     );
   }
@@ -82,7 +84,7 @@ export function CanvasElementView({
         }
       }}
     >
-      <ElementPreview el={el} liveData={liveData} />
+      <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />
 
       {selected && (
         <>
