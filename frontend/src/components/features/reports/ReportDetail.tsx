@@ -351,7 +351,10 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
 
                 {tab === "layout" && (
                   <ReportLayoutEditor
-                    key={`${reportId}-${form.template}`}
+                    // `data` arrives from a separate fetch and can resolve after this
+                    // tab first mounts; remount once it does so the starting page
+                    // list expands repeating pages instead of freezing on 13 raw types.
+                    key={`${reportId}-${form.template}-${data ? "live" : "pending"}`}
                     reportId={reportId}
                     template={selectedTemplate}
                     savedOverride={savedOverride}

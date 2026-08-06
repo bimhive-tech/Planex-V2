@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
 import type { LayoutPage } from "@/lib/reportLayout";
+import { expandRepeatingPages } from "@/lib/reportRepeat";
 import type { ReportData, ReportLayoutOverride, ReportTemplate } from "@/types/report";
 import { ReportConfigurator } from "./designer/ReportConfigurator";
 import styles from "./reports.module.css";
@@ -32,12 +33,17 @@ interface Props {
 export function ReportLayoutEditor({ reportId, template, savedOverride, liveData, canManage, onSaved }: Props) {
   const design = template ? readPageDesign(template.config) : null;
   const templatePages = template ? readPages(template.config) : [];
+  // A repeating page (e.g. "one per zone") is one row in the template but N
+  // real pages in the actual PDF — expand it into that many concrete,
+  // individually-editable pages up front, so what you browse and edit here
+  // already matches the real page count instead of the template's raw types.
+  const startingPages = liveData ? expandRepeatingPages(templatePages, liveData) : templatePages;
   const isCustomized = Boolean(savedOverride?.layout?.pages?.length);
 
   // Keyed by reportId at the call site (see ReportDetail) so switching reports
   // remounts this with a fresh starting state instead of carrying over edits.
   const [pages, setPages] = useState<LayoutPage[]>(
-    isCustomized ? savedOverride!.layout!.pages : templatePages,
+    isCustomized ? savedOverride!.layout!.pages : startingPages,
   );
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,7 +73,7 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
     setError(null);
     try {
       await api.patch(`/reports/${reportId}/`, { layout_override: null });
-      setPages(templatePages);
+      setPages(startingPages);
       setDirty(false);
       onSaved();
     } catch (err) {

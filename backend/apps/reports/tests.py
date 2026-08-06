@@ -579,6 +579,37 @@ class ExpandPagesTests(SimpleTestCase):
         ]}}
         self.assertEqual(len(expand_pages(cfg, ctx, report=None)), 5)
 
+    def test_pin_index_yields_only_that_one_item(self):
+        ctx = _sample_ctx()  # already has 2 zones
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Zone", "elements": [],
+             "repeat": {"source": "zones", "mode": "one_per_item", "pin_index": 1}},
+        ]}}
+        instances = expand_pages(cfg, ctx, report=None)
+        self.assertEqual(len(instances), 1)
+        self.assertEqual(instances[0].scope["item"]["name"], "Zone B")
+        self.assertEqual(instances[0].scope["index"], 1)  # keeps the real position, not 0
+
+    def test_pin_index_out_of_range_yields_nothing(self):
+        ctx = _sample_ctx()  # 2 zones -> valid indices are 0-1
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Zone", "elements": [],
+             "repeat": {"source": "zones", "mode": "one_per_item", "pin_index": 5}},
+        ]}}
+        self.assertEqual(expand_pages(cfg, ctx, report=None), [])
+
+    def test_pin_index_selects_one_chunk(self):
+        ctx = _sample_ctx()
+        ctx["photos"] = [{"image": f"k{i}", "caption": f"Photo {i}"} for i in range(9)]
+        cfg = {"layout": {"pages": [
+            {"id": "a", "name": "Photos", "elements": [],
+             "repeat": {"source": "photos", "mode": "chunk", "chunk_size": 4, "pin_index": 2}},
+        ]}}
+        instances = expand_pages(cfg, ctx, report=None)
+        self.assertEqual(len(instances), 1)
+        self.assertEqual(len(instances[0].scope["items"]), 1)  # the last (remainder) chunk
+        self.assertEqual(instances[0].scope["items"][0]["caption"], "Photo 8")
+
     def test_mixed_fixed_and_repeat_pages_keep_document_order(self):
         ctx = _sample_ctx()
         ctx["photos"] = [{"image": "k1", "caption": ""}, {"image": "k2", "caption": ""}]
@@ -1328,6 +1359,26 @@ class ReportsApiTests(TestCase):
         self.assertEqual(pdf.status_code, 200)
         self.assertEqual(pdf["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(pdf.streaming_content if hasattr(pdf, "streaming_content") else [pdf.content]).startswith(b"%PDF"))
+
+    def test_data_action_trims_repeat_sources_to_light_metadata(self):
+        """The Customize tab's page-expansion only needs enough to count and
+        label a repeating page's real instances (caption/name) — not the
+        underlying image storage key, which this endpoint never exposed."""
+        photo = self._progress_image("Poured slab", "2026-01-01")
+        report = Report.objects.create(
+            company=self.company, project=self.project, title="R", progress_image_ids=[str(photo.id)])
+
+        self.client.force_authenticate(self.admin)
+        data = self.client.get(f"/api/reports/{report.id}/data/")
+        self.assertEqual(data.status_code, 200)
+        self.assertEqual(data.data["photos"], [{"caption": "Poured slab"}])
+        self.assertNotIn("logos", data.data)
+        self.assertNotIn("_progress", data.data)
+        self.assertNotIn("zone_grids", data.data)
+        for attachment in data.data["attachments"]:
+            self.assertEqual(set(attachment.keys()), {"caption"})
+        for area in data.data["area_dashboards"]:
+            self.assertEqual(set(area.keys()), {"name"})
 
     def _progress_image(self, caption, when):
         import datetime as _dt

@@ -78,6 +78,12 @@ export interface ReportData {
   hierarchy: ReportHierarchyRow[];
   discipline: ReportDisciplineRow[];
   critical_path: ReportCriticalPathRow[];
+  // Trimmed to caption/name only (see the `data` action) — enough to count
+  // and label a repeating page's real instances for expandRepeatingPages()
+  // without shipping image storage keys to the browser.
+  photos: { caption: string }[];
+  attachments: { caption: string }[];
+  area_dashboards: { name: string }[];
   cashflow: { month: string; planned: number; actual: number; cum_planned: number; cum_actual: number }[];
   cashflow_totals: { planned: number; actual: number };
   invoices: { name: string; value: number; date: string | null }[];

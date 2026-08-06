@@ -87,8 +87,15 @@ export function ReportConfigurator({ design, pages, onChange, liveData }: Props)
   }
 
   function setRepeat(id: string, patch: Partial<PageRepeat>) {
-    onChange((prev) => prev.map((p) =>
-      p.id === id && p.repeat ? { ...p, repeat: { ...p.repeat, ...patch } } : p));
+    onChange((prev) => prev.map((p) => {
+      if (p.id !== id || !p.repeat) return p;
+      // A pinned (expanded) page's pin_index refers to a position in the OLD
+      // source/mode's item list — changing either invalidates it.
+      const clearsPin = "source" in patch || "mode" in patch;
+      const nextRepeat = { ...p.repeat, ...patch };
+      if (clearsPin) delete nextRepeat.pin_index;
+      return { ...p, repeat: nextRepeat };
+    }));
   }
 
   function toggleSkipMaster(id: string) {

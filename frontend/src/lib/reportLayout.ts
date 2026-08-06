@@ -55,6 +55,11 @@ export interface PageRepeat {
   chunk_size?: number;
   /** Safety cap so a huge project can't emit hundreds of pages. */
   max_pages?: number;
+  /** Set by expandRepeatingPages(): pins this page to exactly the item (or
+   * chunk) at this position, instead of repeating over all of them — what
+   * turns one abstract repeating page into one concrete, independently
+   * editable page per real instance. Absent on the template's own page. */
+  pin_index?: number;
 }
 
 export interface LayoutPage {

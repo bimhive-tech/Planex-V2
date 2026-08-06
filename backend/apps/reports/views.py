@@ -89,11 +89,18 @@ class ReportViewSet(viewsets.ModelViewSet):
         builder can show what's pulled from the chosen project, live."""
         report = self.get_object()
         ctx = build_report_context(report)
-        # logos/photos/attachments/images are binary-ish and the builder's own
-        # asset pickers already cover them; _progress is an internal per-
-        # activity map (can be tens of thousands of entries) nothing here reads.
-        for key in ("logos", "photos", "attachments", "images", "_progress", "zone_grids"):
+        # logos/images are pure branding assets, already covered by the
+        # builder's own asset pickers; _progress is an internal per-activity
+        # map (can be tens of thousands of entries) nothing here reads.
+        for key in ("logos", "images", "_progress", "zone_grids"):
             ctx.pop(key, None)
+        # photos/attachments/area_dashboards carry real image file keys — trim
+        # to just caption/name so the Customize tab can count and label a
+        # repeating page's real instances (see reportLayout's expandRepeat)
+        # without shipping storage paths to the browser.
+        ctx["photos"] = [{"caption": p.get("caption") or ""} for p in ctx.get("photos") or []]
+        ctx["attachments"] = [{"caption": a.get("caption") or ""} for a in ctx.get("attachments") or []]
+        ctx["area_dashboards"] = [{"name": a.get("name") or ""} for a in ctx.get("area_dashboards") or []]
         return Response(ctx)
 
     @action(detail=True, methods=["get"])

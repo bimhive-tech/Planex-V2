@@ -687,7 +687,13 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
 
 def expand_pages(cfg, ctx, report) -> list:
     """Turn config.layout.pages into the physical page sequence: a fixed page
-    stays one page; a repeating page clones once per item (or per chunk)."""
+    stays one page; a repeating page clones once per item (or per chunk).
+
+    A report's own layout_override can also *pin* a repeating page to exactly
+    one of those items/chunks (repeat.pin_index) — that's what the "Customize"
+    tab's page-expansion does: instead of one abstract repeating page, the
+    report gets N concrete, independently-editable pages, each pinned to the
+    item it was expanded from, so what you edit matches the real page count."""
     out, n = [], 0
     for page in (cfg.get("layout") or {}).get("pages", []):
         rep = page.get("repeat")
@@ -699,18 +705,25 @@ def expand_pages(cfg, ctx, report) -> list:
         if not items:
             continue  # empty source -> page skipped entirely, matches legacy behavior
         cap = int(rep.get("max_pages") or 60)
+        pin = rep.get("pin_index")
         if rep.get("mode") == "chunk":
             size = max(1, int(rep.get("chunk_size") or 4))
             groups = [items[i:i + size] for i in range(0, len(items), size)][:cap]
+            if pin is not None:
+                groups = groups[pin:pin + 1] if 0 <= pin < len(groups) else []
             for i, g in enumerate(groups):
                 n += 1
                 out.append(PageInstance(page, {"item": g[0] if g else None, "items": g,
-                                               "index": i, "count": len(groups)}, n))
+                                               "index": pin if pin is not None else i,
+                                               "count": len(groups)}, n))
         else:
             capped = items[:cap]
+            if pin is not None:
+                capped = capped[pin:pin + 1] if 0 <= pin < len(capped) else []
             for i, item in enumerate(capped):
                 n += 1
-                out.append(PageInstance(page, {"item": item, "items": [item], "index": i,
+                out.append(PageInstance(page, {"item": item, "items": [item],
+                                               "index": pin if pin is not None else i,
                                                "count": len(capped)}, n))
     return out
 
