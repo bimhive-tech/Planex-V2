@@ -56,8 +56,12 @@ export function CanvasElementView({
   };
 
   if (ghost) {
+    // A template's master header/footer is a faded reference here (not
+    // directly editable on this tab); on a report it's real, final content
+    // — full opacity, so the page reads as the actual page, not a mockup.
+    const ghostClass = liveData ? styles.elementGhostReal : styles.elementGhost;
     return (
-      <div className={`${styles.element} ${styles.elementGhost}`} style={style} aria-hidden="true">
+      <div className={`${styles.element} ${ghostClass}`} style={style} aria-hidden="true">
         <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />
       </div>
     );

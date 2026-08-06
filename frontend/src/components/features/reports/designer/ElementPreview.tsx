@@ -166,7 +166,7 @@ function polyline(values: number[], invert = true): string {
   return values.map((v, i) => `${(i * step).toFixed(1)},${invert ? 40 - v * 0.4 : v * 0.4}`).join(" ");
 }
 
-function GaugeSvg({ value, color, track }: { value: number; color: string; track: string }) {
+function GaugeSvg({ value, color, track, showLabel = true }: { value: number; color: string; track: string; showLabel?: boolean }) {
   const pct = Math.max(0, Math.min(100, value));
   const angle = -90 + (pct / 100) * 180;
   const needle = [18 + 13 * Math.cos((angle * Math.PI) / 180), 18 + 13 * Math.sin((angle * Math.PI) / 180)];
@@ -179,7 +179,7 @@ function GaugeSvg({ value, color, track }: { value: number; color: string; track
       />
       <line x1="18" y1="18" x2={needle[0]} y2={needle[1]} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="18" cy="18" r="1.5" fill={color} />
-      <text x="18" y="21.5" fontSize="4" textAnchor="middle" fill={color}>{pct.toFixed(0)}%</text>
+      {showLabel && <text x="18" y="21.5" fontSize="4" textAnchor="middle" fill={color}>{pct.toFixed(0)}%</text>}
     </svg>
   );
 }
@@ -201,6 +201,34 @@ function DonutSvg({ frac, colorA, colorB, hollow }: { frac: number; colorA: stri
   );
 }
 
+/** A real gauge value (0-100), or null when this specific binding has no
+ * real data to show (e.g. a zone with no schedule of its own) — the caller
+ * falls back to the plain placeholder rather than a fake-looking value, so
+ * "no data" never gets mistaken for a real (if unremarkable) reading. */
+function realGaugeValue(source: unknown, liveData: ReportData | null | undefined, item: RepeatItem | null): number | null {
+  if (source === "item.spi") {
+    const v = item?.progress ?? item?.actual;
+    return typeof v === "number" ? v : null;
+  }
+  if (source === "spi") return liveData?.overall ?? null;
+  return null;
+}
+
+/** A real donut/pie fraction (0-1), or null — see realGaugeValue. */
+function realDonutFrac(source: unknown, liveData: ReportData | null | undefined, item: RepeatItem | null): number | null {
+  if (source === "item.duration") {
+    const dur = item?.duration as { elapsed: number; total: number } | null | undefined;
+    return dur?.total ? dur.elapsed / dur.total : null;
+  }
+  if (source === "breakdown") {
+    return liveData?.breakdown.total ? liveData.breakdown.completed / liveData.breakdown.total : null;
+  }
+  if (source === "duration") {
+    return liveData?.duration?.total ? liveData.duration.elapsed / liveData.duration.total : null;
+  }
+  return null;
+}
+
 function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
@@ -211,20 +239,13 @@ function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
 
   let body: React.ReactNode;
   if (type === "gauge") {
-    const value = source === "item.spi"
-      ? Number((item?.progress ?? item?.actual) ?? 65)
-      : source === "spi" && liveData ? liveData.overall : 65;
-    body = <GaugeSvg value={value} color={a} track={b} />;
+    const real = realGaugeValue(source, liveData, item);
+    body = <GaugeSvg value={real ?? 65} color={real != null ? a : "var(--border-strong)"} track={b} showLabel={real != null} />;
   } else if (type === "pie" || type === "donut") {
-    const dur = source === "item.duration" ? (item?.duration as { elapsed: number; total: number } | null) : null;
-    const frac = dur?.total
-      ? dur.elapsed / dur.total
-      : source === "breakdown" && liveData?.breakdown.total
-        ? liveData.breakdown.completed / liveData.breakdown.total
-        : source === "duration" && liveData?.duration?.total
-          ? liveData.duration.elapsed / liveData.duration.total
-          : 0.25;
-    body = <DonutSvg frac={frac} colorA={a} colorB={b} hollow={type === "donut"} />;
+    const real = realDonutFrac(source, liveData, item);
+    body = real != null
+      ? <DonutSvg frac={real} colorA={a} colorB={b} hollow={type === "donut"} />
+      : <DonutSvg frac={0.25} colorA="var(--border-strong)" colorB="var(--bg-canvas)" hollow={type === "donut"} />;
   } else if (type === "line" || type === "area") {
     const real = realLinePoints(source, liveData);
     body = (

@@ -237,6 +237,12 @@
   pointer-events: none;
 }
 
+/* Report Customize tab's master header/footer — real content, shown at full
+   strength so the page reads as final, not a faded template reference. */
+.elementGhostReal {
+  pointer-events: none;
+}
+
 .handle {
   position: absolute;
   width: 9px;

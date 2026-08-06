@@ -69,7 +69,11 @@ export function LayoutEditor({
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [showGuides, setShowGuides] = useState(true);
+  // Margin/header/footer guides help while laying out a template, but on a
+  // report (liveData present) they're just chrome between you and seeing
+  // the page as its final, real self — off by default there, still
+  // available via the checkbox for a moment of precise alignment.
+  const [showGuides, setShowGuides] = useState(!liveData);
   const scale = BASE_SCALE * zoom;
 
   // Undo/redo history for this editor instance (Page Designer's master
