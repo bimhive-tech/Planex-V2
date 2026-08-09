@@ -27,8 +27,9 @@ DEFAULT_CONFIG = {
         "table_row_alt": "#eef3f8",
         "cover_bg": "#ffffff",
         "cover_accent": "#963634",       # maroon bar + project title on the cover
-        "chart_planned": "#2E74B5",
-        "chart_actual": "#C0504D",
+        "chart_planned": "#4F81BD",      # sampled from the reference dashboard's own
+        "chart_actual": "#C0504D",       # bar/pie/line charts — its dominant blue/red pair
+        "chart_grid": "#D9D9D9",         # faint horizontal gridlines behind bars/lines
         "gauge_bad": "#B40000",          # SPI/completion gauge bands — 4 zones,
         "gauge_warn": "#FFC000",         # colors sampled from the reference dashboard's
         "gauge_good": "#FFFF00",         # own speedometer chart (Poor/Average/Good/Excellent)

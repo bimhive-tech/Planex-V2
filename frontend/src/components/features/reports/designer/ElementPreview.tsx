@@ -254,7 +254,7 @@ function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
   const source = p.source;
-  const a = String(p.color_a ?? "#2E74B5");
+  const a = String(p.color_a ?? "#4F81BD");
   const b = String(p.color_b ?? "#C0504D");
   const item = singleItem(pinnedItem);
 

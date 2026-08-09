@@ -162,6 +162,7 @@ export const BUILDER_SECTIONS: BuilderSection[] = [
       { path: "labels.actual", label: 'Word: "Actual"', type: "text" },
       { path: "colors.chart_planned", label: "Chart: planned", type: "color" },
       { path: "colors.chart_actual", label: "Chart: actual", type: "color" },
+      { path: "colors.chart_grid", label: "Chart: gridlines", type: "color" },
       { path: "colors.gauge_bad", label: "SPI gauge: Poor", type: "color" },
       { path: "colors.gauge_warn", label: "SPI gauge: Average", type: "color" },
       { path: "colors.gauge_good", label: "SPI gauge: Good", type: "color" },

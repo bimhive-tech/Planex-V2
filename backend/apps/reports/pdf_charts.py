@@ -14,6 +14,14 @@ from reportlab.lib.units import mm
 from .pdf_base import BOLD, FONT_NAME, hexcolor, shape
 
 
+def _grid(value_axis, cfg):
+    """Faint horizontal gridlines behind bars/lines, matching the reference
+    dashboard's own charts (all of which grid at every value-axis tick)."""
+    value_axis.visibleGrid = 1
+    value_axis.gridStrokeColor = hexcolor(cfg["colors"].get("chart_grid", "#D9D9D9"))
+    value_axis.gridStrokeWidth = 0.4
+
+
 def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
     """Swatch+label legend. Horizontal by default; `vertical=True` stacks the
     entries in one column (used when labels carry values and would otherwise
@@ -51,6 +59,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
     chart.barWidth = 8
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[0].strokeColor = None
@@ -84,6 +93,7 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
     chart.groupSpacing = 8
     chart.barSpacing = 1
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
@@ -122,6 +132,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
     chart.groupSpacing = 8
     chart.barSpacing = 1
     chart.bars[0].strokeColor = None
@@ -185,6 +196,7 @@ def _completion_histogram(cfg, children, width, labels, height=None):
     chart.valueAxis.valueStep = max(1, -(-top // 5))  # ceil(top/5)
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
     chart.barWidth = 14
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[0].strokeColor = None
@@ -344,6 +356,7 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
+    _grid(chart.valueAxis, cfg)
     chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2
@@ -373,6 +386,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     chart.valueAxis.valueMin = 0
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
+    _grid(chart.valueAxis, cfg)
     chart.groupSpacing = 6
     chart.barSpacing = 1
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
@@ -402,6 +416,7 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     chart.valueAxis.valueMin = 0
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
+    _grid(chart.valueAxis, cfg)
     chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2

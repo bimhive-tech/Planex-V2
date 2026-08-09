@@ -20,7 +20,7 @@ export function BuilderPreview({ config, pageKey, name }: { config: ReportConfig
     "--pv-accent": g("colors.cover_accent", "#963634"),
     "--pv-cover-bg": g("colors.cover_bg", "#ffffff"),
     "--pv-toc": g("colors.toc_title", "#2E74B5"),
-    "--pv-planned": g("colors.chart_planned", "#2E74B5"),
+    "--pv-planned": g("colors.chart_planned", "#4F81BD"),
     "--pv-actual": g("colors.chart_actual", "#C0504D"),
     "--pv-rowalt": g("colors.table_row_alt", "#eef3f8"),
   } as CSSProperties;
