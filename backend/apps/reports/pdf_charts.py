@@ -343,7 +343,12 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     for lo, hi, color, band_label in gauge_bands:
         a0 = 180 - (lo / max_value) * 180
         a1 = 180 - (hi / max_value) * 180
-        d.add(Wedge(cx, cy, r_outer, a1, a0, innerRadius=r_inner,
+        # reportlab.graphics.shapes.Wedge has no "innerRadius" attribute —
+        # the actual inner-cut parameter is "radius1". Passing innerRadius
+        # was silently ignored (Wedge has no such AttrMapValue), so this was
+        # drawing a full pie wedge down to the center the whole time despite
+        # r_inner being computed correctly above.
+        d.add(Wedge(cx, cy, r_outer, a1, a0, radius1=r_inner,
                     fillColor=hexcolor(color), strokeColor=hexcolor("#ffffff"), strokeWidth=0.5))
         mid_angle = math.radians((a0 + a1) / 2)
         lx, ly = cx + r_label * math.cos(mid_angle), cy + r_label * math.sin(mid_angle)
