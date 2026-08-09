@@ -172,6 +172,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
             <Row label="Client">{p.client_name || "—"}</Row>
             <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
             <Row label="Contract value">{formatMoney(p.contract_value, p.currency)}</Row>
+            <Row label="Revised amount">{formatMoney(p.revised_amount, p.currency)}</Row>
             <Row label="Approved value">{formatMoney(p.approved_value, p.currency)}</Row>
             <Row label="Forecast cost">{formatMoney(p.forecast_cost, p.currency)}</Row>
             <Row label="Advance payment">{formatMoney(p.advance_payment, p.currency)}</Row>
@@ -186,6 +187,9 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
                 </Badge>
               )}
             </Row>
+            <Row label="Project delay (calendar days)">
+              {p.project_delay_days === null ? "—" : p.project_delay_days}
+            </Row>
             <Row label="Status">
               <Badge tone={p.is_archived ? "neutral" : "success"}>{p.is_archived ? "Archived" : "Active"}</Badge>
             </Row>
@@ -193,6 +197,20 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
               <Badge tone={priorityTone(p.priority)}>{p.priority_display}</Badge>
             </Row>
           </section>
+
+          {(p.part_amount || p.part_completion_revised || p.part_forecast_completion || p.part_delay_days !== null) && (
+            <section className={styles.card}>
+              <CardHead icon="projects" title="Part (Contracted Sub-Scope)" sub="Tracked alongside the whole project." />
+              <Row label="Part amount">{formatMoney(p.part_amount, p.currency)}</Row>
+              <Row label="Completion (revised baseline)">
+                {p.part_completion_revised ? new Date(p.part_completion_revised).toLocaleDateString() : "—"}
+              </Row>
+              <Row label="Forecasted completion">
+                {p.part_forecast_completion ? new Date(p.part_forecast_completion).toLocaleDateString() : "—"}
+              </Row>
+              <Row label="Delay (calendar days)">{p.part_delay_days === null ? "—" : p.part_delay_days}</Row>
+            </section>
+          )}
 
           <section className={styles.card}>
             <CardHead icon="users" title="Contacts" sub="Consultant and contractor." />
@@ -208,6 +226,12 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
               {p.contractor_phone && <Row label="Phone">{p.contractor_phone}</Row>}
               {p.contractor_email && <Row label="Email">{p.contractor_email}</Row>}
             </div>
+            {p.contractor_consultant && (
+              <div className={styles.contactGroup}>
+                <span className={styles.contactRole}>Contractor&apos;s Consultant</span>
+                <Row label="Name">{p.contractor_consultant}</Row>
+              </div>
+            )}
           </section>
 
           {(p.description || p.notes) && (

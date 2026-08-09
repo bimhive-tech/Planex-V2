@@ -56,11 +56,19 @@ class Project(TimestampedModel):
     contractor_name = models.CharField(max_length=180, blank=True)
     contractor_phone = models.CharField(max_length=40, blank=True)
     contractor_email = models.EmailField(blank=True)
+    # A 4th party distinct from the project's own consultant — the contractor's
+    # own consultant/advisor, as tracked on some contracts' progress reports.
+    contractor_consultant = models.CharField(max_length=180, blank=True)
 
     planned_start = models.DateField(null=True, blank=True)
     planned_finish = models.DateField(null=True, blank=True)
     revised_finish = models.DateField(null=True, blank=True)
     forecast_finish = models.DateField(null=True, blank=True)  # current forecast, separate from the revised baseline
+    # Manually entered, calendar-day delay figure for the whole project (may
+    # be negative) — distinct from the `_duration_for()` computed delay used
+    # elsewhere, since a contract's own tracked delay figure doesn't always
+    # follow that same (revised_finish/as_of - planned_finish) formula.
+    project_delay_days = models.IntegerField(null=True, blank=True)
     size_sqm = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     notes = models.TextField(blank=True)
 
@@ -74,6 +82,21 @@ class Project(TimestampedModel):
     contract_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    # The contract sum as last formally revised (variation orders etc.) — kept
+    # distinct from approved_value, which is Planex's own running total of
+    # approved variations; this is the client's own tracked "revised amount"
+    # figure, which doesn't always match that computation.
+    revised_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+
+    # Some contracts report progress for a specific contracted "Part" (a
+    # sub-scope) alongside the whole project — its own amount, baseline,
+    # forecast and delay, tracked in parallel with the project-wide figures
+    # above rather than derived from them. All optional: most projects have
+    # no such split and simply leave these blank.
+    part_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    part_completion_revised = models.DateField(null=True, blank=True)
+    part_forecast_completion = models.DateField(null=True, blank=True)
+    part_delay_days = models.IntegerField(null=True, blank=True)
 
     # A real P6 schedule states its own actual AND planned % complete for the
     # whole project — Performance % Complete (earned value / budgeted cost) and

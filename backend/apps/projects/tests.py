@@ -689,6 +689,33 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["approved_value"], "1050000.00")
         self.assertEqual(body["forecast_cost"], "1100000.00")
 
+    def test_contractor_consultant_and_part_scope_fields_round_trip(self):
+        """contractor_consultant, revised_amount, project_delay_days, and the
+        "(Part)" contracted-sub-scope fields — added to close the gap against
+        a reference report that tracks a contract's own 4th-party consultant,
+        revised contract sum, and a specific contracted "Part" of the work
+        (its own amount/baseline/forecast/delay) alongside the whole project."""
+        p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
+        self.login("admin@acme.com")
+        resp = self.client.patch(
+            f"/api/projects/{p.id}/",
+            {
+                "contractor_consultant": "ECG Consulting", "revised_amount": "2000000.00",
+                "project_delay_days": -30,
+                "part_amount": "300000.00", "part_completion_revised": "2025-01-01",
+                "part_forecast_completion": "2025-06-01", "part_delay_days": -15,
+            },
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.json()
+        self.assertEqual(body["contractor_consultant"], "ECG Consulting")
+        self.assertEqual(body["revised_amount"], "2000000.00")
+        self.assertEqual(body["project_delay_days"], -30)
+        self.assertEqual(body["part_amount"], "300000.00")
+        self.assertEqual(body["part_completion_revised"], "2025-01-01")
+        self.assertEqual(body["part_forecast_completion"], "2025-06-01")
+        self.assertEqual(body["part_delay_days"], -15)
+
     def test_duplicate_name_rejected(self):
         Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
         self.login("admin@acme.com")

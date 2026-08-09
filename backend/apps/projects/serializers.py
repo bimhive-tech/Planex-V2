@@ -8,10 +8,16 @@ from .services import project_overall_progress
 
 STAKEHOLDER_FIELDS = [
     "client_name", "consultant_name", "consultant_phone", "consultant_email",
-    "contractor_name", "contractor_phone", "contractor_email",
+    "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
 ]
 DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
-CONTRACT_FIELDS = ["advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost"]
+CONTRACT_FIELDS = [
+    "advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost",
+    "revised_amount", "project_delay_days",
+]
+# A contracted sub-scope some projects track alongside the whole project —
+# see Project.part_amount's docstring.
+PART_FIELDS = ["part_amount", "part_completion_revised", "part_forecast_completion", "part_delay_days"]
 
 
 class ProjectListSerializer(serializers.ModelSerializer):
@@ -42,7 +48,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "project_type", "project_type_display",
             "priority", "priority_display", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS, *PART_FIELDS,
             "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
             "team_count", "open_submission_count", "created_at", "updated_at",
@@ -97,7 +103,7 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             "name", "code", "project_type", "priority", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS, *PART_FIELDS,
             "size_sqm", "notes", "is_archived",
         ]
 

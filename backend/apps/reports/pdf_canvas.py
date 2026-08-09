@@ -503,31 +503,46 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
 
     if source == "project_info":
         dur = ctx.get("duration") or {}
+        money = lambda v: f"{v:,.0f} {p['currency']}" if v else ""  # noqa: E731
+        days = lambda v: f"{v} {labels['unit_days']}" if v or v == 0 else ""  # noqa: E731
         rows = [
+            (labels.get("info_progress_as_on", "Progress as on"),
+             _fmt_date(ctx.get("report", {}).get("date")) if ctx.get("report", {}).get("date") else ""),
             (labels["info_name"], p.get("name")),
             (labels.get("info_code", "Code"), p.get("code")),
             (labels["info_client"], p.get("client")),
             (labels["info_consultant"], p.get("consultant")),
             (labels["info_contractor"], p.get("contractor")),
+            (labels.get("info_contractor_consultant", "Contractor's Consultant"), p.get("contractor_consultant")),
             (labels["info_type"], p.get("type")),
             (labels["info_location"], p.get("location")),
-            (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p.get("budget") else ""),
-            (labels.get("info_contract_value", "Contract value"),
-             f"{p['contract_value']:,.0f} {p['currency']}" if p.get("contract_value") else ""),
-            (labels.get("info_approved_value", "Approved value"),
-             f"{p['approved_value']:,.0f} {p['currency']}" if p.get("approved_value") else ""),
-            (labels.get("info_forecast_cost", "Forecast cost"),
-             f"{p['forecast_cost']:,.0f} {p['currency']}" if p.get("forecast_cost") else ""),
+            (labels["info_budget"], money(p.get("budget"))),
+            (labels.get("info_contract_value", "Contract value"), money(p.get("contract_value"))),
+            (labels.get("info_revised_amount", "Revised Amount"), money(p.get("revised_amount"))),
+            (labels.get("info_approved_value", "Approved value"), money(p.get("approved_value"))),
+            (labels.get("info_forecast_cost", "Forecast cost"), money(p.get("forecast_cost"))),
+            (labels.get("info_advance_payment", "Advance Payment"), money(p.get("advance_payment"))),
             (labels.get("info_duration", "Duration"),
              f"{dur['total']} {labels['unit_days']}" if dur.get("total") else ""),
             (labels["info_start"], _fmt_date(p.get("planned_start"))),
             (labels["info_finish"], _fmt_date(p.get("planned_finish"))),
+            (labels.get("info_eot", "EOT (Days)"), days(p.get("eot_days"))),
             (labels.get("info_revised", "Revised finish"),
              _fmt_date(p.get("revised_finish")) if p.get("revised_finish") else ""),
             (labels.get("info_forecast", "Forecast finish"),
              _fmt_date(p.get("forecast_finish")) if p.get("forecast_finish") else ""),
             (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
+            (labels.get("info_project_delay", "Project Delay (Calendar Days)"), days(p.get("project_delay_days"))),
             (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p.get("size_sqm") else ""),
+            # A contracted sub-scope some projects track alongside the whole
+            # project — see Project.part_amount's docstring. Grouped at the
+            # end so the whole-project figures above stay together.
+            (labels.get("info_part_amount", "(Part) Amount"), money(p.get("part_amount"))),
+            (labels.get("info_part_completion_revised", "(Part) Completion Date (Revised Baseline)"),
+             _fmt_date(p.get("part_completion_revised")) if p.get("part_completion_revised") else ""),
+            (labels.get("info_part_forecast", "(Part) Forecasted Completion Date"),
+             _fmt_date(p.get("part_forecast_completion")) if p.get("part_forecast_completion") else ""),
+            (labels.get("info_part_delay", "(Part) Delay (Calendar Days)"), days(p.get("part_delay_days"))),
         ]
         rows = [(k, v) for k, v in rows if v and v != "—"]
         return _info_table(cfg, styles, rows, rtl) if rows else None

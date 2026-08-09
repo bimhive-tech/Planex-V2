@@ -35,15 +35,24 @@ export interface ProjectDetail {
   contractor_name: string;
   contractor_phone: string;
   contractor_email: string;
+  contractor_consultant: string;
   planned_start: string | null;
   planned_finish: string | null;
   revised_finish: string | null;
   forecast_finish: string | null;
+  project_delay_days: number | null;
   advance_payment: string | null;
   eot_days: number | null;
   contract_value: string | null;
   approved_value: string | null;
   forecast_cost: string | null;
+  revised_amount: string | null;
+  // A contracted sub-scope some projects track alongside the whole project —
+  // see the backend Project.part_amount field's docstring.
+  part_amount: string | null;
+  part_completion_revised: string | null;
+  part_forecast_completion: string | null;
+  part_delay_days: number | null;
   size_sqm: string | null;
   notes: string;
   is_archived: boolean;

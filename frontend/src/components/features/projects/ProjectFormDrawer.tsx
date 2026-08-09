@@ -26,9 +26,10 @@ const FIELDS = [
   "name", "code", "project_type", "priority", "location", "description",
   "budget", "currency", "advance_payment", "client_name",
   "consultant_name", "consultant_phone", "consultant_email",
-  "contractor_name", "contractor_phone", "contractor_email",
-  "planned_start", "planned_finish", "revised_finish", "forecast_finish",
-  "eot_days", "size_sqm", "notes", "contract_value", "approved_value", "forecast_cost",
+  "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
+  "planned_start", "planned_finish", "revised_finish", "forecast_finish", "project_delay_days",
+  "eot_days", "size_sqm", "notes", "contract_value", "approved_value", "forecast_cost", "revised_amount",
+  "part_amount", "part_completion_revised", "part_forecast_completion", "part_delay_days",
 ];
 
 const blank = (): Form => {
@@ -99,9 +100,10 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
     // Empty dates / size must be null, not "".
     const payload: Record<string, unknown> = { ...form };
     for (const k of [
-      "planned_start", "planned_finish", "revised_finish", "forecast_finish",
+      "planned_start", "planned_finish", "revised_finish", "forecast_finish", "project_delay_days",
       "size_sqm", "budget", "advance_payment", "eot_days",
-      "contract_value", "approved_value", "forecast_cost",
+      "contract_value", "approved_value", "forecast_cost", "revised_amount",
+      "part_amount", "part_completion_revised", "part_forecast_completion", "part_delay_days",
     ]) {
       if (!payload[k]) payload[k] = null;
     }
@@ -166,8 +168,12 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Approved value" name="approved_value" type="number" step="0.01"
             value={form.approved_value} onChange={set("approved_value")} />
         </div>
-        <Input label="Forecast cost" name="forecast_cost" type="number" step="0.01"
-          value={form.forecast_cost} onChange={set("forecast_cost")} />
+        <div className={styles.row2}>
+          <Input label="Forecast cost" name="forecast_cost" type="number" step="0.01"
+            value={form.forecast_cost} onChange={set("forecast_cost")} />
+          <Input label="Revised amount" name="revised_amount" type="number" step="0.01"
+            value={form.revised_amount} onChange={set("revised_amount")} />
+        </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="description">Description</label>
           <textarea id="description" className={styles.textarea} rows={2}
@@ -183,7 +189,11 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Revised finish" name="revised_finish" type="date" value={form.revised_finish} onChange={set("revised_finish")} />
           <Input label="Forecast finish" name="forecast_finish" type="date" value={form.forecast_finish} onChange={set("forecast_finish")} />
         </div>
-        <Input label="Size (sqm)" name="size_sqm" type="number" step="0.01" value={form.size_sqm} onChange={set("size_sqm")} />
+        <div className={styles.row2}>
+          <Input label="Size (sqm)" name="size_sqm" type="number" step="0.01" value={form.size_sqm} onChange={set("size_sqm")} />
+          <Input label="Project delay (calendar days)" name="project_delay_days" type="number" step="1"
+            value={form.project_delay_days} onChange={set("project_delay_days")} />
+        </div>
 
         <p className={styles.section}>Client</p>
         <Input label="Client name" name="client_name" value={form.client_name} onChange={set("client_name")} />
@@ -201,6 +211,23 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Phone" name="contractor_phone" value={form.contractor_phone} onChange={set("contractor_phone")} />
           <Input label="Email" name="contractor_email" type="email" value={form.contractor_email} onChange={set("contractor_email")} />
         </div>
+        <Input label="Contractor's consultant" name="contractor_consultant"
+          value={form.contractor_consultant} onChange={set("contractor_consultant")} />
+
+        <p className={styles.section}>Part (contracted sub-scope)</p>
+        <p className={styles.sectionHint}>
+          Only fill these in if this contract tracks a specific "Part" of the work alongside the whole project.
+        </p>
+        <Input label="Part amount" name="part_amount" type="number" step="0.01"
+          value={form.part_amount} onChange={set("part_amount")} />
+        <div className={styles.row2}>
+          <Input label="Part completion (revised baseline)" name="part_completion_revised" type="date"
+            value={form.part_completion_revised} onChange={set("part_completion_revised")} />
+          <Input label="Part forecasted completion" name="part_forecast_completion" type="date"
+            value={form.part_forecast_completion} onChange={set("part_forecast_completion")} />
+        </div>
+        <Input label="Part delay (calendar days)" name="part_delay_days" type="number" step="1"
+          value={form.part_delay_days} onChange={set("part_delay_days")} />
 
         <div className={styles.field}>
           <label className={styles.label} htmlFor="notes">Notes</label>
