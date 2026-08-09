@@ -10,8 +10,22 @@ from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.shapes import Circle, Drawing, Line, Polygon, Rect, String, Wedge
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
 
-from .pdf_base import BOLD, FONT_NAME, hexcolor, shape
+from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
+
+# The reference gauge's own text is plain Latin sans-serif — Helvetica is a
+# standard PDF font (no embedding needed) and reads much closer to it than
+# Amiri's serif Latin glyphs. Only used for text confirmed non-Arabic (a
+# translated template's band/value labels still need Amiri's Arabic support).
+_SANS = "Helvetica"
+_SANS_BOLD = "Helvetica-Bold"
+
+
+def _gauge_font(text, bold=False):
+    if has_arabic(text):
+        return BOLD if bold else FONT_NAME
+    return _SANS_BOLD if bold else _SANS
 
 
 def _grid(value_axis, cfg):
@@ -280,20 +294,26 @@ def overall_donut(cfg, ctx, width, labels, height=None):
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
     """Semicircular SPI/completion gauge — 4 labeled bands (Poor/Average/Good/
     Excellent, red->orange->yellow->green) with a needle at `value`
-    (0..max_value) and the number printed under the hub. `value` is a plain
-    number (not read from ctx) so the same drawing serves the project-level
-    overall % and any per-zone/per-item % a caller has on hand. Band cutoffs,
-    colors and labels come from cfg (gauge_thresholds, colors.gauge_*,
-    labels.gauge_*) so a template can move them away from the defaults —
-    modeled on the reference dashboard's own SPI speedometer chart."""
+    (0..max_value). `value` is a plain number (not read from ctx) so the
+    same drawing serves the project-level overall % and any per-zone/per-
+    item % a caller has on hand. Band cutoffs, colors and labels come from
+    cfg (gauge_thresholds, colors.gauge_*, labels.gauge_*) so a template can
+    move them away from the defaults — modeled pixel-for-pixel on the
+    reference dashboard's own SPI speedometer chart: a thin ring (not a
+    solid wedge down to the hub), a small needle pivot, the value line
+    directly under the arc with the caption below it, and — since that
+    reference chart is plain Latin sans-serif — Helvetica text wherever the
+    label isn't Arabic."""
     if value is None:
         return None
     height = height or 48 * mm
     d = Drawing(width, height)
-    cx, cy = width / 2, height * 0.24
-    r_outer = min(width / 2, height * 0.7) * 0.88
-    r_inner = r_outer * 0.55
-    r_label = r_outer * 1.16
+    cx = width / 2
+    text_h = 24          # room below the hub for the value line + caption
+    label_pad = 11        # room above the arc for the band labels
+    cy = text_h + 6
+    band_font_size = 6.5
+    r_label_factor = 1.08
 
     thresholds = cfg.get("gauge_thresholds") or {}
     low = float(thresholds.get("low", 50))
@@ -307,6 +327,19 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
         (mid, high, colors.get("gauge_good", "#FFFF00"), labels.get("gauge_good", "Good")),
         (high, max_value, colors.get("gauge_excellent", "#77933C"), labels.get("gauge_excellent", "Excellent")),
     ]
+    # The outermost (leftmost/rightmost) band labels are textAnchor="middle"
+    # at r_label, so they reach roughly half their own width further out —
+    # without this, "Excellent" clips off the right edge of a narrow box.
+    widest_label_w = max(
+        pdfmetrics.stringWidth(shape(bl), _gauge_font(bl), band_font_size) for *_, bl in gauge_bands
+    )
+    r_outer = max(8, min(
+        (width / 2 - widest_label_w / 2 - 2) / r_label_factor,
+        height - cy - label_pad,
+    ) * 0.92)
+    r_inner = r_outer * 0.80  # thin ring, matched to the reference's own band width
+    r_label = r_outer * r_label_factor
+
     for lo, hi, color, band_label in gauge_bands:
         a0 = 180 - (lo / max_value) * 180
         a1 = 180 - (hi / max_value) * 180
@@ -314,7 +347,7 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
                     fillColor=hexcolor(color), strokeColor=hexcolor("#ffffff"), strokeWidth=0.5))
         mid_angle = math.radians((a0 + a1) / 2)
         lx, ly = cx + r_label * math.cos(mid_angle), cy + r_label * math.sin(mid_angle)
-        d.add(String(lx, ly, shape(band_label), fontName=FONT_NAME, fontSize=6.5,
+        d.add(String(lx, ly, shape(band_label), fontName=_gauge_font(band_label), fontSize=band_font_size,
                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
 
     v = max(0.0, min(max_value, float(value)))
@@ -327,12 +360,16 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     needle_color = hexcolor("#1e2430")
     d.add(Polygon([base1[0], base1[1], base2[0], base2[1], tip_x, tip_y],
                   fillColor=needle_color, strokeColor=None))
-    d.add(Circle(cx, cy, base_w * 1.4, fillColor=needle_color, strokeColor=None))
+    d.add(Circle(cx, cy, base_w * 0.6, fillColor=needle_color, strokeColor=None))  # small pivot dot, not a bold hub
 
-    d.add(String(cx, cy - r_outer * 0.55, f"{v:.0f}%", fontName=BOLD, fontSize=13,
-                 fillColor=hexcolor(cfg["colors"]["heading"]), textAnchor="middle"))
+    # Value line directly under the hub, caption below that — same top-to-
+    # bottom order as the reference (arc, then value, then caption), the
+    # reverse of this drawing's earlier title-on-top layout.
+    value_text = f"{shape(title)}= {v:.0f}%" if title else f"{v:.0f}%"
+    d.add(String(cx, cy - 14, value_text, fontName=_gauge_font(title or ""), fontSize=11,
+                 fillColor=hexcolor(cfg["colors"]["text"]), textAnchor="middle"))
     if title:
-        d.add(String(cx, height - 8, shape(title), fontName=FONT_NAME, fontSize=8,
+        d.add(String(cx, cy - 26, shape(title), fontName=_gauge_font(title), fontSize=8,
                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
     return d
 
