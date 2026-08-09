@@ -36,6 +36,25 @@ def _grid(value_axis, cfg):
     value_axis.gridStrokeWidth = 0.4
 
 
+def _thinned_labels(names, avail_width, font_size=7, angled=True):
+    """Blank out category-axis labels beyond what `avail_width` can legibly
+    fit, keeping every Nth one — a long monthly series (e.g. a multi-year
+    S-curve with 50+ points) otherwise draws a label at every single point
+    and they overlap into a solid, unreadable smear. Ticks still mark every
+    data point; only the text on the skipped ones is left blank. Angled
+    (rotated ~30 degrees) labels overlap far less per pixel of width than
+    horizontal ones, so they get a smaller per-label budget."""
+    if not names:
+        return names
+    avg_chars = max(1.0, sum(len(n) for n in names) / len(names))
+    per_char = font_size * (0.42 if angled else 0.62)
+    max_labels = max(1, int(avail_width / (avg_chars * per_char)))
+    if len(names) <= max_labels:
+        return names
+    step = -(-len(names) // max_labels)  # ceil division
+    return [n if i % step == 0 else "" for i, n in enumerate(names)]
+
+
 def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
     """Swatch+label legend. Horizontal by default; `vertical=True` stacks the
     entries in one column (used when labels carry values and would otherwise
@@ -65,7 +84,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.x, chart.y = 22, 26
     chart.width, chart.height = width - 44, height - 50
     chart.data = [[round(z["progress"], 1) for z in zones]]
-    chart.categoryAxis.categoryNames = [shape(z["name"]) for z in zones]
+    chart.categoryAxis.categoryNames = _thinned_labels([shape(z["name"]) for z in zones], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.categoryAxis.labels.angle = 30
@@ -99,7 +118,7 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
         [round(z["planned"], 1) for z in zones],
         [round(z["progress"], 1) for z in zones],
     ]
-    chart.categoryAxis.categoryNames = [shape(z["name"]) for z in zones]
+    chart.categoryAxis.categoryNames = _thinned_labels([shape(z["name"]) for z in zones], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.categoryAxis.labels.angle = 30
@@ -138,7 +157,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
                       [round(u["actual"], 1) for u in units]]
     else:
         chart.data = [[round(u["actual"], 1) for u in units]]
-    chart.categoryAxis.categoryNames = [shape(u["name"]) for u in units]
+    chart.categoryAxis.categoryNames = _thinned_labels([shape(u["name"]) for u in units], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.categoryAxis.labels.angle = 30
@@ -390,7 +409,8 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     chart.x, chart.y = 26, 26
     chart.width, chart.height = width - 52, height - 56  # leave a top strip for the legend
     chart.data = [[p["planned"] for p in series], [p["actual"] for p in series]]
-    chart.categoryAxis.categoryNames = [p["date"].strftime("%b %y") for p in series]
+    chart.categoryAxis.categoryNames = _thinned_labels(
+        [p["date"].strftime("%b %y") for p in series], chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
     chart.categoryAxis.labels.angle = 30
@@ -420,7 +440,8 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     chart.x, chart.y = 32, 28
     chart.width, chart.height = width - 60, height - 62
     chart.data = [[r["planned"] for r in rows], [r["actual"] for r in rows]]
-    chart.categoryAxis.categoryNames = [r["month"].strftime("%b %y") for r in rows]
+    chart.categoryAxis.categoryNames = _thinned_labels(
+        [r["month"].strftime("%b %y") for r in rows], chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
     chart.categoryAxis.labels.angle = 30
@@ -450,7 +471,8 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     chart.x, chart.y = 32, 26
     chart.width, chart.height = width - 60, height - 56
     chart.data = [[r["cum_planned"] for r in rows], [r["cum_actual"] for r in rows]]
-    chart.categoryAxis.categoryNames = [r["month"].strftime("%b %y") for r in rows]
+    chart.categoryAxis.categoryNames = _thinned_labels(
+        [r["month"].strftime("%b %y") for r in rows], chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
     chart.categoryAxis.labels.angle = 30
@@ -553,9 +575,15 @@ def gantt_chart(cfg, rows, width, labels, height=None):
                      fontName=BOLD if r["level"] == 0 else FONT_NAME, fontSize=7,
                      fillColor=hexcolor(c["text"])))
 
+    legend_x = width - 150
     d.add(_legend([(c["chart_planned"], labels["planned"]), (c["chart_actual"], labels["actual"])],
-                  width - 150, height - 6, font_size=7))
+                  legend_x, height - 6, font_size=7))
     if has_slip:
-        d.add(String(width - 150, height - 16, "— " + shape(labels.get("gantt_revised", "Revised finish")),
+        # To the legend's left on the same row, not stacked below it — a
+        # fixed vertical offset collided with the legend's own swatch/text
+        # height (varies with font metrics), overlapping "Planned".
+        note = "— " + shape(labels.get("gantt_revised", "Revised finish"))
+        note_w = pdfmetrics.stringWidth(note, FONT_NAME, 7)
+        d.add(String(legend_x - note_w - 10, height - 6, note,
                      fontName=FONT_NAME, fontSize=7, fillColor=delay_color))
     return d
