@@ -453,15 +453,16 @@ class ResolveChartTests(SimpleTestCase):
         from .pdf_charts import speedometer_chart
 
         cfg = default_config()
-        cfg["gauge_thresholds"] = {"low": 20, "high": 40}
+        cfg["gauge_thresholds"] = {"low": 20, "mid": 40, "high": 60}
         cfg["colors"]["gauge_bad"] = "#111111"
         cfg["colors"]["gauge_warn"] = "#222222"
         cfg["colors"]["gauge_good"] = "#333333"
+        cfg["colors"]["gauge_excellent"] = "#444444"
 
         drawing = speedometer_chart(90, 100, cfg)
         wedges = [el for el in drawing.contents if isinstance(el, Wedge)]
         self.assertEqual([w.fillColor for w in wedges],
-                          [hexcolor("#111111"), hexcolor("#222222"), hexcolor("#333333")])
+                          [hexcolor("#111111"), hexcolor("#222222"), hexcolor("#333333"), hexcolor("#444444")])
 
 
 class TocTests(SimpleTestCase):

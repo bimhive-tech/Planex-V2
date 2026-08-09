@@ -29,13 +29,15 @@ DEFAULT_CONFIG = {
         "cover_accent": "#963634",       # maroon bar + project title on the cover
         "chart_planned": "#2E74B5",
         "chart_actual": "#C0504D",
-        "gauge_bad": "#C0504D",          # SPI/completion gauge bands
-        "gauge_warn": "#E8B33D",
-        "gauge_good": "#2E9E5B",
+        "gauge_bad": "#B40000",          # SPI/completion gauge bands — 4 zones,
+        "gauge_warn": "#FFC000",         # colors sampled from the reference dashboard's
+        "gauge_good": "#FFFF00",         # own speedometer chart (Poor/Average/Good/Excellent)
+        "gauge_excellent": "#77933C",
     },
     # SPI/completion gauge band cutoffs, in percent (0-100): below `low` is
-    # gauge_bad, between low/high is gauge_warn, above `high` is gauge_good.
-    "gauge_thresholds": {"low": 50, "high": 80},
+    # gauge_bad, low-mid is gauge_warn, mid-high is gauge_good, above `high`
+    # is gauge_excellent.
+    "gauge_thresholds": {"low": 50, "mid": 70, "high": 90},
     "fonts": {
         "base_size": 11,
         "h1_size": 22,
@@ -167,6 +169,10 @@ DEFAULT_CONFIG = {
         "unit_sqm": "m²",
         "scurve": "Time Performance",
         "spi": "SPI",
+        "gauge_poor": "Poor",
+        "gauge_average": "Average",
+        "gauge_good": "Good",
+        "gauge_excellent": "Excellent",
         "progress_compare": "Progress vs Plan",
         "figure": "شكل",
         "col_previous": "Previous %",

@@ -166,17 +166,38 @@ function polyline(values: number[], invert = true): string {
   return values.map((v, i) => `${(i * step).toFixed(1)},${invert ? 40 - v * 0.4 : v * 0.4}`).join(" ");
 }
 
-function GaugeSvg({ value, color, track, showLabel = true }: { value: number; color: string; track: string; showLabel?: boolean }) {
+// Matches the 4-zone Poor/Average/Good/Excellent band colors the PDF's real
+// speedometer_chart draws (see pdf_charts.py) — sampled from the reference
+// dashboard's own SPI gauge, not an arbitrary placeholder palette.
+const GAUGE_BANDS = [
+  { from: 0, to: 25, color: "#B40000" },
+  { from: 25, to: 50, color: "#FFC000" },
+  { from: 50, to: 75, color: "#FFFF00" },
+  { from: 75, to: 100, color: "#77933C" },
+] as const;
+
+function gaugeArcPoint(pct: number): [number, number] {
+  const rad = ((180 - (pct / 100) * 180) * Math.PI) / 180;
+  return [18 + 16 * Math.cos(rad), 18 - 16 * Math.sin(rad)];
+}
+
+function GaugeSvg({ value, color, showLabel = true }: { value: number; color: string; showLabel?: boolean }) {
   const pct = Math.max(0, Math.min(100, value));
   const angle = -90 + (pct / 100) * 180;
   const needle = [18 + 13 * Math.cos((angle * Math.PI) / 180), 18 + 13 * Math.sin((angle * Math.PI) / 180)];
   return (
     <svg viewBox="0 0 36 22" className={styles.chartSvg} aria-hidden="true">
-      <path d="M2 18 A16 16 0 0 1 34 18" fill="none" stroke={track} strokeWidth="4" strokeLinecap="round" />
-      <path
-        d="M2 18 A16 16 0 0 1 34 18" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round"
-        strokeDasharray={`${(pct / 100) * 50.2} 50.2`}
-      />
+      {GAUGE_BANDS.map((band) => {
+        const [x0, y0] = gaugeArcPoint(band.from);
+        const [x1, y1] = gaugeArcPoint(band.to);
+        return (
+          <path
+            key={band.from}
+            d={`M${x0.toFixed(2)} ${y0.toFixed(2)} A16 16 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`}
+            fill="none" stroke={band.color} strokeWidth="4" strokeLinecap="butt"
+          />
+        );
+      })}
       <line x1="18" y1="18" x2={needle[0]} y2={needle[1]} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="18" cy="18" r="1.5" fill={color} />
       {showLabel && <text x="18" y="21.5" fontSize="4" textAnchor="middle" fill={color}>{pct.toFixed(0)}%</text>}
@@ -240,7 +261,7 @@ function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
   let body: React.ReactNode;
   if (type === "gauge") {
     const real = realGaugeValue(source, liveData, item);
-    body = <GaugeSvg value={real ?? 65} color={real != null ? a : "var(--border-strong)"} track={b} showLabel={real != null} />;
+    body = <GaugeSvg value={real ?? 65} color={real != null ? a : "var(--border-strong)"} showLabel={real != null} />;
   } else if (type === "pie" || type === "donut") {
     const real = realDonutFrac(source, liveData, item);
     body = real != null

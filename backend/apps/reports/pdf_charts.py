@@ -266,33 +266,44 @@ def overall_donut(cfg, ctx, width, labels, height=None):
 
 
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
-    """Semicircular SPI/completion gauge — red/amber/green bands with a needle
-    at `value` (0..max_value) and the number printed under the hub. `value`
-    is a plain number (not read from ctx) so the same drawing serves the
-    project-level overall % and any per-zone/per-item % a caller has on hand.
-    Band cutoffs and colors come from cfg (gauge_thresholds, colors.gauge_*)
-    so a template can move "at risk"/"on track" away from the 50/80 default."""
+    """Semicircular SPI/completion gauge — 4 labeled bands (Poor/Average/Good/
+    Excellent, red->orange->yellow->green) with a needle at `value`
+    (0..max_value) and the number printed under the hub. `value` is a plain
+    number (not read from ctx) so the same drawing serves the project-level
+    overall % and any per-zone/per-item % a caller has on hand. Band cutoffs,
+    colors and labels come from cfg (gauge_thresholds, colors.gauge_*,
+    labels.gauge_*) so a template can move them away from the defaults —
+    modeled on the reference dashboard's own SPI speedometer chart."""
     if value is None:
         return None
-    height = height or 45 * mm
+    height = height or 48 * mm
     d = Drawing(width, height)
-    cx, cy = width / 2, height * 0.22
-    r_outer = min(width / 2, height * 0.75) * 0.92
+    cx, cy = width / 2, height * 0.24
+    r_outer = min(width / 2, height * 0.7) * 0.88
     r_inner = r_outer * 0.55
+    r_label = r_outer * 1.16
 
     thresholds = cfg.get("gauge_thresholds") or {}
-    low, high = float(thresholds.get("low", 50)), float(thresholds.get("high", 80))
+    low = float(thresholds.get("low", 50))
+    mid = float(thresholds.get("mid", 70))
+    high = float(thresholds.get("high", 90))
     colors = cfg["colors"]
+    labels = cfg.get("labels") or {}
     gauge_bands = [
-        (0, low, colors.get("gauge_bad", "#C0504D")),
-        (low, high, colors.get("gauge_warn", "#E8B33D")),
-        (high, max_value, colors.get("gauge_good", "#2E9E5B")),
+        (0, low, colors.get("gauge_bad", "#B40000"), labels.get("gauge_poor", "Poor")),
+        (low, mid, colors.get("gauge_warn", "#FFC000"), labels.get("gauge_average", "Average")),
+        (mid, high, colors.get("gauge_good", "#FFFF00"), labels.get("gauge_good", "Good")),
+        (high, max_value, colors.get("gauge_excellent", "#77933C"), labels.get("gauge_excellent", "Excellent")),
     ]
-    for lo, hi, color in gauge_bands:
+    for lo, hi, color, band_label in gauge_bands:
         a0 = 180 - (lo / max_value) * 180
         a1 = 180 - (hi / max_value) * 180
         d.add(Wedge(cx, cy, r_outer, a1, a0, innerRadius=r_inner,
                     fillColor=hexcolor(color), strokeColor=hexcolor("#ffffff"), strokeWidth=0.5))
+        mid_angle = math.radians((a0 + a1) / 2)
+        lx, ly = cx + r_label * math.cos(mid_angle), cy + r_label * math.sin(mid_angle)
+        d.add(String(lx, ly, shape(band_label), fontName=FONT_NAME, fontSize=6.5,
+                     fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
 
     v = max(0.0, min(max_value, float(value)))
     angle = math.radians(180 - (v / max_value) * 180)
