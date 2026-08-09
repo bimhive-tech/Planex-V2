@@ -62,13 +62,10 @@ class Project(TimestampedModel):
 
     planned_start = models.DateField(null=True, blank=True)
     planned_finish = models.DateField(null=True, blank=True)
+    # Kept in sync with the latest APPROVED schedule Variation (SVO) — see
+    # apps.projects.services.resync_revised_finish. Not directly editable.
     revised_finish = models.DateField(null=True, blank=True)
     forecast_finish = models.DateField(null=True, blank=True)  # current forecast, separate from the revised baseline
-    # Manually entered, calendar-day delay figure for the whole project (may
-    # be negative) — distinct from the `_duration_for()` computed delay used
-    # elsewhere, since a contract's own tracked delay figure doesn't always
-    # follow that same (revised_finish/as_of - planned_finish) formula.
-    project_delay_days = models.IntegerField(null=True, blank=True)
     size_sqm = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     notes = models.TextField(blank=True)
 
@@ -80,13 +77,12 @@ class Project(TimestampedModel):
     # (approved_value), and where it's projected to land (forecast_cost).
     # `budget` stays as the general-purpose figure other flows already use.
     contract_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    # contract_value + the sum of all APPROVED cost Variations (CVOs) — kept in
+    # sync automatically (apps.projects.services.resync_approved_value) rather
+    # than hand-typed, so it can never disagree with the actual Variation log.
+    # Not directly editable.
     approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    # The contract sum as last formally revised (variation orders etc.) — kept
-    # distinct from approved_value, which is Planex's own running total of
-    # approved variations; this is the client's own tracked "revised amount"
-    # figure, which doesn't always match that computation.
-    revised_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
 
     # Some contracts report progress for a specific contracted "Part" (a
     # sub-scope) alongside the whole project — its own amount, baseline,
@@ -136,6 +132,16 @@ class Project(TimestampedModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Keep approved_value correct regardless of *how* contract_value was
+        # set (API, admin, import, a script) — not just the call sites that
+        # remember to call this explicitly. Safe from recursion: the resync
+        # persists via a queryset .update(), which doesn't invoke save().
+        from .services import resync_approved_value
+
+        resync_approved_value(self)
 
 
 def project_image_key(instance, filename):

@@ -2,9 +2,12 @@
 
 A SCHEDULE variation (SVO) proposes a new finish date; a COST variation (CVO)
 proposes a contract-value change. Each is auto-numbered per project per kind and
-moves Pending → Approved / Rejected. The effect (finish date / contract value)
-applies ONLY once approved. Reads need VIEW_VARIATIONS (or MANAGE_VARIATIONS),
-writes/decisions need MANAGE_VARIATIONS."""
+moves Pending → Approved / Rejected. The effect applies ONLY once approved:
+an SVO becomes the project's revised_finish, a CVO's amount folds into
+approved_value (contract_value + sum of approved CVOs) — see
+apps.projects.services.resync_revised_finish / resync_approved_value. Reads
+need VIEW_VARIATIONS (or MANAGE_VARIATIONS), writes/decisions need
+MANAGE_VARIATIONS."""
 import re
 
 from django.db import transaction
@@ -18,6 +21,7 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 
 from .models import Project, Variation
+from .services import resync_approved_value, resync_revised_finish
 
 
 class VariationSerializer(serializers.ModelSerializer):
@@ -87,16 +91,11 @@ def _effective_finish(project):
     return project.revised_finish or project.planned_finish
 
 
-def _resync_revised_finish(project):
-    """Keep the project's revised finish equal to the latest APPROVED schedule VO's
-    new finish. Only approved variations count — a pending/rejected one has no
-    effect. Left untouched when there are no approved schedule VOs."""
-    latest = (project.variations
-              .filter(kind=Variation.Kind.SCHEDULE, status=Variation.Status.APPROVED, new_finish__isnull=False)
-              .order_by("-created_at").first())
-    if latest and project.revised_finish != latest.new_finish:
-        project.revised_finish = latest.new_finish
-        project.save(update_fields=["revised_finish", "updated_at"])
+def _resync(project):
+    """Both kinds of Variation can affect the project after any create/edit/
+    delete/decision — resync unconditionally rather than branching on kind."""
+    resync_revised_finish(project)
+    resync_approved_value(project)
 
 
 class VariationListView(APIView):
@@ -141,7 +140,7 @@ class VariationDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             serializer.save()
-            _resync_revised_finish(project)  # an edited, already-approved SVO may shift it
+            _resync(project)  # an edited, already-approved SVO/CVO may shift it
         return Response(VariationSerializer(variation).data)
 
     def delete(self, request, project_id, variation_id):
@@ -149,7 +148,7 @@ class VariationDetailView(APIView):
         _require_manage(request)
         with transaction.atomic():
             self._get(project, variation_id).delete()
-            _resync_revised_finish(project)
+            _resync(project)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -183,5 +182,5 @@ class VariationDecisionView(APIView):
             variation.decided_at = timezone.now()
             variation.decided_by = request.user
             variation.save(update_fields=["status", "previous_finish", "decided_at", "decided_by", "updated_at"])
-            _resync_revised_finish(project)
+            _resync(project)
         return Response(VariationSerializer(variation).data)

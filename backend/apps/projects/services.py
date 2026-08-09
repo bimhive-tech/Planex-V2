@@ -1,9 +1,50 @@
 """Project business logic — progress roll-up from activities."""
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
+from django.utils import timezone
 
 _WEIGHTED = ExpressionWrapper(
     F("progress_percent") * F("weight"), output_field=DecimalField(max_digits=20, decimal_places=4)
 )
+
+
+def resync_revised_finish(project) -> None:
+    """Keep the project's revised finish equal to the latest APPROVED schedule
+    Variation's (SVO's) new finish. Only approved variations count — a
+    pending/rejected one has no effect. Left untouched when there are no
+    approved schedule VOs (there's no sensible "reset" target)."""
+    from .models import Variation
+
+    latest = (project.variations
+              .filter(kind=Variation.Kind.SCHEDULE, status=Variation.Status.APPROVED, new_finish__isnull=False)
+              .order_by("-created_at").first())
+    if latest and project.revised_finish != latest.new_finish:
+        project.revised_finish = latest.new_finish
+        project.save(update_fields=["revised_finish", "updated_at"])
+
+
+def resync_approved_value(project) -> None:
+    """Keep approved_value equal to contract_value plus the sum of all APPROVED
+    cost Variations (CVOs) — the single source of truth for "what's approved
+    after variations to date", rather than a second hand-typed figure that can
+    drift from the actual Variation log. Cost VOs accumulate (each is a signed
+    delta), unlike schedule VOs which replace a single date — see
+    resync_revised_finish. A no-op until contract_value is set, since summing
+    deltas onto nothing isn't a meaningful contract total."""
+    from .models import Variation
+
+    if project.contract_value is None:
+        return
+    total = project.variations.filter(
+        kind=Variation.Kind.COST, status=Variation.Status.APPROVED,
+    ).aggregate(total=Sum("amount"))["total"] or 0
+    new_value = project.contract_value + total
+    if project.approved_value != new_value:
+        project.approved_value = new_value
+        # A queryset .update(), not project.save() — this runs from inside
+        # Project.save() itself (so every code path that touches
+        # contract_value stays correct, not just the ones that remember to
+        # call this explicitly); .save() here would recurse.
+        type(project).objects.filter(pk=project.pk).update(approved_value=new_value, updated_at=timezone.now())
 
 
 def activity_progress_as_of(project, as_of) -> dict:

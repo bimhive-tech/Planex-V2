@@ -215,8 +215,6 @@ DEFAULT_CONFIG = {
         "info_contractor_consultant": "Contractor's Consultant",
         "info_advance_payment": "Advance Payment",
         "info_eot": "EOT (Days)",
-        "info_revised_amount": "Revised Amount",
-        "info_project_delay": "Project Delay (Calendar Days)",
         "info_part_amount": "(Part) Amount",
         "info_part_completion_revised": "(Part) Completion Date (Revised Baseline)",
         "info_part_forecast": "(Part) Forecasted Completion Date",

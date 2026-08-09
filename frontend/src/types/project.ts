@@ -38,15 +38,17 @@ export interface ProjectDetail {
   contractor_consultant: string;
   planned_start: string | null;
   planned_finish: string | null;
+  // Derived from the latest approved schedule Variation (SVO) — read-only,
+  // not accepted on PATCH. Edit it via the Variations tab instead.
   revised_finish: string | null;
   forecast_finish: string | null;
-  project_delay_days: number | null;
   advance_payment: string | null;
   eot_days: number | null;
   contract_value: string | null;
+  // Derived: contract_value + approved cost Variations (CVOs) — read-only,
+  // not accepted on PATCH. Edit it via the Variations tab instead.
   approved_value: string | null;
   forecast_cost: string | null;
-  revised_amount: string | null;
   // A contracted sub-scope some projects track alongside the whole project —
   // see the backend Project.part_amount field's docstring.
   part_amount: string | null;

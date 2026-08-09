@@ -19,6 +19,7 @@ import { ProjectTeam } from "./ProjectTeam";
 import { ProjectApprovals } from "./ProjectApprovals";
 import { ProjectDelays } from "./ProjectDelays";
 import { ProjectFinances } from "./ProjectFinances";
+import { ProjectPartScope } from "./ProjectPartScope";
 import { ProjectSubmittals } from "./ProjectSubmittals";
 import { ProjectVariations } from "./ProjectVariations";
 import { ProjectReports } from "./ProjectReports";
@@ -31,7 +32,9 @@ export interface ProjectStats {
   breakdown: ProgressBreakdown;
 }
 
-type Tab = "Overview" | "Schedule" | "Team" | "Areas of Concern" | "Finances" | "Submittals" | "Variations" | "Reports" | "Approvals";
+type Tab =
+  | "Overview" | "Schedule" | "Team" | "Areas of Concern" | "Finances" | "Part Scope"
+  | "Submittals" | "Variations" | "Reports" | "Approvals";
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
@@ -54,7 +57,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
     ...(perms.viewSchedule ? (["Schedule"] as Tab[]) : []),
     "Team",
     ...(perms.viewAreasOfConcern ? (["Areas of Concern"] as Tab[]) : []),
-    ...(perms.viewFinances ? (["Finances"] as Tab[]) : []),
+    ...(perms.viewFinances ? (["Finances", "Part Scope"] as Tab[]) : []),
     ...(perms.viewSubmittals ? (["Submittals"] as Tab[]) : []),
     ...(perms.viewVariations ? (["Variations"] as Tab[]) : []),
     ...(perms.exportReports ? (["Reports"] as Tab[]) : []),
@@ -121,6 +124,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
         {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={perms.manageAreasOfConcern} />}
         {tab === "Finances" && <ProjectFinances projectId={project.id} canManage={perms.manageFinances} />}
+        {tab === "Part Scope" && <ProjectPartScope projectId={project.id} canManage={perms.manageFinances} />}
         {tab === "Submittals" && <ProjectSubmittals projectId={project.id} canManage={perms.manageSubmittals} />}
         {tab === "Variations" && <ProjectVariations projectId={project.id} canManage={perms.manageVariations} />}
         {tab === "Reports" && <ProjectReports projectId={project.id} canManage={perms.exportReports} />}

@@ -172,7 +172,6 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
             <Row label="Client">{p.client_name || "—"}</Row>
             <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
             <Row label="Contract value">{formatMoney(p.contract_value, p.currency)}</Row>
-            <Row label="Revised amount">{formatMoney(p.revised_amount, p.currency)}</Row>
             <Row label="Approved value">{formatMoney(p.approved_value, p.currency)}</Row>
             <Row label="Forecast cost">{formatMoney(p.forecast_cost, p.currency)}</Row>
             <Row label="Advance payment">{formatMoney(p.advance_payment, p.currency)}</Row>
@@ -186,9 +185,6 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
                   {delay > 0 ? `${delay} days late` : delay < 0 ? `${-delay} days ahead` : "On time"}
                 </Badge>
               )}
-            </Row>
-            <Row label="Project delay (calendar days)">
-              {p.project_delay_days === null ? "—" : p.project_delay_days}
             </Row>
             <Row label="Status">
               <Badge tone={p.is_archived ? "neutral" : "success"}>{p.is_archived ? "Archived" : "Active"}</Badge>

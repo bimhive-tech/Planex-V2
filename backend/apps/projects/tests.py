@@ -676,7 +676,10 @@ class ProjectApiTests(TestCase):
     def test_contract_cost_and_forecast_fields_round_trip(self):
         """contract_value/approved_value/forecast_cost — added alongside the
         existing budget/advance_payment KPIs so a report's Project Info table
-        can show contracted vs. approved vs. projected cost distinctly."""
+        can show contracted vs. approved vs. projected cost distinctly.
+        approved_value is derived (contract_value + approved cost
+        Variations), so a PATCHed value for it is ignored — it comes back as
+        contract_value with no approved CVOs on this project."""
         p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
         self.login("admin@acme.com")
         resp = self.client.patch(
@@ -686,22 +689,23 @@ class ProjectApiTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         body = resp.json()
         self.assertEqual(body["contract_value"], "1000000.00")
-        self.assertEqual(body["approved_value"], "1050000.00")
+        self.assertEqual(body["approved_value"], "1000000.00")
         self.assertEqual(body["forecast_cost"], "1100000.00")
 
     def test_contractor_consultant_and_part_scope_fields_round_trip(self):
-        """contractor_consultant, revised_amount, project_delay_days, and the
-        "(Part)" contracted-sub-scope fields — added to close the gap against
-        a reference report that tracks a contract's own 4th-party consultant,
-        revised contract sum, and a specific contracted "Part" of the work
-        (its own amount/baseline/forecast/delay) alongside the whole project."""
+        """contractor_consultant and the "(Part)" contracted-sub-scope fields —
+        added to close the gap against a reference report that tracks a
+        contract's own 4th-party consultant and a specific contracted "Part"
+        of the work (its own amount/baseline/forecast/delay) alongside the
+        whole project. (A "revised contract amount" and "project delay"
+        field were deliberately not added here — see approved_value/
+        revised_finish's auto-sync from Variations below.)"""
         p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
         self.login("admin@acme.com")
         resp = self.client.patch(
             f"/api/projects/{p.id}/",
             {
-                "contractor_consultant": "ECG Consulting", "revised_amount": "2000000.00",
-                "project_delay_days": -30,
+                "contractor_consultant": "ECG Consulting",
                 "part_amount": "300000.00", "part_completion_revised": "2025-01-01",
                 "part_forecast_completion": "2025-06-01", "part_delay_days": -15,
             },
@@ -709,12 +713,49 @@ class ProjectApiTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         body = resp.json()
         self.assertEqual(body["contractor_consultant"], "ECG Consulting")
-        self.assertEqual(body["revised_amount"], "2000000.00")
-        self.assertEqual(body["project_delay_days"], -30)
         self.assertEqual(body["part_amount"], "300000.00")
         self.assertEqual(body["part_completion_revised"], "2025-01-01")
         self.assertEqual(body["part_forecast_completion"], "2025-06-01")
         self.assertEqual(body["part_delay_days"], -15)
+
+    def test_approved_value_is_read_only_and_ignores_direct_edits(self):
+        """approved_value is derived (contract_value + approved cost
+        Variations), not a plain field — a direct PATCH must not change it."""
+        p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial",
+                                   contract_value=1_000_000)
+        self.login("admin@acme.com")
+        resp = self.client.patch(f"/api/projects/{p.id}/", {"approved_value": "9999999.00"},
+                                 content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        p.refresh_from_db()
+        self.assertNotEqual(p.approved_value, 9_999_999)
+
+    def test_revised_finish_is_read_only_and_ignores_direct_edits(self):
+        """revised_finish is derived (the latest approved schedule
+        Variation's new finish), not a plain field — a direct PATCH must not
+        change it."""
+        p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
+        self.login("admin@acme.com")
+        resp = self.client.patch(f"/api/projects/{p.id}/", {"revised_finish": "2099-01-01"},
+                                 content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        p.refresh_from_db()
+        self.assertIsNone(p.revised_finish)
+
+    def test_approved_value_syncs_when_contract_value_changes(self):
+        """Editing contract_value directly must re-derive approved_value even
+        with no Variations involved — otherwise the two figures would only
+        agree by coincidence right after creation."""
+        p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial",
+                                   contract_value=1_000_000)
+        p.refresh_from_db()
+        self.assertEqual(p.approved_value, 1_000_000)
+        self.login("admin@acme.com")
+        resp = self.client.patch(f"/api/projects/{p.id}/", {"contract_value": "1500000.00"},
+                                 content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        p.refresh_from_db()
+        self.assertEqual(p.approved_value, 1_500_000)
 
     def test_duplicate_name_rejected(self):
         Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
@@ -1556,6 +1597,56 @@ class VariationApiTests(TestCase):
         self.assertEqual(resp.json()["amount"], "150000.00")
         self.assertEqual(resp.json()["number"], "CVO-001")
         self.assertIsNone(resp.json()["impact_days"])
+
+    def test_pending_cost_variation_has_no_effect_until_approved(self):
+        """Mirrors test_pending_schedule_variation_has_no_effect_until_approved
+        for the cost side — approved_value should stay untouched (None, since
+        no contract_value is set) until the CVO is approved."""
+        self.login("va@acme.com")
+        self.project.contract_value = 1_000_000
+        self.project.save(update_fields=["contract_value"])
+        resp = self._create(kind="cost", title="Added marble", amount="150000.00")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_000_000)  # unaffected while pending
+
+        self._decide(resp.json()["id"], "approve")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_150_000)
+
+    def test_multiple_approved_cost_variations_accumulate(self):
+        """Cost VOs are signed deltas that sum — unlike a schedule VO, which
+        replaces a single date, several approved CVOs must all count."""
+        self.login("va@acme.com")
+        self.project.contract_value = 1_000_000
+        self.project.save(update_fields=["contract_value"])
+        added = self._create(kind="cost", title="Added scope", amount="200000.00").json()["id"]
+        omitted = self._create(kind="cost", title="Omitted scope", amount="-50000.00").json()["id"]
+        self._decide(added, "approve")
+        self._decide(omitted, "approve")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_150_000)  # 1,000,000 + 200,000 - 50,000
+
+    def test_rejected_cost_variation_does_not_count(self):
+        self.login("va@acme.com")
+        self.project.contract_value = 1_000_000
+        self.project.save(update_fields=["contract_value"])
+        vid = self._create(kind="cost", title="Added marble", amount="150000.00").json()["id"]
+        self._decide(vid, "reject")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_000_000)
+
+    def test_deleting_an_approved_cost_variation_resyncs_down(self):
+        self.login("va@acme.com")
+        self.project.contract_value = 1_000_000
+        self.project.save(update_fields=["contract_value"])
+        vid = self._create(kind="cost", title="Added marble", amount="150000.00").json()["id"]
+        self._decide(vid, "approve")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_150_000)
+
+        self.client.delete(f"/api/projects/{self.project.id}/variations/{vid}/")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.approved_value, 1_000_000)
 
     def test_viewer_cannot_manage_or_decide(self):
         self.login("va@acme.com")

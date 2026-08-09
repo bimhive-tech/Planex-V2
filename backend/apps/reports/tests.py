@@ -1042,19 +1042,23 @@ class ProjectInfoCostAndDateFieldsTests(TestCase):
         self.company = Company.objects.create(name="Acme")
 
     def test_context_carries_the_new_project_fields(self):
+        """approved_value is derived (contract_value + approved cost
+        Variations — see apps.projects.services.resync_approved_value), so it
+        comes back as contract_value with no approved CVOs on this project,
+        not whatever was passed to .create()."""
         from .services import build_report_context
 
         project = Project.objects.create(
             company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
             revised_finish=datetime.date(2026, 6, 1), forecast_finish=datetime.date(2026, 8, 1),
-            contract_value=1_000_000, approved_value=1_050_000, forecast_cost=1_100_000)
+            contract_value=1_000_000, forecast_cost=1_100_000)
         report = Report.objects.create(company=self.company, project=project, title="R")
         ctx = build_report_context(report)
 
         self.assertEqual(ctx["project"]["revised_finish"], datetime.date(2026, 6, 1))
         self.assertEqual(ctx["project"]["forecast_finish"], datetime.date(2026, 8, 1))
         self.assertEqual(ctx["project"]["contract_value"], 1_000_000)
-        self.assertEqual(ctx["project"]["approved_value"], 1_050_000)
+        self.assertEqual(ctx["project"]["approved_value"], 1_000_000)
         self.assertEqual(ctx["project"]["forecast_cost"], 1_100_000)
 
     def test_project_info_table_grows_a_row_per_field_present(self):
@@ -1080,13 +1084,20 @@ class ProjectInfoCostAndDateFieldsTests(TestCase):
 
 
 class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
-    """Contractor's Consultant, Advance Payment, EOT, Revised Amount, Project
-    Delay, and the "(Part)" contracted-sub-scope fields (amount/completion
-    revised baseline/forecasted completion/delay) — added to close the gap
-    against a reference report that tracks a contract's own advance payment,
+    """Contractor's Consultant, Advance Payment, EOT, and the "(Part)"
+    contracted-sub-scope fields (amount/completion revised baseline/
+    forecasted completion/delay) — added to close the gap against a
+    reference report that tracks a contract's own advance payment,
     extension of time, and a specific "Part" of the work alongside the whole
     project. advance_payment/eot_days already existed on Project but were
-    never actually wired into the report's project_info table."""
+    never actually wired into the report's project_info table.
+
+    A "Revised Amount" and "Project Delay" field were deliberately NOT
+    added here despite the reference report having them — Planex already
+    tracks that via the Variations (SVO/CVO) log: approved_value auto-syncs
+    from approved cost Variations and revised_finish from approved schedule
+    Variations (see apps.projects.services), so a second hand-typed figure
+    would just be a duplicate that can drift out of sync."""
 
     def setUp(self):
         self.company = Company.objects.create(name="Acme")
@@ -1097,7 +1108,6 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
         project = Project.objects.create(
             company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
             contractor_consultant="ECG Consulting", advance_payment=500_000, eot_days=45,
-            revised_amount=2_000_000, project_delay_days=-30,
             part_amount=300_000, part_completion_revised=datetime.date(2025, 1, 1),
             part_forecast_completion=datetime.date(2025, 6, 1), part_delay_days=-15)
         report = Report.objects.create(company=self.company, project=project, title="R")
@@ -1106,8 +1116,6 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
         self.assertEqual(ctx["project"]["contractor_consultant"], "ECG Consulting")
         self.assertEqual(ctx["project"]["advance_payment"], 500_000)
         self.assertEqual(ctx["project"]["eot_days"], 45)
-        self.assertEqual(ctx["project"]["revised_amount"], 2_000_000)
-        self.assertEqual(ctx["project"]["project_delay_days"], -30)
         self.assertEqual(ctx["project"]["part_amount"], 300_000)
         self.assertEqual(ctx["project"]["part_completion_revised"], datetime.date(2025, 1, 1))
         self.assertEqual(ctx["project"]["part_forecast_completion"], datetime.date(2025, 6, 1))
@@ -1127,16 +1135,15 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
             "project": {
                 "name": "Tower", "currency": "EGP",
                 "contractor_consultant": "ECG Consulting", "advance_payment": 500_000, "eot_days": 45,
-                "revised_amount": 2_000_000, "project_delay_days": -30,
                 "part_amount": 300_000, "part_completion_revised": datetime.date(2025, 1, 1),
                 "part_forecast_completion": datetime.date(2025, 6, 1), "part_delay_days": -15,
             },
             "arabic": False, "duration": {},
         }
         full_table = resolve_table("project_info", cfg, full_ctx, {"item": None})
-        self.assertEqual(len(full_table._cellvalues), empty_rows + 9)
+        self.assertEqual(len(full_table._cellvalues), empty_rows + 7)
 
-    def test_negative_delay_days_still_renders_a_row(self):
+    def test_negative_part_delay_days_still_renders_a_row(self):
         """A negative delay (ahead of schedule) is a real, meaningful value —
         it must not be dropped the way an unset/zero field is."""
         from .pdf_base import ensure_fonts
@@ -1145,12 +1152,11 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
         ensure_fonts()
         cfg = default_config()
         ctx = {
-            "project": {"name": "Tower", "currency": "EGP", "project_delay_days": -484, "part_delay_days": -808},
+            "project": {"name": "Tower", "currency": "EGP", "part_delay_days": -808},
             "arabic": False, "duration": {},
         }
         table = resolve_table("project_info", cfg, ctx, {"item": None})
         rendered = [row[1].getPlainText() for row in table._cellvalues]
-        self.assertTrue(any("-484" in v for v in rendered))
         self.assertTrue(any("-808" in v for v in rendered))
 
     def test_progress_as_on_reads_the_report_date(self):

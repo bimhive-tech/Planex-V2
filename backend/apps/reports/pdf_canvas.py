@@ -518,7 +518,6 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
             (labels["info_location"], p.get("location")),
             (labels["info_budget"], money(p.get("budget"))),
             (labels.get("info_contract_value", "Contract value"), money(p.get("contract_value"))),
-            (labels.get("info_revised_amount", "Revised Amount"), money(p.get("revised_amount"))),
             (labels.get("info_approved_value", "Approved value"), money(p.get("approved_value"))),
             (labels.get("info_forecast_cost", "Forecast cost"), money(p.get("forecast_cost"))),
             (labels.get("info_advance_payment", "Advance Payment"), money(p.get("advance_payment"))),
@@ -532,7 +531,6 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
             (labels.get("info_forecast", "Forecast finish"),
              _fmt_date(p.get("forecast_finish")) if p.get("forecast_finish") else ""),
             (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
-            (labels.get("info_project_delay", "Project Delay (Calendar Days)"), days(p.get("project_delay_days"))),
             (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p.get("size_sqm") else ""),
             # A contracted sub-scope some projects track alongside the whole
             # project — see Project.part_amount's docstring. Grouped at the

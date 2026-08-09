@@ -11,10 +11,15 @@ STAKEHOLDER_FIELDS = [
     "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
 ]
 DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
-CONTRACT_FIELDS = [
-    "advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost",
-    "revised_amount", "project_delay_days",
-]
+# revised_finish is derived (the latest approved schedule Variation's new
+# finish — see apps.projects.services.resync_revised_finish), not directly
+# editable: a manual edit would just get silently overwritten by the next
+# SVO action, which is more confusing than not offering the field at all.
+WRITABLE_DATE_FIELDS = [f for f in DATE_FIELDS if f != "revised_finish"]
+CONTRACT_FIELDS = ["advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost"]
+# approved_value is derived (contract_value + approved cost Variations — see
+# apps.projects.services.resync_approved_value), not directly editable.
+WRITABLE_CONTRACT_FIELDS = [f for f in CONTRACT_FIELDS if f != "approved_value"]
 # A contracted sub-scope some projects track alongside the whole project —
 # see Project.part_amount's docstring.
 PART_FIELDS = ["part_amount", "part_completion_revised", "part_forecast_completion", "part_delay_days"]
@@ -103,8 +108,8 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             "name", "code", "project_type", "priority", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS, *PART_FIELDS,
-            "size_sqm", "notes", "is_archived",
+            "budget", "currency", *STAKEHOLDER_FIELDS, *WRITABLE_DATE_FIELDS, *WRITABLE_CONTRACT_FIELDS,
+            *PART_FIELDS, "size_sqm", "notes", "is_archived",
         ]
 
     def validate_name(self, value):
