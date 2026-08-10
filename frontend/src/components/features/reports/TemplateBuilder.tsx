@@ -26,10 +26,14 @@ import styles from "./builder.module.css";
 
 type Mode = "design" | "layout" | "content";
 
+// "Content & Labels" no longer has a tab button — Report Configuration
+// (the canvas) is the one way to build a template now — but its mode/JSX
+// branch below stays reachable via ?engine=sections at render time: an
+// older template that only ever had section toggles (no real canvas
+// content) still renders through it, see views.py's _render_report_pdf.
 const MODES: { key: Mode; label: string }[] = [
   { key: "design", label: "Page Designer" },
   { key: "layout", label: "Report Configuration" },
-  { key: "content", label: "Content & Labels" },
 ];
 
 export function TemplateBuilder({ templateId }: { templateId: string }) {
