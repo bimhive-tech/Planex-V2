@@ -20,7 +20,7 @@ from apps.accounts.constants import Permission
 logger = logging.getLogger(__name__)
 
 from .access import accessible_scope_ids
-from .imports import import_schedule, import_workbook
+from .imports import import_workbook
 from .models import Activity, Project, ProjectScope
 from .serializers import (
     ActivitySerializer,
@@ -368,31 +368,6 @@ class ProjectImportView(APIView):
         except Exception:
             logger.exception("Failed to retain source workbook for project %s", project.id)
 
-        return Response(result)
-
-
-class ProjectScheduleImportView(APIView):
-    """Import a flat schedule export (Activity Name + Start + Finish columns —
-    the shape Primavera P6 exports to Excel) and set matching scopes' planned
-    dates. Only ever sets dates on existing scopes; never touches structure."""
-
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
-
-    def post(self, request, project_id):
-        project = _project(request, project_id)
-        _require(request, Permission.MANAGE_PROJECTS.value)
-        upload = request.FILES.get("file")
-        if not upload:
-            raise ValidationError({"file": "No file uploaded."})
-        if not upload.name.lower().endswith((".xlsx", ".xlsm")):
-            raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
-        if upload.size > MAX_IMPORT_BYTES:
-            raise ValidationError({"file": "File is too large (max 40 MB)."})
-        try:
-            result = import_schedule(project, upload)
-        except Exception as exc:  # parsing failures shouldn't 500
-            raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
         return Response(result)
 
 

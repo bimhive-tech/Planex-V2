@@ -617,6 +617,9 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
     if source == "detailed_progress":
         return _resolve_detailed_progress_table(cfg, ctx, styles)
 
+    if source == "activity_schedule":
+        return _resolve_activity_schedule_table(cfg, ctx, styles)
+
     if source == "critical_path_delays":
         rows_data = ctx.get("critical_path") or []
         if not rows_data:
@@ -650,6 +653,45 @@ def _resolve_detailed_progress_table(cfg, ctx, styles):
     labels = cfg["labels"]
     header = [labels.get("col_task", "Task")] + grid["columns"][:8]
     rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
+    return _data_table(cfg, styles, header, rows)
+
+
+def _resolve_activity_schedule_table(cfg, ctx, styles):
+    """Every activity's P6 duration/SPI/schedule-variance columns — computed
+    lazily and cached in ctx, the same pattern as the detailed-progress grid
+    above, since a real project can carry tens of thousands of activities and
+    most report renders never touch this table at all."""
+    rows_data = ctx.get("activity_schedule")
+    if rows_data is None:
+        report = ctx.get("_report")
+        project = getattr(report, "project", None)
+        if project is None:
+            return None
+        rows_data = list(project.activities.order_by("sort_order", "name").values(
+            "name", "baseline_duration", "original_duration", "actual_duration",
+            "remaining_duration", "schedule_performance_index", "schedule_variance",
+        ))
+        ctx["activity_schedule"] = rows_data
+    if not rows_data:
+        return None
+
+    labels = cfg["labels"]
+    header = [
+        labels.get("col_task", "Task"), labels.get("col_bl_duration", "BL Duration"),
+        labels.get("col_original_duration", "Original Duration"),
+        labels.get("col_actual_duration", "Actual Duration"),
+        labels.get("col_remaining_duration", "Remaining Duration"),
+        labels.get("col_spi", "SPI"), labels.get("col_schedule_variance", "Schedule Variance"),
+    ]
+
+    def n(v, digits=0):
+        return "" if v is None else f"{v:,.{digits}f}"
+
+    rows = [
+        [r["name"], n(r["baseline_duration"]), n(r["original_duration"]), n(r["actual_duration"]),
+         n(r["remaining_duration"]), n(r["schedule_performance_index"], 2), n(r["schedule_variance"])]
+        for r in rows_data
+    ]
     return _data_table(cfg, styles, header, rows)
 
 

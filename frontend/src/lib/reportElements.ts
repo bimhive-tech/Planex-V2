@@ -61,6 +61,7 @@ export const TABLE_SOURCES = [
   { value: "discipline_progress", label: "Progress by trade" },
   { value: "detailed_progress", label: "Detailed activities" },
   { value: "critical_path_delays", label: "Critical path delays" },
+  { value: "activity_schedule", label: "Activity schedule detail (durations, SPI, variance)" },
   { value: "progress_compare", label: "Plan vs actual" },
   { value: "milestones", label: "Milestones" },
   { value: "invoices", label: "Invoices" },

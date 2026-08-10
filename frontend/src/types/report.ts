@@ -83,6 +83,13 @@ export interface ReportData {
   hierarchy: ReportHierarchyRow[];
   discipline: ReportDisciplineRow[];
   critical_path: ReportCriticalPathRow[];
+  // Sample only (first 20) for the builder's live preview — the real PDF
+  // render reads the full, unbounded list lazily (see pdf_canvas.py).
+  activity_schedule: {
+    name: string; baseline_duration: number | null; original_duration: number | null;
+    actual_duration: number | null; remaining_duration: number | null;
+    schedule_performance_index: string | null; schedule_variance: string | null;
+  }[];
   // photos/attachments/logos carry a caption and an authed streaming `url`
   // (never the raw storage path — see the `data` action) — enough to count
   // and label a repeating page's real instances and show the actual image

@@ -49,12 +49,6 @@ export interface ProjectDetail {
   // not accepted on PATCH. Edit it via the Variations tab instead.
   approved_value: string | null;
   forecast_cost: string | null;
-  // A contracted sub-scope some projects track alongside the whole project —
-  // see the backend Project.part_amount field's docstring.
-  part_amount: string | null;
-  part_completion_revised: string | null;
-  part_forecast_completion: string | null;
-  part_delay_days: number | null;
   size_sqm: string | null;
   notes: string;
   is_archived: boolean;
@@ -174,6 +168,10 @@ export interface Scope {
   scope_type: ScopeType;
   scope_type_display: string;
   name: string;
+  // Human-readable display text from the source file's own WBS heading, when
+  // a code-driven P6 import could determine one — empty otherwise, in which
+  // case `name` is already human-readable and should be shown instead.
+  label: string;
   sort_order: number;
   planned_start: string | null;
   planned_finish: string | null;
@@ -199,9 +197,13 @@ export interface Activity {
   // Populated by a P6 schedule import; null for zone-tracker imports.
   budgeted_cost: string | null;
   earned_value_cost: string | null;
+  schedule_variance: string | null;
   total_float: number | null;
   original_duration: number | null;
   remaining_duration: number | null;
+  baseline_duration: number | null;
+  actual_duration: number | null;
+  schedule_performance_index: string | null;
   is_critical: boolean;
 }
 
@@ -230,4 +232,18 @@ export interface ZoneGrid {
   zone: { id: string; name: string };
   subzones: { id: string; name: string }[];
   rows: GridRow[];
+}
+
+// A specific contracted "Part" of the work, tracked in parallel with the
+// whole project — a log, so a project can have more than one entry over time.
+export interface PartScope {
+  id: string;
+  title: string;
+  amount: string | null;
+  start_date: string | null;
+  completion_revised: string | null;
+  forecast_completion: string | null;
+  notes: string;
+  delay_days: number | null;
+  created_at: string;
 }

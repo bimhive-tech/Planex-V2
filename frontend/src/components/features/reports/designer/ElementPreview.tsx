@@ -89,6 +89,13 @@ function realTableRows(source: unknown, data: ReportData | null | undefined, pin
     case "critical_path_delays":
       return data.critical_path.length
         ? data.critical_path.map((r) => [r.name, `${r.delay_days}d`]) : null;
+    case "activity_schedule":
+      return data.activity_schedule.length
+        ? data.activity_schedule.map((r) => [
+            r.name, r.original_duration ?? "—", r.actual_duration ?? "—",
+            r.schedule_performance_index ?? "—",
+          ].map(String))
+        : null;
     case "milestones":
       return data.milestones.length
         ? data.milestones.map((m) => [m.title, fmtDate(m.date)]) : null;

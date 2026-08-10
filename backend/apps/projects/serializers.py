@@ -20,9 +20,6 @@ CONTRACT_FIELDS = ["advance_payment", "eot_days", "contract_value", "approved_va
 # approved_value is derived (contract_value + approved cost Variations — see
 # apps.projects.services.resync_approved_value), not directly editable.
 WRITABLE_CONTRACT_FIELDS = [f for f in CONTRACT_FIELDS if f != "approved_value"]
-# A contracted sub-scope some projects track alongside the whole project —
-# see Project.part_amount's docstring.
-PART_FIELDS = ["part_amount", "part_completion_revised", "part_forecast_completion", "part_delay_days"]
 
 
 class ProjectListSerializer(serializers.ModelSerializer):
@@ -53,7 +50,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "project_type", "project_type_display",
             "priority", "priority_display", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS, *PART_FIELDS,
+            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
             "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
             "team_count", "open_submission_count", "created_at", "updated_at",
@@ -109,7 +106,7 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
         fields = [
             "name", "code", "project_type", "priority", "location", "description",
             "budget", "currency", *STAKEHOLDER_FIELDS, *WRITABLE_DATE_FIELDS, *WRITABLE_CONTRACT_FIELDS,
-            *PART_FIELDS, "size_sqm", "notes", "is_archived",
+            "size_sqm", "notes", "is_archived",
         ]
 
     def validate_name(self, value):
@@ -131,7 +128,7 @@ class ScopeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectScope
         fields = [
-            "id", "parent", "scope_type", "scope_type_display", "name", "sort_order",
+            "id", "parent", "scope_type", "scope_type_display", "name", "label", "sort_order",
             "planned_start", "planned_finish", "revised_finish",
             "discipline", "discipline_display",
         ]
@@ -156,7 +153,8 @@ class ActivitySerializer(serializers.ModelSerializer):
             "id", "scope", "name", "code", "unit", "progress_type", "progress_type_display",
             "planned_quantity", "weight", "progress_percent", "sort_order",
             "planned_start", "planned_finish", "budgeted_cost", "earned_value_cost",
-            "total_float", "original_duration", "remaining_duration", "is_critical",
+            "schedule_variance", "total_float", "original_duration", "remaining_duration",
+            "baseline_duration", "actual_duration", "schedule_performance_index", "is_critical",
         ]
 
 

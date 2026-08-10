@@ -19,11 +19,11 @@ import { ProjectTeam } from "./ProjectTeam";
 import { ProjectApprovals } from "./ProjectApprovals";
 import { ProjectDelays } from "./ProjectDelays";
 import { ProjectFinances } from "./ProjectFinances";
+import { ProjectMilestones } from "./ProjectMilestones";
 import { ProjectPartScope } from "./ProjectPartScope";
 import { ProjectSubmittals } from "./ProjectSubmittals";
 import { ProjectVariations } from "./ProjectVariations";
 import { ProjectReports } from "./ProjectReports";
-import { ProjectReportButton } from "./ProjectReportButton";
 import type { ProgressBreakdown, ProjectDetail, ProjectPerms } from "@/types/project";
 import styles from "./projectWorkspace.module.css";
 
@@ -33,7 +33,7 @@ export interface ProjectStats {
 }
 
 type Tab =
-  | "Overview" | "Schedule" | "Team" | "Areas of Concern" | "Finances" | "Part Scope"
+  | "Overview" | "Schedule" | "Milestones" | "Team" | "Areas of Concern" | "Finances" | "Part Scope"
   | "Submittals" | "Variations" | "Reports" | "Approvals";
 
 function Meta({ icon, children }: { icon: IconName; children: React.ReactNode }) {
@@ -54,7 +54,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
   const showApprovals = perms.review || perms.approve || perms.submit;
   const tabs: Tab[] = [
     "Overview",
-    ...(perms.viewSchedule ? (["Schedule"] as Tab[]) : []),
+    ...(perms.viewSchedule ? (["Schedule", "Milestones"] as Tab[]) : []),
     "Team",
     ...(perms.viewAreasOfConcern ? (["Areas of Concern"] as Tab[]) : []),
     ...(perms.viewFinances ? (["Finances", "Part Scope"] as Tab[]) : []),
@@ -79,7 +79,6 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
         </Link>
         <div className={styles.topActions}>
           {perms.exportReports && <P6ExportButton projectId={project.id} />}
-          <ProjectReportButton projectId={project.id} />
           {canManage && (
             <Button variant="secondary" size="sm" leadingIcon={<Icon name="edit" size={15} />}
               onClick={() => setEditOpen(true)}>
@@ -117,10 +116,14 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
       </nav>
 
       <div className={styles.content}>
-        {tab === "Overview" && <ProjectOverview project={project} stats={stats} canManage={canManage} />}
+        {tab === "Overview" && (
+          <ProjectOverview project={project} stats={stats} canManage={canManage}
+            onViewMilestones={perms.viewSchedule ? () => setTab("Milestones") : undefined} />
+        )}
         {tab === "Schedule" && (
           <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
         )}
+        {tab === "Milestones" && <ProjectMilestones projectId={project.id} canManage={canManage} />}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
         {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={perms.manageAreasOfConcern} />}
         {tab === "Finances" && <ProjectFinances projectId={project.id} canManage={perms.manageFinances} />}

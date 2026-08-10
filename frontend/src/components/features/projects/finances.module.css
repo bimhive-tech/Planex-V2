@@ -72,6 +72,28 @@
   letter-spacing: 0;
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.search {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+}
+.search:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 /* Cash-flow grid */
 .tableWrap {
   overflow-x: auto;

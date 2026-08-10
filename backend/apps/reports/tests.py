@@ -347,6 +347,11 @@ def _full_ctx():
         {"name": "Zone A", "planned_finish": datetime.date(2026, 6, 1),
          "forecast_finish": datetime.date(2026, 6, 20), "delay_days": 19},
     ]
+    ctx["activity_schedule"] = [
+        {"name": "Install cladding", "baseline_duration": 10, "original_duration": 10,
+         "actual_duration": 12, "remaining_duration": 0, "schedule_performance_index": 0.9,
+         "schedule_variance": -500.0},
+    ]
     ctx["gantt"] = [
         {"name": "Zone A", "level": 0, "start": datetime.date(2026, 1, 1), "finish": datetime.date(2026, 6, 1),
          "revised_finish": None, "progress": 60.0},
@@ -373,7 +378,7 @@ class ResolveTableTests(SimpleTestCase):
     SOURCES_WITH_DATA = [
         "project_info", "zone_progress", "hierarchy_progress", "discipline_progress",
         "progress_compare", "milestones", "invoices", "submittals", "delays",
-        "critical_path_delays",
+        "critical_path_delays", "activity_schedule",
     ]
 
     def test_every_source_with_data_returns_a_table(self):
@@ -395,6 +400,23 @@ class ResolveTableTests(SimpleTestCase):
         # zone_grids -> None, not an exception.
         cfg = default_config()
         self.assertIsNone(resolve_table("detailed_progress", cfg, _full_ctx(), {"item": None}))
+
+    def test_activity_schedule_without_a_real_project_returns_none(self):
+        # Same lazy pattern as detailed_progress — no ctx["_report"], no crash.
+        ctx = _sample_ctx()  # activity_schedule not pre-populated here
+        self.assertIsNone(resolve_table("activity_schedule", default_config(), ctx, {"item": None}))
+
+    def test_activity_schedule_formats_durations_and_spi(self):
+        cfg = default_config()
+        table = resolve_table("activity_schedule", cfg, _full_ctx(), {"item": None})
+        self.assertIsNotNone(table)
+        rendered = [[cell.getPlainText() if hasattr(cell, "getPlainText") else str(cell) for cell in row]
+                    for row in table._cellvalues]
+        body_row = rendered[1]
+        self.assertEqual(body_row[0], "Install cladding")
+        self.assertEqual(body_row[3], "12")  # actual duration
+        self.assertEqual(body_row[5], "0.90")  # SPI to 2dp
+        self.assertEqual(body_row[6], "-500")  # schedule variance
 
     def test_unknown_source_returns_none(self):
         self.assertIsNone(resolve_table("not_a_real_source", default_config(), _full_ctx(), {"item": None}))
@@ -1104,12 +1126,14 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
 
     def test_context_carries_the_new_project_fields(self):
         from .services import build_report_context
+        from apps.projects.models import PartScope
 
         project = Project.objects.create(
             company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
-            contractor_consultant="ECG Consulting", advance_payment=500_000, eot_days=45,
-            part_amount=300_000, part_completion_revised=datetime.date(2025, 1, 1),
-            part_forecast_completion=datetime.date(2025, 6, 1), part_delay_days=-15)
+            contractor_consultant="ECG Consulting", advance_payment=500_000, eot_days=45)
+        PartScope.objects.create(
+            company=self.company, project=project, title="Elevator Package", amount=300_000,
+            completion_revised=datetime.date(2025, 1, 1), forecast_completion=datetime.date(2025, 6, 1))
         report = Report.objects.create(company=self.company, project=project, title="R")
         ctx = build_report_context(report)
 
@@ -1119,7 +1143,9 @@ class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
         self.assertEqual(ctx["project"]["part_amount"], 300_000)
         self.assertEqual(ctx["project"]["part_completion_revised"], datetime.date(2025, 1, 1))
         self.assertEqual(ctx["project"]["part_forecast_completion"], datetime.date(2025, 6, 1))
-        self.assertEqual(ctx["project"]["part_delay_days"], -15)
+        # delay_days is now derived (forecast - revised baseline), not a
+        # manually-typed figure — 2025-06-01 minus 2025-01-01.
+        self.assertEqual(ctx["project"]["part_delay_days"], 151)
 
     def test_project_info_table_grows_a_row_per_field_present(self):
         from .pdf_base import ensure_fonts

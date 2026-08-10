@@ -6,7 +6,6 @@ from .structure_views import (
     ActivityDetailView,
     ActivityListCreateView,
     ProjectImportView,
-    ProjectScheduleImportView,
     ProjectSnapshotsView,
     ProjectStructureView,
     ScopeTreeView,
@@ -26,6 +25,8 @@ from .finance_views import (
     InvoiceImportView,
     InvoiceListView,
 )
+from .cost_performance_views import ProjectActivityScheduleListView, ProjectCostPerformanceView
+from .part_scope_views import PartScopeDetailView, PartScopeListView
 from .submittal_views import (
     SubmittalDetailView,
     SubmittalFileView,
@@ -67,7 +68,6 @@ urlpatterns = [
     path("projects/<uuid:project_id>/scope-tree/", ScopeTreeView.as_view(), name="project-scope-tree"),
     path("projects/<uuid:project_id>/zones/<uuid:zone_id>/grid/", ProjectZoneGridView.as_view(), name="project-zone-grid"),
     path("projects/<uuid:project_id>/import/", ProjectImportView.as_view(), name="project-import"),
-    path("projects/<uuid:project_id>/schedule-import/", ProjectScheduleImportView.as_view(), name="project-schedule-import"),
     path("projects/<uuid:project_id>/snapshots/", ProjectSnapshotsView.as_view(), name="project-snapshots"),
     path("projects/<uuid:project_id>/export/p6/", ProjectP6ExportView.as_view(), name="project-p6-export"),
     path("projects/<uuid:project_id>/export/p6/prepare/", ProjectP6PrepareView.as_view(), name="project-p6-prepare"),
@@ -83,6 +83,10 @@ urlpatterns = [
     path("projects/<uuid:project_id>/variations/", VariationListView.as_view(), name="project-variations"),
     path("projects/<uuid:project_id>/variations/<uuid:variation_id>/", VariationDetailView.as_view(), name="project-variation"),
     path("projects/<uuid:project_id>/variations/<uuid:variation_id>/decision/", VariationDecisionView.as_view(), name="project-variation-decision"),
+    path("projects/<uuid:project_id>/cost-performance/", ProjectCostPerformanceView.as_view(), name="project-cost-performance"),
+    path("projects/<uuid:project_id>/activity-schedule/", ProjectActivityScheduleListView.as_view(), name="project-activity-schedule"),
+    path("projects/<uuid:project_id>/part-scopes/", PartScopeListView.as_view(), name="project-part-scopes"),
+    path("projects/<uuid:project_id>/part-scopes/<uuid:entry_id>/", PartScopeDetailView.as_view(), name="project-part-scope"),
     path("projects/<uuid:project_id>/cashflow/", CashFlowView.as_view(), name="project-cashflow"),
     path("projects/<uuid:project_id>/cashflow/import/", CashFlowImportView.as_view(), name="project-cashflow-import"),
     path("projects/<uuid:project_id>/invoices/", InvoiceListView.as_view(), name="project-invoices"),

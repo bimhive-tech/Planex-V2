@@ -3,13 +3,19 @@
 Preferred path: return the project's ORIGINAL imported workbook unchanged except
 for its progress column(s), refreshed to Planex's current accepted progress.
 Every other cell, sheet, formula, and macro is left byte-identical — so the
-export matches the reference exactly. Two source shapes are handled:
+export matches the reference exactly. Two source shapes are handled, tried in
+this order (exact match first, whenever it's usable at all — see
+refresh_source_workbook for why the order matters):
 
-* The real P6 schedule template (p6_schedule_import.py) — rows are matched by
-  exact Activity ID, which we kept as Activity.code at import time, so refresh
-  just updates each leaf row's "Activity % Complete" cell.
-* The legacy 'FOR (P6)' sheet (p6_import.py) — Activity IDs aren't stored on our
-  side, so rows are matched by (building code + normalised task name) instead.
+* The real P6 schedule template (p6_schedule_import.py / p6_id_schedule_import.py)
+  — rows are matched by exact Activity ID, which we kept as Activity.code at
+  import time, so refresh just updates each leaf row's "Activity % Complete"
+  cell. Tried first: unambiguous whenever the sheet has this header shape,
+  regardless of what the sheet itself is named.
+* The legacy 'FOR (P6)' outline sheet (p6_import.py, no Start/Finish columns
+  so the above never matches it) — rows are matched by (building code +
+  normalised task name) instead, a fuzzier fallback for a shape that doesn't
+  give us anything more precise.
 
 Either way, unmatched rows keep their original value.
 
@@ -136,6 +142,24 @@ def refresh_source_workbook(project) -> tuple[bytes, str] | None:
     ext = "xlsm" if is_xlsm else "xlsx"
     wb = openpyxl.load_workbook(BytesIO(raw), keep_vba=is_xlsm)
 
+    # Exact-Activity-ID match first: it's unambiguous whenever the sheet has
+    # the real P6 header shape (Activity ID/Name/Start/Finish/% Complete),
+    # true for anything p6_schedule_import.py/p6_id_schedule_import.py can
+    # parse — which includes files whose sheet happens to be literally named
+    # "p6", so this must run before the name-based fuzzy path below, or it
+    # never gets a chance to. Confirmed: a real Planex-Code-scheme export's
+    # sheet is named "p6", which used to short-circuit straight into the
+    # fuzzy matcher below — and that matcher's "building code" comes from a
+    # regex over raw text (WBS banner rows / literal scope names) tuned for
+    # the OLD raw-Arabic-heading shape ("A6", "A15", ...); against the new
+    # scheme's own scope names ("PH1", "Z(A)", "Building 6") it either
+    # collapses unrelated buildings into one bucket or matches nothing at
+    # all, silently leaving every row's % unchanged either way.
+    if _refresh_p6_schedule(wb, project):
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue(), f"{project.name} - P6.{ext}"
+
     ws = _find_p6_sheet(wb)
     if ws is not None:
         lookup = _progress_lookup(project)
@@ -167,11 +191,6 @@ def refresh_source_workbook(project) -> tuple[bytes, str] | None:
         buf = BytesIO()
         wb.save(buf)
         return buf.getvalue(), f"{project.name} - FOR (P6).{ext}"
-
-    if _refresh_p6_schedule(wb, project):
-        buf = BytesIO()
-        wb.save(buf)
-        return buf.getvalue(), f"{project.name} - P6.{ext}"
 
     return None
 

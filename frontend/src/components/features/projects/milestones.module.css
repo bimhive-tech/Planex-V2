@@ -22,6 +22,33 @@
   color: var(--text-secondary);
 }
 
+.headTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pctChip {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success-text);
+  background: var(--success-fill);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+}
+
+.viewAll {
+  width: 100%;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  padding: var(--space-2) 0 0;
+}
+.viewAll:hover {
+  text-decoration: underline;
+}
+
 .list {
   display: flex;
   flex-direction: column;

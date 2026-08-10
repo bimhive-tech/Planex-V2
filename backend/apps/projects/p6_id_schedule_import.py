@@ -36,8 +36,17 @@ would break the moment a different project's legend uses a different one
 (the legend sheet is set up per-project, so it can vary). Matching by
 content instead of position tolerates any combination without needing to
 special-case each one.
+
+Key Milestones (project start/end, handover dates, ...) carry NO Planex
+Code at all in the first real export — see _milestone_group for the
+indentation-based fallback used until the team adds one. The agreed
+convention for when they do: a milestone row's Planex Code has "MS" as its
+2nd segment, e.g. "MN(6)-MS-1" for a project-wide milestone, or
+"MN(6)-MS-PH1-Z(A)-Building 15-1" to tie it to that building (segments
+after "MS" follow the same placeholder-dropping rule as segment_path). See
+is_milestone_code / milestone_scope_path.
 """
-from .p6_schedule_import import _int, _locate_header, _num, _parse_date, _to_pct
+from .p6_schedule_import import _int, _leading_spaces, _locate_header, _num, _parse_date, _to_pct, _to_pct_optional
 
 # Bare tag words that mean "this legend level isn't used on this row" when
 # they appear with no distinguishing suffix (contrast "CON" alone vs "PH1").
@@ -62,6 +71,29 @@ def segment_path(code: str) -> list:
     return [p for p in middle if p and p != "0" and p.lower() not in _PLACEHOLDER_WORDS]
 
 
+def is_milestone_code(code: str) -> bool:
+    """True when a Planex Code's own 2nd segment (right after the project
+    code) is the "MS" tag, e.g. "MN(6)-MS-1" (project-wide) or
+    "MN(6)-MS-PH1-Z(A)-Building 15-1" (tied to that building) — agreed with
+    the team as the convention for coding the file's Key Milestones branch,
+    which otherwise carries no Planex Code at all (see module docstring).
+    Checked before segment_path() so these rows route to the Milestones
+    panel instead of becoming a bogus "MS" branch in the scope tree."""
+    if not isinstance(code, str):
+        return False
+    parts = [p.strip() for p in code.strip().split("-")]
+    return len(parts) >= 2 and parts[1].strip().lower() == "ms"
+
+
+def milestone_scope_path(code: str) -> tuple:
+    """The zone/building segments (if any) between the "MS" tag and the
+    trailing differentiator, e.g. ("PH1", "Z(A)", "Building 15") for a
+    milestone tied to one building, or () for a project-wide one."""
+    parts = [p.strip() for p in code.strip().split("-")]
+    middle = parts[2:-1]
+    return tuple(p for p in middle if p and p != "0" and p.lower() not in _PLACEHOLDER_WORDS)
+
+
 def _looks_like_planex_code(rows, code_col) -> bool:
     seen = hits = 0
     for row in rows:
@@ -77,8 +109,36 @@ def _looks_like_planex_code(rows, code_col) -> bool:
 
 
 def _new_group(name: str) -> dict:
-    return {"name": name[:180] or "Uncategorized", "children": [], "activities": [],
+    return {"name": name[:180] or "Uncategorized", "label": None, "children": [], "activities": [],
             "start": None, "finish": None, "pct": None, "schedule_pct": None}
+
+
+def _label_ancestors(by_path, path, heading_stack):
+    """Best-effort human-readable label for each ancestor node in `path`,
+    read from the file's own WBS heading text (e.g. "المرحلة الاولي (75
+    عمارة)" for "PH1") via the indentation stack active at this row.
+
+    Matched from the deepest level backward (path[-1] with heading_stack[-1],
+    path[-2] with heading_stack[-2], ...): a placeholder segment dropped by
+    segment_path only ever shortens the FRONT of the code path relative to
+    the heading stack (the project code itself, and any bare tag wrapper
+    like "CON" that still has its own WBS heading row but no distinguishing
+    code) — confirmed against the real file, where the "مرحلة التنفيذ"
+    wrapper heading has no code counterpart but sits at the front, not
+    between two coded levels. A leftover heading at the front is simply
+    unused; nothing here assumes every heading has a matching code segment.
+
+    Purely cosmetic — sets `label`, never touches `name` (the matching key),
+    so a heading text that changes or is missing on a later import cannot
+    affect re-import correctness."""
+    labels = [text for _, text in heading_stack]
+    for i in range(1, len(path) + 1):
+        node = by_path.get(path[:i])
+        if node is None or node.get("label"):
+            continue
+        idx = len(labels) - (len(path) - i) - 1
+        if 0 <= idx < len(labels):
+            node["label"] = labels[idx][:180]
 
 
 def _rollup_dates(node):
@@ -142,7 +202,7 @@ def _milestone_group(rows, id_c, name_c, start_c, finish_c, pct_c):
                     group = _new_group("Key Milestones")
                 group["activities"].append({
                     "code": a_str.strip()[:60], "name": name.strip()[:200],
-                    "pct": _to_pct(pct), "start": start, "finish": finish,
+                    "pct": _to_pct(pct), "pct_raw": _to_pct_optional(pct), "start": start, "finish": finish,
                     "budget": None, "earned_value": None, "float": None,
                     "duration": None, "remaining": None,
                 })
@@ -191,6 +251,10 @@ def parse_id_schedule_sheets(wb):
         if cost_c is None:
             cost_c = cols.get("budgeted total cost")
         ev_c = cols.get("earned value cost")
+        variance_c = cols.get("schedule variance")
+        bl_dur_c = cols.get("bl project duration")
+        actual_dur_c = cols.get("actual duration")
+        spi_c = cols.get("schedule performance index")
 
         by_path: dict[tuple, dict] = {}
         roots: list[dict] = []
@@ -212,43 +276,85 @@ def parse_id_schedule_sheets(wb):
             return by_path[path]
 
         matched_any = False
+        coded_milestones: list[dict] = []
+        # Tracks the WBS heading text currently "open" at each indentation
+        # depth, purely to source human-readable labels (see _label_ancestors)
+        # — independent of the code-driven tree being built below it.
+        heading_stack: list[tuple[int, str]] = []
         for row in data_rows:
             raw_code = row[code_c] if code_c < len(row) else None
             act_id = row[id_c] if id_c < len(row) else None
             name = row[name_c] if name_c < len(row) else None
+            if not isinstance(act_id, str) or not act_id.strip():
+                continue
+
+            if not (isinstance(name, str) and name.strip()):
+                # A WBS heading row (no Activity Name) — just update the label
+                # stack; it carries no Planex Code of its own either way.
+                depth = _leading_spaces(act_id)
+                while heading_stack and heading_stack[-1][0] >= depth:
+                    heading_stack.pop()
+                heading_stack.append((depth, act_id.strip()))
+                continue
+
             if not isinstance(raw_code, str) or not raw_code.strip():
                 continue
-            if not isinstance(name, str) or not name.strip():
-                continue
-            path = tuple(segment_path(raw_code))
-            if not path:
-                continue
-            matched_any = True
 
             start = _parse_date(row[start_c]) if start_c < len(row) else None
             finish = _parse_date(row[finish_c]) if finish_c < len(row) else None
             pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
             code = act_id.strip()[:60] if isinstance(act_id, str) and act_id.strip() else raw_code.strip()[:60]
+
+            if is_milestone_code(raw_code):
+                # Coded like the rest of the sheet ("MN(6)-MS-..."), rather
+                # than the indentation-only fallback below — carries its own
+                # zone/building path (if any) instead of relying on a raw-text
+                # heading match, so it resolves to a real ProjectScope later.
+                coded_milestones.append({
+                    "code": code, "name": name.strip()[:200], "pct": _to_pct(pct),
+                    "pct_raw": _to_pct_optional(pct),
+                    "start": start, "finish": finish, "budget": None, "earned_value": None,
+                    "float": None, "duration": None, "remaining": None,
+                    "scope_path": milestone_scope_path(raw_code),
+                })
+                continue
+
+            path = tuple(segment_path(raw_code))
+            if not path:
+                continue
+            matched_any = True
+
             task = {
                 "code": code, "name": name.strip()[:200],
                 "pct": _to_pct(pct), "start": start, "finish": finish,
                 "budget": _num(row, cost_c), "earned_value": _num(row, ev_c),
                 "float": _int(row, float_c), "duration": _int(row, dur_c),
                 "remaining": _int(row, rem_c),
+                "schedule_variance": _num(row, variance_c),
+                "baseline_duration": _int(row, bl_dur_c), "actual_duration": _int(row, actual_dur_c),
+                "spi": _num(row, spi_c),
             }
             node_for(path)["activities"].append(task)
+            _label_ancestors(by_path, path, heading_stack)
 
         if not matched_any:
             continue
 
-        # The Key Milestones WBS branch carries no Planex Code at all (see
-        # _milestone_group's docstring) — the code-driven walk above never
-        # sees it, so it's collected separately by indentation and appended
-        # here; build_from_p6_schedule's existing milestone extraction then
-        # routes it to the Milestones panel like it always has.
-        milestones = _milestone_group(data_rows, id_c, name_c, start_c, finish_c, pct_c)
-        if milestones:
-            roots.append(milestones)
+        if coded_milestones:
+            # The team has adopted an "MS"-tagged code for Key Milestones —
+            # prefer it over the indentation fallback below, since it's
+            # explicit and gives each milestone a resolvable scope path.
+            group = _new_group("Key Milestones")
+            group["activities"] = coded_milestones
+            roots.append(group)
+        else:
+            # The Key Milestones WBS branch carries no Planex Code at all yet
+            # (see module docstring) — collected separately by indentation;
+            # build_from_p6_schedule's existing milestone extraction then
+            # routes it to the Milestones panel like it always has.
+            milestones = _milestone_group(data_rows, id_c, name_c, start_c, finish_c, pct_c)
+            if milestones:
+                roots.append(milestones)
 
         for root in roots:
             _rollup_dates(root)

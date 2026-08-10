@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
-from .imports import _guess_discipline, import_schedule, parse_sheet
+from .imports import _guess_discipline, parse_sheet
 from .models import Project
 
 
@@ -81,81 +81,6 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(_guess_discipline("LC"), "")
         self.assertEqual(_guess_discipline("Snag list"), "")
 
-
-class ScheduleImportTests(TestCase):
-    """`import_schedule` matches a flat Activity Name/Start/Finish export (the
-    shape Primavera P6 exports to Excel) to existing scopes by name and sets
-    their dates — never touches structure."""
-
-    def _workbook(self, header, rows):
-        import io
-
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(header)
-        for row in rows:
-            ws.append(row)
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        return buf
-
-    def test_matches_by_name_and_sets_dates(self):
-        import datetime
-
-        from apps.accounts.models import Company
-        from .models import ProjectScope
-
-        company = Company.objects.create(name="Acme")
-        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
-        zone = ProjectScope.objects.create(company=company, project=project, scope_type="zone", name="ZONE (A)")
-
-        wb = self._workbook(
-            ["Activity Name", "Start", "Finish"],
-            [["ZONE (A)", datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)],
-             ["No Match Here", datetime.date(2026, 1, 1), datetime.date(2026, 2, 1)]],
-        )
-        result = import_schedule(project, wb)
-        self.assertEqual(result, {"matched": 1, "unmatched": 1, "total_rows": 2})
-        zone.refresh_from_db()
-        self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
-        self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
-
-    def test_finds_schedule_in_later_sheet_with_offset_header(self):
-        # Mirrors the real tracker: sheet 1 is a progress matrix (no dates),
-        # the schedule lives in a later 'FOR (P6)' sheet whose header isn't row 1.
-        import datetime
-        import io
-
-        import openpyxl
-
-        from apps.accounts.models import Company
-        from .models import ProjectScope
-
-        company = Company.objects.create(name="Acme")
-        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
-        zone = ProjectScope.objects.create(company=company, project=project, scope_type="zone", name="ZONE (A)")
-
-        wb = openpyxl.Workbook()
-        matrix = wb.active
-        matrix.title = "ZONE (A)"
-        matrix.append(["Task", "Subzone 1", "Subzone 2"])  # a matrix, no Start/Finish
-        matrix.append(["Plaster", 0.5, 0.8])
-        p6 = wb.create_sheet("FOR (P6)")
-        p6.append(["Some title row"])                       # header not at row 1
-        p6.append(["Activity ID", "Activity Name", "Start", "Finish"])
-        p6.append(["A1", "ZONE (A)", datetime.date(2026, 1, 1), datetime.date(2026, 6, 1)])
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-
-        result = import_schedule(project, buf)
-        self.assertEqual(result["matched"], 1)
-        zone.refresh_from_db()
-        self.assertEqual(zone.planned_start, datetime.date(2026, 1, 1))
-        self.assertEqual(zone.planned_finish, datetime.date(2026, 6, 1))
 
 class P6ImportTests(TestCase):
     """`import_workbook` falls back to a Primavera FOR (P6) sheet (WBS via row
@@ -616,6 +541,60 @@ class P6ScheduleImportTests(TestCase):
         else:
             self.fail("CN.02 row not found in refreshed workbook")
 
+    def test_export_uses_exact_id_match_even_when_sheet_is_named_p6(self):
+        """A real Planex Code export's own sheet is literally named "p6" — which
+        used to route export straight into the OLDER building+name fuzzy
+        matcher (meant for the legacy outline sheet) instead of the exact
+        Activity.code match, even though this sheet has everything the exact
+        match needs. That matcher's "building code" comes from a regex over
+        raw text tuned for the old scheme ("A6", "A15", ...); against two
+        same-named tasks in different buildings it either collapses them
+        into one bucket or matches nothing, silently leaving stale values.
+        Exact-ID match must be tried first and get this right regardless."""
+        import io
+
+        import openpyxl
+        from django.core.files.base import ContentFile
+
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from . import exports
+
+        HEADER = ["Planex Code", "Activity ID", "Activity Name", "Original Duration", "Start", "Finish",
+                  "Activity % Complete", "Budgeted Total Cost", "Earned Value Cost"]
+        d = __import__("datetime").date
+        rows = [
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 1-Internal Finishes-1", "MN6-A1-IF-1", "بطانة",
+             1, d(2026, 1, 1), d(2026, 1, 2), 0.2, 1000, 200],
+            ["MN(6)-CON-0-0-PH1-Z(B)-0-Building 5-Internal Finishes-1", "MN6-B5-IF-1", "بطانة",
+             1, d(2026, 1, 1), d(2026, 1, 2), 0.8, 1000, 800],
+        ]
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "p6"  # the real export's own sheet name
+        ws.append(HEADER)
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        raw = buf.getvalue()
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        project.source_workbook.save("planex_code.xlsx", ContentFile(raw), save=True)
+        import_workbook(project, io.BytesIO(raw), source="planex_code.xlsx")
+
+        a1 = project.activities.get(code="MN6-A1-IF-1")
+        a1.progress_percent = 55
+        a1.save(update_fields=["progress_percent"])
+
+        content, _ = exports.refresh_source_workbook(project)
+        wb2 = openpyxl.load_workbook(io.BytesIO(content))
+        ws2 = wb2["p6"]
+        by_id = {row[1]: row[6] for row in ws2.iter_rows(min_row=2, values_only=True)}
+        self.assertAlmostEqual(by_id["MN6-A1-IF-1"], 0.55)
+        self.assertAlmostEqual(by_id["MN6-B5-IF-1"], 0.80)
+
 
 STRONG_PW = "Str0ngPassw0rd!"
 
@@ -708,31 +687,19 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["approved_value"], "1000000.00")
         self.assertEqual(body["forecast_cost"], "1100000.00")
 
-    def test_contractor_consultant_and_part_scope_fields_round_trip(self):
-        """contractor_consultant and the "(Part)" contracted-sub-scope fields —
-        added to close the gap against a reference report that tracks a
-        contract's own 4th-party consultant and a specific contracted "Part"
-        of the work (its own amount/baseline/forecast/delay) alongside the
-        whole project. (A "revised contract amount" and "project delay"
+    def test_contractor_consultant_round_trips(self):
+        """A contract's own 4th-party consultant — closes a gap against a
+        reference report. (A "revised contract amount" and "project delay"
         field were deliberately not added here — see approved_value/
-        revised_finish's auto-sync from Variations below.)"""
+        revised_finish's auto-sync from Variations below. Part Scope has its
+        own dedicated log/endpoints — see PartScopeApiTests.)"""
         p = Project.objects.create(company=self.company_a, name="Tower", project_type="commercial")
         self.login("admin@acme.com")
         resp = self.client.patch(
-            f"/api/projects/{p.id}/",
-            {
-                "contractor_consultant": "ECG Consulting",
-                "part_amount": "300000.00", "part_completion_revised": "2025-01-01",
-                "part_forecast_completion": "2025-06-01", "part_delay_days": -15,
-            },
+            f"/api/projects/{p.id}/", {"contractor_consultant": "ECG Consulting"},
             content_type="application/json")
         self.assertEqual(resp.status_code, 200, resp.content)
-        body = resp.json()
-        self.assertEqual(body["contractor_consultant"], "ECG Consulting")
-        self.assertEqual(body["part_amount"], "300000.00")
-        self.assertEqual(body["part_completion_revised"], "2025-01-01")
-        self.assertEqual(body["part_forecast_completion"], "2025-06-01")
-        self.assertEqual(body["part_delay_days"], -15)
+        self.assertEqual(resp.json()["contractor_consultant"], "ECG Consulting")
 
     def test_approved_value_is_read_only_and_ignores_direct_edits(self):
         """approved_value is derived (contract_value + approved cost
@@ -1326,6 +1293,71 @@ class FinanceSubmittalApiTests(TestCase):
                                content_type="application/json")
         self.assertEqual(resp.status_code, 403)  # needs MANAGE_FINANCES
 
+    def test_cost_performance_rolls_up_activity_cost_columns(self):
+        """Budgeted Total Cost / Earned Value Cost / Schedule Variance are
+        imported onto every Activity but nothing else reads them — this
+        endpoint is where they're surfaced, as a project-wide sum."""
+        from .models import ProjectScope, Activity
+
+        scope = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="phase", name="Phase 1")
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=scope, name="A1",
+            budgeted_cost=1000, earned_value_cost=900, schedule_variance=-50)
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=scope, name="A2",
+            budgeted_cost=500, earned_value_cost=600, schedule_variance=25)
+
+        self.login("fv@acme.com")
+        resp = self.client.get(f"/api/projects/{self.project.id}/cost-performance/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(float(data["budgeted_total_cost"]), 1500)
+        self.assertEqual(float(data["earned_value_cost"]), 1500)
+        self.assertEqual(float(data["schedule_variance"]), -25)
+
+    def test_cost_performance_hidden_without_finances_perm(self):
+        self.login("pl@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/cost-performance/").status_code, 403)
+
+    def test_activity_schedule_detail_is_paginated_and_searchable(self):
+        from .models import ProjectScope, Activity
+
+        scope = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="phase", name="Phase 1")
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=scope, name="Install cladding",
+            budgeted_cost=1000, baseline_duration=10, actual_duration=12, schedule_performance_index="0.900")
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=scope, name="Paint walls", budgeted_cost=200)
+
+        self.login("fv@acme.com")
+        resp = self.client.get(f"/api/projects/{self.project.id}/activity-schedule/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["count"], 2)
+        self.assertIn("results", body)
+
+        resp = self.client.get(f"/api/projects/{self.project.id}/activity-schedule/?search=cladding")
+        body = resp.json()
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(body["results"][0]["name"], "Install cladding")
+        self.assertEqual(body["results"][0]["actual_duration"], 12)
+        self.assertAlmostEqual(float(body["results"][0]["schedule_performance_index"]), 0.9)
+
+    def test_activity_schedule_detail_hidden_without_finances_perm(self):
+        self.login("pl@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/activity-schedule/").status_code, 403)
+
+    def test_cost_performance_empty_project_returns_nulls_not_zero(self):
+        """No activities with cost data (e.g. a zone-tracker import) must
+        report null, not a misleading 0 total."""
+        self.login("fv@acme.com")
+        resp = self.client.get(f"/api/projects/{self.project.id}/cost-performance/")
+        data = resp.json()
+        self.assertIsNone(data["budgeted_total_cost"])
+        self.assertIsNone(data["earned_value_cost"])
+
     def test_cashflow_bulk_replace_normalises_month(self):
         self.login("fa@acme.com")
         resp = self.client.put(f"/api/projects/{self.project.id}/cashflow/",
@@ -1519,6 +1551,78 @@ class FinanceSubmittalApiTests(TestCase):
         # A member without the submittals perm is denied.
         self.login("fv@acme.com")
         self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/submittals/").status_code, 403)
+
+
+class PartScopeApiTests(TestCase):
+    """Part Scope — a log of a project's contracted "Part" entries, gated
+    the same as the rest of Finances (VIEW_FINANCES / MANAGE_FINANCES)."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        admin_role = Role.objects.create(
+            company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.admin = User.objects.create_user(email="ps-admin@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.admin, role=admin_role)
+
+        fin_role = Role.objects.create(
+            company=self.company, name="FinViewer",
+            permissions=[Permission.VIEW_PROJECTS.value, Permission.VIEW_FINANCES.value])
+        self.fin_viewer = User.objects.create_user(email="ps-fv@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.fin_viewer, role=fin_role)
+
+        plain_role = Role.objects.create(
+            company=self.company, name="Plain", permissions=[Permission.VIEW_PROJECTS.value])
+        self.plain = User.objects.create_user(email="ps-pl@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.plain, role=plain_role)
+
+        self.project = Project.objects.create(company=self.company, name="Tower", project_type="commercial")
+
+    def login(self, email):
+        resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_create_list_update_delete(self):
+        self.login("ps-admin@acme.com")
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/part-scopes/",
+            {"title": "Elevator Package", "amount": "300000.00", "start_date": "2025-01-01",
+             "completion_revised": "2025-06-01", "forecast_completion": "2025-07-16"},
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        body = resp.json()
+        self.assertEqual(body["title"], "Elevator Package")
+        self.assertEqual(body["delay_days"], 45)  # 2025-07-16 minus 2025-06-01
+        entry_id = body["id"]
+
+        listed = self.client.get(f"/api/projects/{self.project.id}/part-scopes/").json()
+        self.assertEqual(len(listed), 1)
+
+        resp = self.client.patch(
+            f"/api/projects/{self.project.id}/part-scopes/{entry_id}/",
+            {"amount": "350000.00"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["amount"], "350000.00")
+
+        resp = self.client.delete(f"/api/projects/{self.project.id}/part-scopes/{entry_id}/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(len(self.client.get(f"/api/projects/{self.project.id}/part-scopes/").json()), 0)
+
+    def test_viewer_can_read_not_write(self):
+        self.login("ps-fv@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/part-scopes/").status_code, 200)
+        resp = self.client.post(
+            f"/api/projects/{self.project.id}/part-scopes/", {"title": "X"}, content_type="application/json")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_hidden_without_finances_perm(self):
+        self.login("ps-pl@acme.com")
+        self.assertEqual(self.client.get(f"/api/projects/{self.project.id}/part-scopes/").status_code, 403)
+
+    def test_delay_days_null_when_dates_incomplete(self):
+        from .models import PartScope
+        entry = PartScope.objects.create(company=self.company, project=self.project, title="No dates yet")
+        self.assertIsNone(entry.delay_days)
 
 
 class VariationApiTests(TestCase):

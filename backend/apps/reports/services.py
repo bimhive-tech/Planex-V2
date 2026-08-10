@@ -511,6 +511,9 @@ def build_report_context(report):
     """Assemble the full data dict the PDF generator consumes."""
     project = report.project
     as_of = report.report_date or report.period_finish or datetime.date.today()
+    # Part Scope is a log (see PartScope's docstring) — the report shows
+    # whichever entry is most recent, ordered by the model's own Meta.
+    latest_part = project.part_scopes.first()
 
     # As-of-date progress: read each activity's % from its latest dated entry on
     # or before the report date. Empty (no entries anywhere) → fast current path.
@@ -674,10 +677,10 @@ def build_report_context(report):
             "contract_value": project.contract_value,
             "approved_value": project.approved_value,
             "forecast_cost": project.forecast_cost,
-            "part_amount": project.part_amount,
-            "part_completion_revised": project.part_completion_revised,
-            "part_forecast_completion": project.part_forecast_completion,
-            "part_delay_days": project.part_delay_days,
+            "part_amount": latest_part.amount if latest_part else None,
+            "part_completion_revised": latest_part.completion_revised if latest_part else None,
+            "part_forecast_completion": latest_part.forecast_completion if latest_part else None,
+            "part_delay_days": latest_part.delay_days if latest_part else None,
             "currency": project.currency,
             "notes": project.notes,
         },

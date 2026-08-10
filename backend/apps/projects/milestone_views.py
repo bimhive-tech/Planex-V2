@@ -12,10 +12,30 @@ from .models import Milestone, Project
 
 class MilestoneSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    scope_id = serializers.SerializerMethodField()
+    # Ancestor chain top-down (e.g. ["PH1", "Z(A)", "Building 15"]) for
+    # grouping the full Milestones list by zone/building — null for
+    # project-wide milestones and any manually added one.
+    scope_path = serializers.SerializerMethodField()
 
     class Meta:
         model = Milestone
-        fields = ["id", "title", "date", "status", "status_display", "sort_order"]
+        fields = [
+            "id", "title", "date", "status", "status_display", "sort_order",
+            "progress_percent", "scope_id", "scope_path",
+        ]
+
+    def get_scope_id(self, obj):
+        return str(obj.scope_id) if obj.scope_id else None
+
+    def get_scope_path(self, obj):
+        if not obj.scope_id:
+            return None
+        names, node = [], obj.scope
+        while node:
+            names.append(node.label or node.name)
+            node = node.parent
+        return list(reversed(names))
 
 
 class MilestoneWriteSerializer(serializers.ModelSerializer):
@@ -48,7 +68,10 @@ class MilestoneListView(APIView):
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view(request)
-        return Response(MilestoneSerializer(project.milestones.all(), many=True).data)
+        # scope's own ancestor chain tops out at 4 levels (Stage>Zone>Area>Phase)
+        # — select_related that far so scope_path never re-queries per row.
+        milestones = project.milestones.select_related("scope__parent__parent__parent")
+        return Response(MilestoneSerializer(milestones, many=True).data)
 
     def post(self, request, project_id):
         project = _project(request, project_id)

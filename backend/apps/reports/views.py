@@ -39,7 +39,9 @@ class ReportsAccess(BasePermission):
 def _render_report_pdf(report, engine):
     """Shared by the `pdf` and `page-images` actions — same cfg/context
     assembly and canvas-vs-legacy dispatch either way. Returns (bytes,
-    section->page map)."""
+    section->page map). The Content & Labels builder tab is gone from the
+    UI, but existing templates that only ever had section toggles (no real
+    canvas content) still need this fallback to render at all."""
     ctx = build_report_context(report)
     cfg = merged_config(report.template.config if report.template else None)
     cfg = apply_report_layout_override(cfg, report)
@@ -107,8 +109,16 @@ class ReportViewSet(viewsets.ModelViewSet):
         # `images` (the detailed-progress zone grids' inline photos) and
         # _progress (an internal per-activity map, can be tens of thousands
         # of entries) are only ever read at PDF-render time.
-        for key in ("images", "_progress", "zone_grids"):
+        for key in ("images", "_progress", "zone_grids", "activity_schedule"):
             ctx.pop(key, None)
+        # Full activity_schedule is lazy (tens of thousands of rows, see
+        # pdf_canvas._resolve_activity_schedule_table) — the builder's canvas
+        # preview only needs a small real sample to show what the columns
+        # look like, not the whole list.
+        ctx["activity_schedule"] = list(report.project.activities.order_by("sort_order", "name").values(
+            "name", "baseline_duration", "original_duration", "actual_duration",
+            "remaining_duration", "schedule_performance_index", "schedule_variance",
+        )[:20])
 
         def light(entry):
             """Caption/url only — never the raw storage path — so the
@@ -139,10 +149,10 @@ class ReportViewSet(viewsets.ModelViewSet):
     def pdf(self, request, pk=None):
         """Generate and stream the report PDF on demand.
 
-        `?engine=canvas`/`?engine=sections` force a specific renderer (useful
-        while the canvas engine is being built out); otherwise a template
-        with real Page Designer / Report Configuration content uses the new
-        canvas engine and everything else keeps using Content & Labels."""
+        `?engine=canvas`/`?engine=sections` force a specific renderer;
+        otherwise a template with real Page Designer / Report Configuration
+        content uses the canvas engine and anything else (an older template
+        that only ever had Content & Labels toggles) falls back to it."""
         report = self.get_object()
         data, pages = _render_report_pdf(report, request.query_params.get("engine"))
         resp = HttpResponse(data, content_type="application/pdf")

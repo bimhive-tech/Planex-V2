@@ -1,36 +1,27 @@
 "use client";
 
-// Key Milestones card (Overview): timeline of project milestones with status,
-// plus add/edit/delete for managers. Mirrors the reference panel.
-import { useEffect, useState } from "react";
+// Key Milestones highlights (Overview): a short, curated slice of the
+// project's milestones, plus add/edit/delete for managers. A P6 import can
+// bring in hundreds of milestones (e.g. one per building handover) — this
+// card stays short on purpose and points to the full Milestones tab instead
+// of trying to render all of them here.
+import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
-import { Modal } from "@/components/ui/Modal";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import { formatDate } from "@/lib/format";
+import { MilestoneListItem } from "./MilestoneListItem";
+import { MilestoneModal } from "./MilestoneModal";
+import { milestoneCompletionPct, type Milestone } from "./milestoneShared";
 import styles from "./milestones.module.css";
 
-interface Milestone {
-  id: string;
-  title: string;
-  date: string | null;
-  status: string;
-  status_display: string;
-  sort_order: number;
-}
+const OVERVIEW_CAP = 6;
 
-const STATUSES = [
-  { value: "completed", label: "Completed" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "upcoming", label: "Upcoming" },
-];
-
-export function MilestonesPanel({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+export function MilestonesPanel({ projectId, canManage, onViewAll }: {
+  projectId: string; canManage: boolean; onViewAll?: () => void;
+}) {
   const { data, loading, error, reload } = useFetch(
     () => api.get<Milestone[]>(`/projects/${projectId}/milestones/`),
     [projectId],
@@ -38,6 +29,9 @@ export function MilestonesPanel({ projectId, canManage }: { projectId: string; c
   const [modal, setModal] = useState<{ milestone: Milestone | null } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const items = data ?? [];
+  const pct = milestoneCompletionPct(items);
+  const shown = items.slice(0, OVERVIEW_CAP);
+  const hasMore = items.length > OVERVIEW_CAP;
 
   async function remove(m: Milestone) {
     if (!window.confirm(`Delete milestone “${m.title}”?`)) return;
@@ -53,7 +47,10 @@ export function MilestonesPanel({ projectId, canManage }: { projectId: string; c
   return (
     <section className={`${styles.card}`}>
       <header className={styles.head}>
-        <h2 className={styles.title}>Key Milestones</h2>
+        <div className={styles.headTitleRow}>
+          <h2 className={styles.title}>Key Milestones</h2>
+          {pct !== null && <span className={styles.pctChip}>{pct}% complete</span>}
+        </div>
         {canManage && (
           <Button size="sm" variant="secondary" leadingIcon={<Icon name="plus" size={15} />}
             onClick={() => setModal({ milestone: null })}>
@@ -73,30 +70,16 @@ export function MilestonesPanel({ projectId, canManage }: { projectId: string; c
         onRetry={reload}
       >
         <ul className={styles.list}>
-          {items.map((m) => (
-            <li key={m.id} className={styles.item}>
-              <span className={`${styles.dot} ${styles[`s_${m.status}`]}`} aria-hidden="true">
-                {m.status === "completed" && <Icon name="check" size={12} />}
-              </span>
-              <div className={styles.itemBody}>
-                <span className={styles.itemTitle}>{m.title}</span>
-                <span className={styles.itemMeta}>
-                  {m.status_display}{m.date ? ` · ${formatDate(m.date)}` : ""}
-                </span>
-              </div>
-              {canManage && (
-                <div className={styles.itemActions}>
-                  <button className={styles.iconBtn} aria-label="Edit" onClick={() => setModal({ milestone: m })}>
-                    <Icon name="edit" size={14} />
-                  </button>
-                  <button className={styles.iconBtn} aria-label="Delete" onClick={() => remove(m)}>
-                    <Icon name="trash" size={14} />
-                  </button>
-                </div>
-              )}
-            </li>
+          {shown.map((m) => (
+            <MilestoneListItem key={m.id} milestone={m} canManage={canManage}
+              onEdit={() => setModal({ milestone: m })} onDelete={() => remove(m)} />
           ))}
         </ul>
+        {hasMore && onViewAll && (
+          <button className={styles.viewAll} onClick={onViewAll}>
+            View all {items.length} milestones →
+          </button>
+        )}
       </StateView>
 
       {modal && (
@@ -104,59 +87,5 @@ export function MilestonesPanel({ projectId, canManage }: { projectId: string; c
           onClose={() => setModal(null)} onSaved={reload} />
       )}
     </section>
-  );
-}
-
-function MilestoneModal({ projectId, milestone, onClose, onSaved }: {
-  projectId: string; milestone: Milestone | null; onClose: () => void; onSaved: () => void;
-}) {
-  const isEdit = !!milestone;
-  const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
-  const [statusV, setStatusV] = useState("upcoming");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setTitle(milestone?.title ?? "");
-    setDate(milestone?.date ?? "");
-    setStatusV(milestone?.status ?? "upcoming");
-  }, [milestone]);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    const body = { title, date: date || null, status: statusV };
-    try {
-      if (isEdit && milestone) {
-        await api.patch(`/projects/${projectId}/milestones/${milestone.id}/`, body);
-      } else {
-        await api.post(`/projects/${projectId}/milestones/`, body);
-      }
-      onSaved();
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save milestone.");
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Modal open title={isEdit ? "Edit milestone" : "Add milestone"} onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="milestone-form" disabled={submitting}>{submitting ? "Saving…" : "Save"}</Button>
-        </>
-      }>
-      <form id="milestone-form" onSubmit={submit} className={styles.form}>
-        <Input label="Title" name="title" required autoFocus placeholder="e.g. Design Approval"
-          value={title} onChange={(e) => setTitle(e.target.value)} />
-        <Input label="Date" name="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <Select label="Status" options={STATUSES} value={statusV} onChange={(e) => setStatusV(e.target.value)} />
-        {error && <p className="formError">{error}</p>}
-      </form>
-    </Modal>
   );
 }

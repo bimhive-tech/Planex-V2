@@ -148,6 +148,10 @@ def parse_p6_schedule_sheets(wb):
         ev_c = cols.get("earned value cost")
         perf_c = cols.get("performance % complete")  # actual (earned value / budget)
         sched_c = cols.get("schedule % complete")  # planned (time-based)
+        variance_c = cols.get("schedule variance")
+        bl_dur_c = cols.get("bl project duration")
+        actual_dur_c = cols.get("actual duration")
+        spi_c = cols.get("schedule performance index")
 
         roots, stack = [], []  # stack of (depth, node)
         for row in rows:
@@ -165,10 +169,13 @@ def parse_p6_schedule_sheets(wb):
                 pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
                 stack[-1][1]["activities"].append({
                     "code": a_str.strip()[:60], "name": b.strip()[:200],
-                    "pct": _to_pct(pct), "start": start, "finish": finish,
+                    "pct": _to_pct(pct), "pct_raw": _to_pct_optional(pct), "start": start, "finish": finish,
                     "budget": _num(row, cost_c), "earned_value": _num(row, ev_c),
                     "float": _int(row, float_c), "duration": _int(row, dur_c),
                     "remaining": _int(row, rem_c),
+                    "schedule_variance": _num(row, variance_c),
+                    "baseline_duration": _int(row, bl_dur_c), "actual_duration": _int(row, actual_dur_c),
+                    "spi": _num(row, spi_c),
                 })
                 continue
 
@@ -272,21 +279,52 @@ def _weight_key(roots) -> str:
     return "duration" if totals["duration"] > 0 else ""
 
 
+def _resolve_milestone_scopes(project, scope_paths):
+    """Batch-resolve milestone scope_path label-tuples (e.g. ("PH1", "Z(A)",
+    "Building 15") from a "MN(6)-MS-..." code) to real ProjectScope rows.
+
+    One query for the whole project's scope tree, then walked in memory —
+    a per-milestone/per-level query would mean up to 3 queries for each of
+    what could be hundreds of coded milestones (one per building)."""
+    from .models import ProjectScope
+
+    by_parent_name = {(s.parent_id, s.name): s for s in
+                       ProjectScope.objects.filter(project=project).only("id", "name", "parent_id")}
+    resolved = {}
+    for path in scope_paths:
+        if not path:
+            resolved[path] = None
+            continue
+        parent_id, scope = None, None
+        for label in path:
+            scope = by_parent_name.get((parent_id, label))
+            if scope is None:
+                break
+            parent_id = scope.id
+        resolved[path] = scope
+    return resolved
+
+
 def _record_milestones(project, tasks):
     """Store milestone activities as Milestones. Upserted by title rather than
     replaced wholesale so re-importing an updated schedule refreshes the dates
     without discarding milestones somebody added by hand."""
     from .models import Milestone
 
+    paths = {tuple(task.get("scope_path") or ()) for task in tasks}
+    resolved = _resolve_milestone_scopes(project, paths)
+
     for order, task in enumerate(tasks):
         pct = task["pct"]
         status = (Milestone.Status.COMPLETED if pct >= 100
                   else Milestone.Status.IN_PROGRESS if pct > 0
                   else Milestone.Status.UPCOMING)
+        scope = resolved.get(tuple(task.get("scope_path") or ()))
         Milestone.objects.update_or_create(
             project=project, title=task["name"][:180],
             defaults={"company": project.company, "sort_order": order, "status": status,
-                      "date": task["finish"] or task["start"]},
+                      "date": task["finish"] or task["start"], "scope": scope,
+                      "progress_percent": task.get("pct_raw")},
         )
     return len(tasks)
 
@@ -366,7 +404,7 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         stype = type_of(node, depth)
         counts[stype] += 1
         scope = Scope(company=company, project=project, parent=parent, scope_type=stype,
-                      name=node["name"], sort_order=len(scopes_by_depth[depth]),
+                      name=node["name"], label=node.get("label") or "", sort_order=len(scopes_by_depth[depth]),
                       planned_start=node.get("start"), planned_finish=node.get("finish"),
                       discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
         scopes_by_depth[depth].append(scope)
@@ -388,6 +426,9 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
                 budgeted_cost=task["budget"], earned_value_cost=task["earned_value"],
                 total_float=task["float"], original_duration=task["duration"],
                 remaining_duration=task["remaining"],
+                schedule_variance=task.get("schedule_variance"),
+                baseline_duration=task.get("baseline_duration"), actual_duration=task.get("actual_duration"),
+                schedule_performance_index=task.get("spi"),
                 row_index=row_index, sort_order=row_counter[0],
                 subzone_index=col_index, subzone_code=col_name,
                 progress_type=Activity.ProgressType.PERCENTAGE,

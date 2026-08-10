@@ -109,7 +109,9 @@ function StatusBar({ tone, label, count, pct }: { tone: string; label: string; c
   );
 }
 
-export function ProjectOverview({ project: p, stats, canManage }: { project: ProjectDetail; stats: ProjectStats; canManage: boolean }) {
+export function ProjectOverview({ project: p, stats, canManage, onViewMilestones }: {
+  project: ProjectDetail; stats: ProjectStats; canManage: boolean; onViewMilestones?: () => void;
+}) {
   const t = timeline(p.planned_start, p.planned_finish);
   const delay = delayDays(p.planned_finish, p.forecast_finish, p.revised_finish);
   const b = stats.breakdown;
@@ -162,7 +164,7 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
           </section>
 
           <ProgressTimeline projectId={p.id} />
-          <MilestonesPanel projectId={p.id} canManage={canManage} />
+          <MilestonesPanel projectId={p.id} canManage={canManage} onViewAll={onViewMilestones} />
         </div>
 
         {/* Right column — the reference details and contacts. */}
@@ -193,20 +195,6 @@ export function ProjectOverview({ project: p, stats, canManage }: { project: Pro
               <Badge tone={priorityTone(p.priority)}>{p.priority_display}</Badge>
             </Row>
           </section>
-
-          {(p.part_amount || p.part_completion_revised || p.part_forecast_completion || p.part_delay_days !== null) && (
-            <section className={styles.card}>
-              <CardHead icon="projects" title="Part (Contracted Sub-Scope)" sub="Tracked alongside the whole project." />
-              <Row label="Part amount">{formatMoney(p.part_amount, p.currency)}</Row>
-              <Row label="Completion (revised baseline)">
-                {p.part_completion_revised ? new Date(p.part_completion_revised).toLocaleDateString() : "—"}
-              </Row>
-              <Row label="Forecasted completion">
-                {p.part_forecast_completion ? new Date(p.part_forecast_completion).toLocaleDateString() : "—"}
-              </Row>
-              <Row label="Delay (calendar days)">{p.part_delay_days === null ? "—" : p.part_delay_days}</Row>
-            </section>
-          )}
 
           <section className={styles.card}>
             <CardHead icon="users" title="Contacts" sub="Consultant and contractor." />

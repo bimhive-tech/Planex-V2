@@ -84,16 +84,6 @@ class Project(TimestampedModel):
     approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
 
-    # Some contracts report progress for a specific contracted "Part" (a
-    # sub-scope) alongside the whole project — its own amount, baseline,
-    # forecast and delay, tracked in parallel with the project-wide figures
-    # above rather than derived from them. All optional: most projects have
-    # no such split and simply leave these blank.
-    part_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    part_completion_revised = models.DateField(null=True, blank=True)
-    part_forecast_completion = models.DateField(null=True, blank=True)
-    part_delay_days = models.IntegerField(null=True, blank=True)
-
     # A real P6 schedule states its own actual AND planned % complete for the
     # whole project — Performance % Complete (earned value / budgeted cost) and
     # Schedule % Complete (time-based) respectively — rather than leaving
@@ -269,8 +259,21 @@ class Milestone(TimestampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.UPCOMING)
     sort_order = models.PositiveIntegerField(default=0)
 
+    # Set only when a P6 import's "Activity % Complete" column has a real
+    # value for this row — null (not 0) for a manually added milestone or a
+    # row the source file left blank, so the UI can tell "0% complete" apart
+    # from "no figure to show" instead of assuming zero.
+    progress_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Set only when a P6 import's Planex Code ties the milestone to a specific
+    # zone/building (e.g. a per-building handover date) — null for project-wide
+    # milestones (kickoff, overall handover) and any manually added one.
+    scope = models.ForeignKey(
+        "ProjectScope", on_delete=models.SET_NULL, null=True, blank=True, related_name="milestones",
+    )
+
     class Meta:
-        indexes = [models.Index(fields=["project", "sort_order"])]
+        indexes = [models.Index(fields=["project", "sort_order"]), models.Index(fields=["project", "scope"])]
         ordering = ["sort_order", "date"]
 
     def __str__(self):
@@ -300,6 +303,40 @@ class ProjectDelay(TimestampedModel):
 
     def __str__(self):
         return self.title
+
+
+class PartScope(TimestampedModel):
+    """A specific contracted "Part" (sub-scope) of the work, tracked in
+    parallel with the whole project — its own amount, start date, and
+    completion baseline/forecast. A log, not a single snapshot: a project
+    can have more than one entry over its life (a new Part added later, or
+    one superseded by a revision), so past ones stay visible instead of
+    being silently overwritten. The report shows the most recent entry."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="part_scopes")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="part_scopes")
+    title = models.CharField(max_length=180)
+    amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    start_date = models.DateField(null=True, blank=True)
+    completion_revised = models.DateField(null=True, blank=True)  # revised baseline completion
+    forecast_completion = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_part_scopes")
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "-created_at"])]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def delay_days(self) -> int | None:
+        if self.forecast_completion is None or self.completion_revised is None:
+            return None
+        return (self.forecast_completion - self.completion_revised).days
 
 
 class ProjectMember(TimestampedModel):
@@ -366,7 +403,19 @@ class ProjectScope(TimestampedModel):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="scopes")
     parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children")
     scope_type = models.CharField(max_length=20, choices=ScopeType.choices)
+    # Stable grouping/matching key — for a code-driven P6 import this is the
+    # raw Planex Code segment (e.g. "PH1", "Z(A)", "Building 15"), used to
+    # resolve milestone scope links and to re-key nodes across an import.
+    # Never shown to a user on its own; see `label`.
     name = models.CharField(max_length=180)
+    # Human-readable display text read from the source file's own WBS heading
+    # (e.g. "المرحلة الاولي (75 عمارة)" for "PH1") when a code-driven import
+    # can determine one — blank otherwise, in which case the UI falls back to
+    # `name` (already human-readable for the older indentation-only import
+    # scheme, and for anything created by hand). Purely cosmetic: nothing
+    # matches or re-imports by this field, only by `name`, so it changing (or
+    # being blank) between imports never affects import correctness.
+    label = models.CharField(max_length=180, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
 
     # Optional own schedule (any node may carry one, independent of the
@@ -434,9 +483,13 @@ class Activity(TimestampedModel):
     # no such data (zone trackers), so "no value" stays distinct from "zero".
     budgeted_cost = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     earned_value_cost = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    schedule_variance = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
     total_float = models.IntegerField(null=True, blank=True)  # days of slack; <=0 is on the critical path
     original_duration = models.IntegerField(null=True, blank=True)
     remaining_duration = models.IntegerField(null=True, blank=True)
+    baseline_duration = models.IntegerField(null=True, blank=True)  # P6 "BL Project Duration"
+    actual_duration = models.IntegerField(null=True, blank=True)
+    schedule_performance_index = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
 
     @property
     def is_critical(self) -> bool:
