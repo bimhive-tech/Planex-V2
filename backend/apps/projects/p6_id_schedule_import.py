@@ -106,6 +106,56 @@ def _rollup_dates(node):
     node["finish"] = max(finishes) if finishes else None
 
 
+def _milestone_group(rows, id_c, name_c, start_c, finish_c, pct_c):
+    """Collect leaf activities that live under a WBS branch matching the
+    milestone keywords (p6_schedule_import._is_milestone_group), located by
+    the file's own leading-space indentation on the Activity ID column —
+    NOT by Planex Code, since these rows carry none at all. A real P6
+    export keeps its key dates (project start/finish, handover milestones)
+    as zero-work activities under one WBS heading; that heading isn't part
+    of the coded discipline work, so the code-driven walk in
+    parse_id_schedule_sheets never sees it and would otherwise silently
+    drop every one of these rows.
+
+    Returns a single synthetic group (named so it still matches the
+    milestone keywords) for the caller to append to `roots` — build_from_
+    p6_schedule's existing _extract_milestones step then picks it up and
+    routes it to the Milestones panel exactly like the old indentation
+    parser's own milestone branch, with no other special-casing needed."""
+    from .p6_schedule_import import _is_milestone_group, _leading_spaces
+
+    group = None
+    stack = []  # (depth, is_milestone_branch)
+    in_milestones = False
+    for row in rows:
+        act_id = row[id_c] if id_c < len(row) else None
+        name = row[name_c] if name_c < len(row) else None
+        if not isinstance(act_id, str) or not act_id.strip():
+            continue
+        a_str = act_id
+        if isinstance(name, str) and name.strip():
+            if in_milestones:
+                start = _parse_date(row[start_c]) if start_c < len(row) else None
+                finish = _parse_date(row[finish_c]) if finish_c < len(row) else None
+                pct = row[pct_c] if pct_c is not None and pct_c < len(row) else None
+                if group is None:
+                    group = _new_group("Key Milestones")
+                group["activities"].append({
+                    "code": a_str.strip()[:60], "name": name.strip()[:200],
+                    "pct": _to_pct(pct), "start": start, "finish": finish,
+                    "budget": None, "earned_value": None, "float": None,
+                    "duration": None, "remaining": None,
+                })
+            continue
+        depth = _leading_spaces(a_str)
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        is_ms = _is_milestone_group(a_str.strip()) or (stack[-1][1] if stack else False)
+        stack.append((depth, is_ms))
+        in_milestones = is_ms
+    return group
+
+
 def parse_id_schedule_sheets(wb):
     """Return [{name, children, activities, start, finish}] built from a
     sheet's "Planex Code" column, or None if no sheet has one (or none of
@@ -190,6 +240,16 @@ def parse_id_schedule_sheets(wb):
 
         if not matched_any:
             continue
+
+        # The Key Milestones WBS branch carries no Planex Code at all (see
+        # _milestone_group's docstring) — the code-driven walk above never
+        # sees it, so it's collected separately by indentation and appended
+        # here; build_from_p6_schedule's existing milestone extraction then
+        # routes it to the Milestones panel like it always has.
+        milestones = _milestone_group(data_rows, id_c, name_c, start_c, finish_c, pct_c)
+        if milestones:
+            roots.append(milestones)
+
         for root in roots:
             _rollup_dates(root)
         return roots or None

@@ -144,6 +144,40 @@ class IdScheduleImportTests(TestCase):
         # detection falls through (no Planex Code sheet actually matched).
         self.assertFalse(ProjectScope.objects.filter(project=project).exists())
 
+    def test_key_milestones_branch_has_no_planex_code_but_still_imports(self):
+        """A real P6 export keeps its key dates (project start/finish,
+        handover milestones) as zero-work activities under one WBS heading
+        — carrying NO Planex Code at all, since they aren't coded discipline
+        work. The code-driven walk must not just silently drop them; they
+        belong in the Milestones panel, same as the old indentation
+        parser's own milestone branch."""
+        d = datetime.date
+        rows = [
+            # Planex-Code-driven real work, so the sheet is detected at all.
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 1-ELEC-1", "A1", "Wiring",
+             1, d(2026, 1, 1), d(2026, 1, 2), 1, 1000, 1000],
+            # The milestone WBS branch — no Planex Code on any of these rows.
+            [None, "  Key Milestones", None, 0, d(2026, 1, 1), d(2026, 12, 1), None, 0, 0],
+            [None, "MS-START", "Project start", 0, d(2026, 1, 1), None, 1, 0, 0],
+            [None, "MS-END", "Project end", 0, None, d(2026, 12, 1), 0, 0, 0],
+        ]
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(rows), source="planex_code.xlsx")
+
+        self.assertEqual(result["activities"], 1)  # only the coded row
+        self.assertEqual(result["milestones"], 2)
+        from .models import Milestone
+        titles = set(Milestone.objects.filter(project=project).values_list("title", flat=True))
+        self.assertEqual(titles, {"Project start", "Project end"})
+        start_ms = Milestone.objects.get(project=project, title="Project start")
+        self.assertEqual(start_ms.status, Milestone.Status.COMPLETED)  # pct=1 -> 100%
+        end_ms = Milestone.objects.get(project=project, title="Project end")
+        self.assertEqual(end_ms.status, Milestone.Status.UPCOMING)  # pct=0
+
+        # The milestone branch must not also appear as a schedule scope.
+        self.assertFalse(ProjectScope.objects.filter(project=project, name="Key Milestones").exists())
+
     def test_no_planex_code_column_falls_through_to_old_parser(self):
         """A file with no "Planex Code" column at all (the previous
         template shape) must still import via the leading-space scheme,
