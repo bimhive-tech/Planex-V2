@@ -1,9 +1,7 @@
-"""Tests for the segmented-ID P6 parser (p6_id_schedule_import.py).
+"""Tests for the Planex Code P6 parser (p6_id_schedule_import.py).
 
-No real export using this scheme exists yet — these are built against the
-12-column legend alone (PN/CON/AR/SUB AR/PH/Z/P/U/LEV/DEC/SUB DEC/NU), so they
-document the assumed ID format as much as they verify behaviour. Revisit once
-the team's real file arrives.
+Built against the team's first real export (Mansoura 6 - Building, Aug
+2026) — see that module's docstring for the empirically-confirmed shape.
 """
 import datetime
 import io
@@ -15,28 +13,49 @@ from apps.accounts.models import Company
 
 from .imports import import_workbook
 from .models import Activity, Project, ProjectScope
-from .p6_id_schedule_import import parse_segmented_id
+from .p6_id_schedule_import import segment_path
 
 
-class ParseSegmentedIdTests(TestCase):
-    def test_parses_all_twelve_segments(self):
-        segs = parse_segmented_id("PN01-CON02-AR03-SAR00-PH04-Z00-P00-U00-LEV00-DEC02-SDEC00-NU007")
-        self.assertEqual(segs, {
-            "pn": 1, "con": 2, "ar": 3, "sar": 0, "ph": 4, "z": 0, "p": 0,
-            "u": 0, "lev": 0, "dec": 2, "sdec": 0, "nu": 7,
-        })
+class SegmentPathTests(TestCase):
+    def test_real_file_shape_ten_segments_two_dropped(self):
+        """The team's actual export: 10 dash-separated segments (not the
+        legend's full 12 — Level and Sub-discipline are dropped entirely),
+        with Area/Sub-area/Part kept as a literal "0" placeholder."""
+        path = segment_path("MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Internal Finishes-1")
+        self.assertEqual(path, ["PH1", "Z(A)", "Building 6", "Internal Finishes"])
 
-    def test_rejects_malformed_id(self):
-        self.assertIsNone(parse_segmented_id("Not-A-Segmented-Id"))
-        self.assertIsNone(parse_segmented_id("PN01-CON02-AR03"))  # too few segments
+    def test_bare_tag_word_is_a_placeholder(self):
+        # "CON" alone (no distinguishing suffix) means "this project doesn't
+        # branch on Construction" — same as "0" for Area/Sub-area/Part.
+        path = segment_path("MN(6)-CON-0-0-PH2-Z(B)-0-Building 12-Stairs-30")
+        self.assertEqual(path, ["PH2", "Z(B)", "Building 12", "Stairs"])
+
+    def test_project_code_and_differentiator_are_dropped(self):
+        # First segment (project code) and last (per-row differentiator) are
+        # never part of the tree path — the real Activity ID is used as the
+        # leaf's own code instead of the differentiator.
+        path = segment_path("PN01-PH1-1")
+        self.assertEqual(path, ["PH1"])
+
+    def test_all_placeholders_returns_empty(self):
+        self.assertEqual(segment_path("MN(6)-CON-0-0-0-0-0-0-DEC-1"), [])
+
+    def test_too_few_segments_returns_empty(self):
+        self.assertEqual(segment_path("MN(6)-1"), [])
+        self.assertEqual(segment_path("not a code"), [])
+
+    def test_non_string_returns_empty(self):
+        self.assertEqual(segment_path(None), [])
+        self.assertEqual(segment_path(123), [])
 
 
-class SegmentedIdImportTests(TestCase):
-    """Same header shape as the reference P6 schedule export, but with
-    segmented Activity IDs and no separate WBS rows — every row is a leaf."""
+class IdScheduleImportTests(TestCase):
+    """Same header shape as the reference P6 schedule export, plus a
+    separate "Planex Code" column — Activity ID/Name stay the leaf
+    activity's own identity; Planex Code only drives the WBS tree."""
 
-    HEADER = ["Activity ID", "Activity Name", "Original Duration", "Start", "Finish",
-              "Activity % Complete", "Budgeted Material Cost", "Earned Value Cost"]
+    HEADER = ["Planex Code", "Activity ID", "Activity Name", "Original Duration", "Start", "Finish",
+              "Activity % Complete", "Budgeted Total Cost", "Earned Value Cost"]
 
     def _workbook(self, rows):
         wb = openpyxl.Workbook()
@@ -50,85 +69,98 @@ class SegmentedIdImportTests(TestCase):
         buf.seek(0)
         return buf
 
-    def test_builds_tree_from_shared_id_prefixes(self):
+    def test_builds_tree_from_real_file_shaped_codes(self):
         d = datetime.date
         rows = [
-            # Two activities sharing CON01-AR01-PH01 -> one Stage/Zone/Phase branch.
-            ["PN01-CON01-AR01-SAR00-PH01-Z00-P00-U00-LEV00-DEC00-SDEC00-NU001", "Excavate",
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Internal Finishes-1", "MN6-A6-01-01", "Seal",
              10, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500],
-            ["PN01-CON01-AR01-SAR00-PH01-Z00-P00-U00-LEV00-DEC00-SDEC00-NU002", "Backfill",
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Internal Finishes-2", "MN6-A6-01-02", "Putty",
              5, d(2026, 1, 11), d(2026, 1, 15), 0, 500, 0],
-            # A second Area under the same Stage.
-            ["PN01-CON01-AR02-SAR00-PH02-Z00-P00-U00-LEV00-DEC00-SDEC00-NU003", "Wiring",
+            # A second discipline under the same Building.
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Stairs-1", "MN6-A6-02-01", "Stair render",
              8, d(2026, 2, 1), d(2026, 2, 8), 1, 2000, 2000],
         ]
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
 
-        result = import_workbook(project, self._workbook(rows), source="segmented.xlsx")
+        result = import_workbook(project, self._workbook(rows), source="planex_code.xlsx")
         self.assertEqual(result["source_kind"], "p6_schedule")
         self.assertEqual(result["activities"], 3)
 
-        stage = ProjectScope.objects.get(project=project, name="CON 01")
+        stage = ProjectScope.objects.get(project=project, name="PH1")
         self.assertEqual(stage.scope_type, ProjectScope.ScopeType.STAGE)
         self.assertEqual(stage.parent, None)
 
-        areas = list(ProjectScope.objects.filter(project=project, parent=stage).order_by("name"))
-        self.assertEqual([a.name for a in areas], ["AR 01", "AR 02"])
-        self.assertEqual(areas[0].scope_type, ProjectScope.ScopeType.ZONE)
+        zone = ProjectScope.objects.get(project=project, name="Z(A)")
+        self.assertEqual(zone.scope_type, ProjectScope.ScopeType.ZONE)
+        self.assertEqual(zone.parent, stage)
 
-        # PH01 holds activities directly -> becomes a Phase, whatever its depth.
-        phase = ProjectScope.objects.get(project=project, name="PH 01")
-        self.assertEqual(phase.scope_type, ProjectScope.ScopeType.PHASE)
-        self.assertEqual(phase.parent, areas[0])
+        building = ProjectScope.objects.get(project=project, name="Building 6")
+        self.assertEqual(building.scope_type, ProjectScope.ScopeType.AREA)
+        self.assertEqual(building.parent, zone)
 
-        excavate = Activity.objects.get(project=project, code="NU001")
-        self.assertEqual(excavate.name, "Excavate")
-        self.assertEqual(float(excavate.progress_percent), 50.0)
+        disciplines = list(ProjectScope.objects.filter(project=project, parent=building).order_by("name"))
+        self.assertEqual([s.name for s in disciplines], ["Internal Finishes", "Stairs"])
+        self.assertEqual(disciplines[0].scope_type, ProjectScope.ScopeType.PHASE)
+
+        # The real Activity ID is used as the leaf's own code — not a
+        # synthetic differentiator like the old assumed scheme's "NU001".
+        seal = Activity.objects.get(project=project, code="MN6-A6-01-01")
+        self.assertEqual(seal.name, "Seal")
+        self.assertEqual(float(seal.progress_percent), 50.0)
 
         # Group nodes carry no Start/Finish of their own — rolled up from activities.
         self.assertEqual(stage.planned_start, d(2026, 1, 1))
         self.assertEqual(stage.planned_finish, d(2026, 2, 8))
 
-    def test_uneven_depth_still_resolves_holder_to_phase(self):
-        """A branch that goes all the way to Level still becomes Phase at
-        whatever depth actually holds the activity — same rule the leading-
-        space parser already relies on for uneven WBS branches."""
+    def test_budgeted_total_cost_header_drives_weighting(self):
+        """This file's cost column is named "Budgeted Total Cost", not the
+        original template's "Budgeted Material Cost" — must still be read
+        for cost-based roll-up weighting."""
         d = datetime.date
         rows = [
-            ["PN01-CON01-AR01-SAR02-PH01-Z03-P01-U01-LEV02-DEC00-SDEC00-NU001", "Deep leaf",
-             10, d(2026, 1, 1), d(2026, 1, 10), 0, 100, 0],
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 1-ELEC-1", "A1", "Big", 1,
+             d(2026, 1, 1), d(2026, 1, 2), 1, 9000, 9000],
+            ["MN(6)-CON-0-0-PH1-Z(A)-0-Building 1-ELEC-2", "A2", "Small", 1,
+             d(2026, 1, 1), d(2026, 1, 2), 0, 1000, 0],
         ]
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
-        import_workbook(project, self._workbook(rows), source="segmented.xlsx")
+        result = import_workbook(project, self._workbook(rows), source="planex_code.xlsx")
+        self.assertEqual(result["weighted_by"], "budget")
 
-        leaf_scope = Activity.objects.get(project=project, code="NU001").scope
-        self.assertEqual(leaf_scope.scope_type, ProjectScope.ScopeType.PHASE)
-        self.assertEqual(leaf_scope.name, "LEV 02")
-
-    def test_all_placeholder_tree_segments_fall_back_to_uncategorized(self):
+    def test_bare_tag_placeholders_all_the_way_falls_back_to_uncategorized(self):
         d = datetime.date
         rows = [
-            ["PN01-CON00-AR00-SAR00-PH00-Z00-P00-U00-LEV00-DEC00-SDEC00-NU001", "Orphan task",
+            ["MN(6)-CON-0-0-0-0-0-0-DEC-1", "A1", "Orphan task",
              1, d(2026, 1, 1), d(2026, 1, 2), 0, 0, 0],
         ]
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
-        import_workbook(project, self._workbook(rows), source="segmented.xlsx")
+        import_workbook(project, self._workbook(rows), source="planex_code.xlsx")
 
-        self.assertTrue(ProjectScope.objects.filter(project=project, name="Uncategorized").exists())
+        # Every middle segment is a placeholder ("0" or "DEC" alone) -> no
+        # real tree path -> this parser doesn't match the row at all, so
+        # detection falls through (no Planex Code sheet actually matched).
+        self.assertFalse(ProjectScope.objects.filter(project=project).exists())
 
-    def test_leading_space_export_still_takes_the_old_path(self):
-        """A file using the old indentation scheme has no segmented IDs at all,
-        so detection must fall through to parse_p6_schedule_sheets untouched."""
+    def test_no_planex_code_column_falls_through_to_old_parser(self):
+        """A file with no "Planex Code" column at all (the previous
+        template shape) must still import via the leading-space scheme,
+        completely unaffected by this module."""
         d = datetime.date
-        rows = [
-            ["  Construction Phase", None, 0, d(2026, 1, 1), d(2026, 2, 1), None, 0, 0],
-            ["CN.01", "Foundation", 10, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500],
-        ]
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Activity ID", "Activity Name", "Original Duration", "Start", "Finish",
+                  "Activity % Complete", "Budgeted Material Cost", "Earned Value Cost"])
+        ws.append(["  Construction Phase", None, 0, d(2026, 1, 1), d(2026, 2, 1), None, 0, 0])
+        ws.append(["CN.01", "Foundation", 10, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
-        result = import_workbook(project, self._workbook(rows), source="legacy.xlsx")
+        result = import_workbook(project, buf, source="legacy.xlsx")
         self.assertEqual(result["source_kind"], "p6_schedule")
         self.assertTrue(ProjectScope.objects.filter(project=project, name="Construction Phase").exists())

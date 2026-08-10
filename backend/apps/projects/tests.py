@@ -65,6 +65,22 @@ class ImportParserTests(SimpleTestCase):
         self.assertEqual(_guess_discipline("شبكات الصرف الصحي"), "mechanical")
         self.assertEqual(_guess_discipline("Random unrelated text"), "")
 
+    def test_guesses_discipline_from_real_planex_code_names(self):
+        """The Mansoura 6 real export's discipline names (from its own Planex
+        Code legend sheet) — added since only "Internal Finishes" matched
+        before these keywords existed, leaving 7 of 8 disciplines
+        unclassified on that real file."""
+        self.assertEqual(_guess_discipline("Internal Finishes"), "architecture")
+        self.assertEqual(_guess_discipline("Stairs"), "architecture")
+        self.assertEqual(_guess_discipline("main entrance"), "architecture")
+        self.assertEqual(_guess_discipline("ELEC"), "electrical")
+        self.assertEqual(_guess_discipline("Elevators"), "mechanical")
+        self.assertEqual(_guess_discipline("F.Fighting"), "mechanical")
+        # Deliberately NOT mapped: "LC" (light current) is too short/risky a
+        # substring to match safely, and "Snag list" isn't a trade at all.
+        self.assertEqual(_guess_discipline("LC"), "")
+        self.assertEqual(_guess_discipline("Snag list"), "")
+
 
 class ScheduleImportTests(TestCase):
     """`import_schedule` matches a flat Activity Name/Start/Finish export (the

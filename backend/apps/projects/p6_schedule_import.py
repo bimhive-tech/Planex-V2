@@ -140,7 +140,11 @@ def parse_p6_schedule_sheets(wb):
         dur_c = cols.get("original duration")
         rem_c = cols.get("remaining duration")
         float_c = cols.get("total float")
+        # Seen named both "Budgeted Material Cost" (the original reference
+        # template) and "Budgeted Total Cost" (a later real export) — accept either.
         cost_c = cols.get("budgeted material cost")
+        if cost_c is None:
+            cost_c = cols.get("budgeted total cost")
         ev_c = cols.get("earned value cost")
         perf_c = cols.get("performance % complete")  # actual (earned value / budget)
         sched_c = cols.get("schedule % complete")  # planned (time-based)

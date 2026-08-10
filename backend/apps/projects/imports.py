@@ -51,12 +51,14 @@ _DISCIPLINE_KEYWORDS = {
     ProjectScope.Discipline.CONCRETE: ["خرسان", "حفر", "اساسات", "هيكل", "concrete", "structure"],
     ProjectScope.Discipline.ARCHITECTURE: [
         "تشطيب", "بياض", "دهان", "سيراميك", "رخام", "نجارة", "حدادة", "بلاط", "ارضيات",
-        "architecture", "finish",
+        "architecture", "finish", "stair", "entrance",
     ],
-    ProjectScope.Discipline.ELECTRICAL: ["كهرب", "تيار خفيف", "اضاءة", "انارة", "electrical"],
+    ProjectScope.Discipline.ELECTRICAL: [
+        "كهرب", "تيار خفيف", "اضاءة", "انارة", "electrical", "elec",
+    ],
     ProjectScope.Discipline.MECHANICAL: [
         "صحي", "صرف", "تكييف", "ميكانيك", "حريق", "مكافحة الحريق", "تهوية", "مياه", "ري",
-        "mechanical", "plumbing", "hvac",
+        "mechanical", "plumbing", "hvac", "elevator", "f.fighting", "fire fighting",
     ],
 }
 
