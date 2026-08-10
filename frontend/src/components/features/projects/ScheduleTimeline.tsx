@@ -17,7 +17,14 @@ export function ScheduleTimeline({ start, finish, revised, progress }: {
   const s = new Date(start).getTime();
   const f = new Date(finish).getTime();
   const r = revised ? new Date(revised).getTime() : null;
-  const now = Date.now();
+  // Floored to the start of the day (not Date.now()'s raw millisecond) so
+  // "today" is stable across a render: this is a "use client" component,
+  // but Next still renders it once on the server and once on the client
+  // during hydration — a few milliseconds apart, which was enough for the
+  // two passes to disagree on a value used in a percentage calculation and
+  // trip React's hydration mismatch check. Day-granularity is also just
+  // the right precision for a timeline showing whole days remaining.
+  const now = Math.floor(Date.now() / DAY) * DAY;
   const spanEnd = Math.max(f, r ?? f, now);
   const span = Math.max(1, spanEnd - s);
   const at = (t: number) => Math.max(0, Math.min(100, ((t - s) / span) * 100));
