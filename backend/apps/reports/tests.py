@@ -749,6 +749,75 @@ class HierarchyRowsTests(TestCase):
         self.assertIsNone(rows[0]["previous"])  # zone itself wasn't in the map
 
 
+class ScopeContextStalenessTests(TestCase):
+    """A schedule re-import deletes and recreates every ProjectScope/Activity
+    with fresh UUIDs (see [[projects-module]]'s stale-client-state note) — a
+    Report's saved `scope_ids` from before that re-import become a list of
+    ids that no longer exist. `_scope_context` used to treat every id that
+    didn't match a current scope as if it must be an individual activity id
+    (a real, supported selection), so a fully-stale list silently matched
+    neither a scope nor a real activity anywhere and excluded everything —
+    a report that used to work renders with empty zones/hierarchy/discipline
+    after any re-import, with no error. Confirmed live against a real report
+    in this state before fixing."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+        self.zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Zone A")
+        self.activity = Activity.objects.create(
+            company=self.company, project=self.project, scope=self.zone,
+            name="Task", weight=1, progress_percent=40)
+
+    def test_fully_stale_scope_ids_falls_back_to_everything(self):
+        from .services import _scope_context
+
+        stale_ids = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+        predicate, _ = _scope_context(self.project, stale_ids)
+        self.assertTrue(predicate(str(self.zone.id), str(self.activity.id)))  # not silently excluded
+
+    def test_partially_stale_scope_ids_keeps_the_real_ones(self):
+        from .services import _scope_context
+
+        mixed = [str(self.zone.id), "22222222-2222-2222-2222-222222222222"]
+        predicate, _ = _scope_context(self.project, mixed)
+        self.assertTrue(predicate(str(self.zone.id), str(self.activity.id)))
+
+    def test_stale_task_level_selection_also_falls_back(self):
+        """Same staleness, but the selection was task-level (no scope ids at
+        all) rather than a zone — still shouldn't render an empty report."""
+        from .services import _scope_context
+
+        predicate, _ = _scope_context(self.project, ["33333333-3333-3333-3333-333333333333"])
+        self.assertTrue(predicate(str(self.zone.id), str(self.activity.id)))
+
+    def test_a_real_task_level_selection_still_scopes_correctly(self):
+        """Genuine task-level filtering (not stale) must keep working —
+        the fallback only kicks in when NOTHING in the selection is real."""
+        from apps.projects.models import Activity
+        from .services import _scope_context
+
+        other_activity = Activity.objects.create(
+            company=self.company, project=self.project, scope=self.zone,
+            name="Other task", weight=1, progress_percent=10)
+        predicate, _ = _scope_context(self.project, [str(self.activity.id)])
+        self.assertTrue(predicate(str(self.zone.id), str(self.activity.id)))
+        self.assertFalse(predicate(str(self.zone.id), str(other_activity.id)))
+
+    def test_end_to_end_zone_rows_not_silently_empty(self):
+        from .services import _zone_rows
+
+        stale_ids = ["11111111-1111-1111-1111-111111111111"]
+        rows = _zone_rows(self.project, stale_ids)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "Zone A")
+
+
 class PlannedProgressOverrideTests(TestCase):
     """A real P6 export states its own Schedule % Complete (planned, time-based)
     alongside Performance % Complete (actual). `_planned_progress` should prefer

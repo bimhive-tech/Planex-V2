@@ -109,29 +109,60 @@ def _scope_context(project, scope_ids):
     `predicate(scope_id, activity_id)` is True when an activity is in the export:
     its scope (or an ancestor scope) was ticked, or the task itself was ticked.
     An empty selection includes everything. `scope_to_zone` maps any scope to its
-    top-level zone, so we can roll progress up per zone over the included tasks."""
-    rows = list(project.scopes.values_list("id", "parent_id"))
-    parent = {str(sid): (str(pid) if pid else None) for sid, pid in rows}
+    zone, so we can roll progress up per zone over the included tasks — the
+    nearest ZONE-typed ancestor (or itself), NOT simply the top of the tree:
+    a P6 import can nest Zone under Stage (`ScopeType.STAGE` is explicitly "a
+    top-level grouping above zones"), so walking straight to the root would
+    roll everything up to the Stage id instead, which `_zone_rows`'s
+    `scope_type=ZONE` query never matches — every zone-scoped section
+    (progress-by-zone, hierarchy, discipline, gantt, the detailed grid) would
+    render silently empty for any project using that hierarchy shape."""
+    rows = list(project.scopes.values_list("id", "parent_id", "scope_type"))
+    parent = {str(sid): (str(pid) if pid else None) for sid, pid, _st in rows}
+    scope_type = {str(sid): st for sid, _pid, st in rows}
 
     scope_to_zone, children = {}, {}
-    for sid, pid in rows:
+    for sid, pid, _st in rows:
         if pid:
             children.setdefault(str(pid), []).append(str(sid))
+    zone_type = ProjectScope.ScopeType.ZONE
     for sid in parent:
-        cur, chain = sid, []
-        while parent.get(cur):
-            chain.append(cur)
-            cur = parent[cur]
-        for s in chain:
-            scope_to_zone[s] = cur
-        scope_to_zone[cur] = cur
+        cur = sid
+        while cur is not None and scope_type.get(cur) != zone_type:
+            cur = parent.get(cur)
+        # No zone-typed ancestor at all (an older/flatter import where zone
+        # genuinely is the root, or a scope above the first zone) — fall
+        # back to the top of the chain, same as before.
+        if cur is None:
+            cur = sid
+            while parent.get(cur):
+                cur = parent[cur]
+        scope_to_zone[sid] = cur
 
     sel = {str(s) for s in (scope_ids or [])}
     if not sel:
         return (lambda sc, ac: True), scope_to_zone
 
     selected_scopes = sel & set(parent)
-    selected_tasks = sel - selected_scopes
+    remaining = sel - selected_scopes
+    # Whatever's left of the selection is assumed to be individual activity
+    # ids (the scope picker allows selecting down to a single task) — but a
+    # *stale* scope_ids list (every id left over from before the project's
+    # schedule was last re-imported, which replaces every ProjectScope and
+    # Activity with fresh UUIDs) would otherwise match nothing here either,
+    # silently excluding every real scope and rendering the whole report's
+    # zone-scoped data empty with no error. Only trust `remaining` as real
+    # task ids once at least one of them is confirmed to still exist.
+    selected_tasks = set()
+    if remaining:
+        real_tasks = {str(a) for a in project.activities.filter(id__in=remaining).values_list("id", flat=True)}
+        selected_tasks = remaining & real_tasks
+
+    if not selected_scopes and not selected_tasks:
+        # The entire saved selection is stale — fall back to "everything"
+        # selected (same as an empty scope_ids) instead of a silently empty report.
+        return (lambda sc, ac: True), scope_to_zone
+
     covered, stack = set(), list(selected_scopes)
     while stack:
         node = stack.pop()
@@ -147,13 +178,18 @@ def _scope_context(project, scope_ids):
 
 
 def _zone_rows(project, scope_ids=None, progress=None):
-    """Top-level zones with progress rolled up over the *selected* tasks (a zone
-    is shown only when it has included tasks). No selection = the whole project.
-    `progress` (activity_id->% map) overrides current values for as-of reports."""
+    """Zones with progress rolled up over the *selected* tasks (a zone is shown
+    only when it has included tasks). No selection = the whole project.
+    `progress` (activity_id->% map) overrides current values for as-of reports.
+
+    Matches every ZONE-typed scope regardless of parent — NOT just top-level
+    ones: a P6 import can nest Zone under Stage (see `_scope_context`), so a
+    `parent__isnull=True` filter here would exclude every real zone in that
+    shape even though `scope_to_zone` correctly resolves activities to them."""
     predicate, scope_to_zone = _scope_context(project, scope_ids)
     zones = list(
         ProjectScope.objects.filter(
-            project=project, parent__isnull=True, scope_type=ProjectScope.ScopeType.ZONE
+            project=project, scope_type=ProjectScope.ScopeType.ZONE
         ).order_by("sort_order", "name").values_list("id", "name")
     )
     order = {str(z): i for i, (z, _) in enumerate(zones)}
@@ -228,8 +264,10 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         w = weight.get(sid, 0.0)
         return round(pweight[sid] / w, 1) if w else None
 
+    # Every ZONE-typed scope, regardless of depth — not just top-level ones;
+    # see _zone_rows's docstring for why (Stage can sit above Zone).
     zones = sorted(
-        (s for s in scopes.values() if s.parent_id is None and s.scope_type == ProjectScope.ScopeType.ZONE),
+        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.ZONE),
         key=lambda s: (s.sort_order, s.name),
     )
 
@@ -362,8 +400,10 @@ def _gantt_rows(project, scope_ids=None, progress=None):
             "progress": round(pweight[sid] / weight[sid], 1),
         }
 
+    # Every ZONE-typed scope, regardless of depth — not just top-level ones;
+    # see _zone_rows's docstring for why (Stage can sit above Zone).
     zones = sorted(
-        (s for s in scopes.values() if s.parent_id is None and s.scope_type == ProjectScope.ScopeType.ZONE),
+        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.ZONE),
         key=lambda s: (s.sort_order, s.name),
     )
 

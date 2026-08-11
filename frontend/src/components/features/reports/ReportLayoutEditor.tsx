@@ -28,12 +28,20 @@ interface Props {
   /** This report's live project data — shown inside table/chart/field
    * elements on the canvas instead of generic placeholder content. */
   liveData: ReportData | null;
+  /** True until the very first `liveData` fetch settles (success or
+   * failure) — see the `everSettled` gate below. Without this, the canvas
+   * could unlock as soon as the page-image render finished even though
+   * liveData was still null, showing every table/chart's generic
+   * placeholder and looking like real data had silently failed to load. */
+  liveDataLoading: boolean;
   canManage: boolean;
   /** Refreshes the report row + the PDF preview after a save/reset. */
   onSaved: () => void;
 }
 
-export function ReportLayoutEditor({ reportId, template, savedOverride, liveData, canManage, onSaved }: Props) {
+export function ReportLayoutEditor({
+  reportId, template, savedOverride, liveData, liveDataLoading, canManage, onSaved,
+}: Props) {
   const design = template ? readPageDesign(template.config) : null;
   const templatePages = template ? readPages(template.config) : [];
   // A repeating page (e.g. "one per zone") is one row in the template but N
@@ -68,15 +76,19 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
   // regenerating it (10-20s) on every keystroke would make editing unusable.
   const [imagesKey, setImagesKey] = useState(0);
   const { images: pageImages, loading: imagesLoading } = useReportPageImages(reportId, imagesKey);
-  // Blocks the canvas until the real page backgrounds have loaded once, so
-  // you can't start dragging elements against a blank/wrong background —
-  // stays true for the rest of the session once the first load settles
-  // (success or failure), so a later re-generate-after-save doesn't lock
-  // the whole editor again.
+  // Blocks the canvas until BOTH the real page backgrounds AND the live
+  // project data have loaded once — either one finishing alone used to be
+  // enough to unlock editing, so a report whose /data/ fetch was slower
+  // than its page-image render (its own separate ~7s+ query, see
+  // ReportDetail) would show every table/chart's generic placeholder
+  // content instead of the real thing, looking like real data had
+  // silently failed to load. Stays true for the rest of the session once
+  // both first settle, so a later re-generate-after-save doesn't lock the
+  // whole editor again.
   const [everSettled, setEverSettled] = useState(false);
   useEffect(() => {
-    if (!imagesLoading) setEverSettled(true);
-  }, [imagesLoading]);
+    if (!imagesLoading && !liveDataLoading) setEverSettled(true);
+  }, [imagesLoading, liveDataLoading]);
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);

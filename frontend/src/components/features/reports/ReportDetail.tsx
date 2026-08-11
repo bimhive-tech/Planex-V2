@@ -92,6 +92,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("setup");
   const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState<ReportData | null>(null);
+  const [dataLoading, setDataLoading] = useState(true);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewLoading, setPreviewLoading] = useState(true);
   const [sectionPages, setSectionPages] = useState<Record<string, number>>({});
@@ -129,7 +130,11 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   // Live project data (progress tables / info) — refetched after each save.
   useEffect(() => {
     let alive = true;
-    api.get<ReportData>(`/reports/${reportId}/data/`).then((d) => alive && setData(d)).catch(() => {});
+    setDataLoading(true);
+    api.get<ReportData>(`/reports/${reportId}/data/`)
+      .then((d) => alive && setData(d))
+      .catch(() => {})
+      .finally(() => alive && setDataLoading(false));
     return () => { alive = false; };
   }, [reportId, refreshKey]);
 
@@ -365,6 +370,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     template={selectedTemplate}
                     savedOverride={savedOverride}
                     liveData={data}
+                    liveDataLoading={dataLoading}
                     canManage={canManage}
                     onSaved={() => { reload(); bump(); }}
                   />
