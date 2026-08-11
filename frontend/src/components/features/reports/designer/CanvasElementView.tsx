@@ -67,7 +67,7 @@ export function CanvasElementView({
     const ghostClass = liveData ? styles.elementGhostReal : styles.elementGhost;
     return (
       <div className={`${styles.element} ${ghostClass}`} style={style} aria-hidden="true">
-        <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />
+        <ElementPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />
       </div>
     );
   }
@@ -93,7 +93,7 @@ export function CanvasElementView({
         }
       }}
     >
-      {!hideContent && <ElementPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />}
+      {!hideContent && <ElementPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />}
 
       {selected && (
         <>

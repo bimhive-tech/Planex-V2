@@ -17,8 +17,24 @@ import styles from "./designer.module.css";
 
 interface PreviewProps {
   el: LayoutElement;
+  /** mm-to-px factor for this canvas (BASE_SCALE * zoom, see LayoutEditor) —
+   * text/field font sizes are converted through this so they resize in step
+   * with the element's box as you zoom. Without it, a box drawn at
+   * `w * scale` grows and shrinks with zoom while a plain CSS `pt` font size
+   * doesn't, so the same text wraps onto a different number of lines at
+   * different zoom levels purely from the mismatch, not any real change. */
+  scale: number;
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
+}
+
+/** 1pt = 1/72in = 25.4/72mm — matches how apps/reports/pdf_canvas.py's
+ * `_text_style` treats `props.size` (a ReportLab `fontSize`, i.e. points),
+ * so the preview's line-wrapping tracks the real PDF's, not just itself
+ * across zoom levels. */
+const PT_TO_MM = 25.4 / 72;
+function ptToPx(pt: number, scale: number): number {
+  return pt * PT_TO_MM * scale;
 }
 
 function label(list: { value: string; label: string }[], value: unknown, fallback: string) {
@@ -386,7 +402,7 @@ function resolveRepeatImageUrl(props: Record<string, unknown>, pinnedItem: Repea
   return (item?.url as string) || null;
 }
 
-export function ElementPreview({ el, liveData, pinnedItem }: PreviewProps) {
+export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps) {
   const p = el.props;
 
   switch (el.type) {
@@ -395,7 +411,7 @@ export function ElementPreview({ el, liveData, pinnedItem }: PreviewProps) {
         <div
           className={styles.textPreview}
           style={{
-            fontSize: `${Number(p.size ?? 11)}pt`,
+            fontSize: `${ptToPx(Number(p.size ?? 11), scale)}px`,
             color: String(p.color ?? "#1e2430"),
             textAlign: (p.align as "left" | "center" | "right") ?? "left",
             fontWeight: p.bold ? 700 : 400,
@@ -412,7 +428,7 @@ export function ElementPreview({ el, liveData, pinnedItem }: PreviewProps) {
         <div
           className={styles.fieldPreview}
           style={{
-            fontSize: `${Number(p.size ?? 11)}pt`,
+            fontSize: `${ptToPx(Number(p.size ?? 11), scale)}px`,
             color: String(p.color ?? "#1e2430"),
             textAlign: (p.align as "left" | "center" | "right") ?? "left",
             fontWeight: p.bold ? 700 : 400,
@@ -485,10 +501,10 @@ export function ElementPreview({ el, liveData, pinnedItem }: PreviewProps) {
       );
 
     case "table":
-      return <TablePreview el={el} liveData={liveData} pinnedItem={pinnedItem} />;
+      return <TablePreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />;
 
     case "chart":
-      return <ChartPreview el={el} liveData={liveData} pinnedItem={pinnedItem} />;
+      return <ChartPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />;
 
     case "toc":
       return <TocPreview />;
