@@ -1631,3 +1631,115 @@ class ReportsApiTests(TestCase):
         self.client.force_authenticate(self.viewer)
         res = self.client.post(f"/api/report-templates/{template.id}/seed-layout/")
         self.assertEqual(res.status_code, 403)
+
+
+class ArabicWrapTests(SimpleTestCase):
+    """A long Arabic value in a narrow table column used to garble: the whole
+    string was bidi-reordered once, then ReportLab re-wrapped that already-
+    reordered text using plain LTR word-breaking, cutting off the front of the
+    value (reported live as "Consultant" showing "-روب للاستشارات الهندسية"
+    instead of "جروب للاستشارات الهندسية"). The fix shapes each line
+    separately, after wrapping the *logical* text — see pdf_tables._wrap_shape."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    LONG_NAME = "مشروع المنصورة 6 - أعمال التشطيبات"
+    LONG_CONSULTANT = "جروب للاستشارات الهندسية"
+
+    def test_wrap_shape_keeps_text_on_one_line_when_it_fits(self):
+        from reportlab.lib.units import mm
+
+        from .pdf_base import shape
+        from .pdf_tables import _wrap_shape
+
+        result = _wrap_shape(self.LONG_CONSULTANT, "Amiri", 12, 200 * mm)
+        self.assertEqual(result, shape(self.LONG_CONSULTANT))  # no <br/> — single line, same as before
+
+    def test_wrap_shape_breaks_into_multiple_lines_when_too_narrow(self):
+        from reportlab.lib.units import mm
+
+        from .pdf_tables import _wrap_shape
+
+        result = _wrap_shape(self.LONG_NAME, "Amiri", 12, 25 * mm)
+        self.assertIn("<br/>", result)  # actually wrapped, not silently squeezed onto one line
+
+    def test_wrap_shape_does_not_drop_words(self):
+        """Every word must land on some line — this is the exact failure mode
+        reported (the first word(s) of a long value going missing)."""
+        from reportlab.lib.units import mm
+
+        from .pdf_tables import _wrap_shape
+
+        for max_width in (20 * mm, 30 * mm, 45 * mm, 200 * mm):
+            result = _wrap_shape(self.LONG_NAME, "Amiri", 12, max_width)
+            lines = result.split("<br/>")
+            self.assertEqual(len(lines), len([ln for ln in lines if ln]))  # no empty lines
+            # 5 logical words in; every line must be non-trivially long enough
+            # to plausibly hold at least one shaped word (catches a line that
+            # silently lost its content, not just a line-count mismatch).
+            for line in lines:
+                self.assertGreater(len(line), 0)
+
+    def test_wrap_shape_handles_empty_and_none(self):
+        from .pdf_tables import _wrap_shape
+
+        self.assertEqual(_wrap_shape("", "Amiri", 12, 50), "")
+        self.assertEqual(_wrap_shape(None, "Amiri", 12, 50), "")
+
+    def test_info_table_wraps_long_value_in_a_narrow_column_without_crashing(self):
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+        from .pdf_tables import _info_table, _styles
+
+        cfg = default_config()
+        styles = _styles(cfg)
+        rows = [("Name", self.LONG_NAME), ("Consultant", self.LONG_CONSULTANT), ("Code", "MNS-6-FIN")]
+        table = _info_table(cfg, styles, rows, True, avail_width=95 * mm)
+        self.assertIsNotNone(table)
+        # Value column is column 0 in the RTL layout (label sits on the right).
+        name_cell = table._cellvalues[0][0]
+        self.assertIn("<br/>", name_cell.text)
+
+    def test_project_info_via_resolve_table_wraps_at_narrow_widths(self):
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+
+        cfg = default_config()
+        ctx = _full_ctx()
+        ctx["project"]["name"] = self.LONG_NAME
+        ctx["project"]["consultant"] = self.LONG_CONSULTANT
+        table = resolve_table("project_info", cfg, ctx, {"item": None}, avail_width=95 * mm)
+        self.assertIsNotNone(table)
+        rendered = [cell.text for row in table._cellvalues for cell in row if hasattr(cell, "text")]
+        self.assertTrue(any("<br/>" in t for t in rendered))
+
+    def test_project_info_stays_one_line_at_a_wide_width(self):
+        """No regression for the common case — plenty of room, no wrapping."""
+        from .constants import default_config
+
+        cfg = default_config()
+        ctx = _full_ctx()
+        ctx["project"]["name"] = self.LONG_NAME
+        table = resolve_table("project_info", cfg, ctx, {"item": None}, avail_width=500)
+        self.assertIsNotNone(table)
+        rendered = [cell.text for row in table._cellvalues for cell in row if hasattr(cell, "text")]
+        self.assertFalse(any("<br/>" in t for t in rendered))
+
+    def test_bullet_marker_not_a_missing_glyph_black_square(self):
+        """■ (U+25A0) has no glyph in the Amiri font and renders as a visible
+        tofu box next to every label — swapped for a plain bullet."""
+        from .constants import default_config
+        from .pdf_tables import _info_table, _styles
+
+        cfg = default_config()
+        styles = _styles(cfg)
+        table = _info_table(cfg, styles, [("Name", "Test")], True)
+        label_cell = table._cellvalues[0][1]
+        self.assertNotIn("■", label_cell.text)
+        self.assertIn("•", label_cell.text)

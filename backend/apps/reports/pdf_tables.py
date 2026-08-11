@@ -5,11 +5,14 @@ to import the whole flowing-document module to build a table."""
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Table, TableStyle
 
 from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
 
 NOTE_HEIGHT = 4 * mm  # space reserved under a truncated table for the "+N more" note
+CELL_H_PADDING = 16  # LEFTPADDING + RIGHTPADDING as set on every table style below
+MIN_COL_WIDTH = 15 * mm
 
 
 def _styles(cfg):
@@ -32,9 +35,40 @@ def _styles(cfg):
     }
 
 
-def _aligned(style, text, *, force=None):
+def _wrap_shape(text, font_name, font_size, max_width) -> str:
+    """Break `text` into lines that fit `max_width` when rendered, shaping
+    (reshape + bidi-reorder) each line separately, then join with <br/>.
+
+    Arabic must be shaped *after* it's known where each line breaks — shaping
+    the whole string first and then letting ReportLab's own word-wrap re-break
+    the already bidi-reordered result garbles the text (the visible symptom:
+    long Arabic values in a narrow table column render as cut-off fragments).
+    Shaping line-by-line up front means Paragraph never needs to re-wrap.
+    """
+    text = str(text or "")
+    if not text:
+        return ""
+    words = text.split(" ")
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        trial = current + [word]
+        trial_shaped = shape(" ".join(trial))
+        if current and stringWidth(trial_shaped, font_name, font_size) > max_width:
+            lines.append(shape(" ".join(current)))
+            current = [word]
+        else:
+            current = trial
+    if current:
+        lines.append(shape(" ".join(current)))
+    return "<br/>".join(lines)
+
+
+def _aligned(style, text, *, force=None, max_width=None):
     s = ParagraphStyle(f"{style.name}_a", parent=style)
     s.alignment = force if force is not None else (TA_RIGHT if has_arabic(text) else TA_LEFT)
+    if max_width and has_arabic(text):
+        return Paragraph(_wrap_shape(text, s.fontName, s.fontSize, max_width), s)
     return Paragraph(shape(text), s)
 
 
@@ -46,16 +80,26 @@ def _pct_or_dash(v):
     return f"{v:.1f}%" if v is not None else "—"
 
 
-def _info_table(cfg, styles, rows, rtl):
-    """Bordered 2-col table: ■ label on the right, value on the left (RTL look)."""
+def _info_table(cfg, styles, rows, rtl, avail_width=None):
+    """Bordered 2-col table: ■ label on the right, value on the left (RTL look).
+
+    `avail_width` (the box/frame width this table will actually be drawn
+    into, in points) lets the value column wrap long text correctly instead
+    of relying on ReportLab to shrink-then-rewrap the auto ("None") column,
+    which is what garbles long Arabic values — see `_wrap_shape`.
+    """
     c = cfg["colors"]
     label_style = ParagraphStyle("lbl", parent=styles["value"], alignment=TA_RIGHT)
+    label_w = 58 * mm
+    value_max_width = max(avail_width - label_w - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
     data = []
     for label, value in rows:
-        lbl = Paragraph(f"{shape(label)} ■", label_style)
-        val = _aligned(styles["body"], value, force=TA_RIGHT if rtl else TA_LEFT)
+        # A bullet, not a black square (■) — Amiri has no glyph for ■ and
+        # renders it as a visible tofu box next to every label.
+        lbl = Paragraph(f"{shape(label)} •", label_style)
+        val = _aligned(styles["body"], value, force=TA_RIGHT if rtl else TA_LEFT, max_width=value_max_width)
         data.append([val, lbl] if rtl else [lbl, val])
-    widths = [None, 58 * mm] if rtl else [58 * mm, None]
+    widths = [None, label_w] if rtl else [label_w, None]
     t = Table(data, colWidths=widths)
     t.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.7, hexcolor(c["table_border"])),
@@ -67,13 +111,33 @@ def _info_table(cfg, styles, rows, rtl):
     return t
 
 
-def _data_table(cfg, styles, header, rows, col_widths=None):
+def _auto_col_max_widths(col_widths, n_cols, avail_width):
+    """For whichever columns have no fixed width (None, or col_widths omitted
+    entirely), split the leftover space between them — the width each such
+    column's text needs to wrap correctly. None when there's nothing to
+    compute (no avail_width, or every column already has a fixed width)."""
+    if not avail_width:
+        return None
+    widths = col_widths if col_widths is not None else [None] * n_cols
+    fixed_sum = sum(w for w in widths if w is not None)
+    none_count = sum(1 for w in widths if w is None)
+    if not none_count:
+        return None
+    share = max((avail_width - fixed_sum) / none_count - CELL_H_PADDING, MIN_COL_WIDTH)
+    return [share if w is None else None for w in widths]
+
+
+def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
     c, tcfg = cfg["colors"], cfg["table"]
     head = ParagraphStyle("th", parent=styles["body"], fontName=BOLD if tcfg.get("header_bold") else FONT_NAME,
                           textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
+    max_widths = _auto_col_max_widths(col_widths, len(header), avail_width)
     data = [[Paragraph(shape(h), head) for h in header]]
     for row in rows:
-        data.append([_aligned(styles["body"], cell, force=TA_CENTER) for cell in row])
+        data.append([
+            _aligned(styles["body"], cell, force=TA_CENTER, max_width=(max_widths[i] if max_widths else None))
+            for i, cell in enumerate(row)
+        ])
     t = Table(data, colWidths=col_widths, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
@@ -89,7 +153,7 @@ def _data_table(cfg, styles, header, rows, col_widths=None):
     return t
 
 
-def _hierarchy_table(cfg, styles, rows, labels, rtl):
+def _hierarchy_table(cfg, styles, rows, labels, rtl, avail_width=None):
     """Project -> Zone -> Subzone rollup. Zone rows are bold; subzone rows are
     indented one level — same shape as the report's nested breakdown table."""
     c, tcfg = cfg["colors"], cfg["table"]
@@ -98,6 +162,14 @@ def _hierarchy_table(cfg, styles, rows, labels, rtl):
     name_style = ParagraphStyle("hin", parent=styles["body"], alignment=TA_RIGHT if rtl else TA_LEFT)
     name_bold = ParagraphStyle("hinb", parent=name_style, fontName=BOLD)
     pct_style = ParagraphStyle("hip", parent=styles["body"], alignment=TA_CENTER)
+    name_max_width = (
+        max(avail_width - 3 * 28 * mm - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
+    )
+
+    def name_para(text, style, *, indent=""):
+        if name_max_width and has_arabic(text):
+            return Paragraph(indent + _wrap_shape(text, style.fontName, style.fontSize, name_max_width), style)
+        return Paragraph(indent + shape(text), style)
 
     header = [labels["col_zone"], labels["col_actual"], labels["col_previous"], labels["col_planned"]]
     data = [[Paragraph(shape(h), head) for h in header]]
@@ -105,15 +177,14 @@ def _hierarchy_table(cfg, styles, rows, labels, rtl):
     for zone in rows:
         zebra_rows.append(len(data))
         data.append([
-            Paragraph(shape(zone["name"]), name_bold),
+            name_para(zone["name"], name_bold),
             Paragraph(_pct_or_dash(zone["actual"]), pct_style),
             Paragraph(_pct_or_dash(zone["previous"]), pct_style),
             Paragraph(_pct_or_dash(zone["planned"]), pct_style),
         ])
         for child in zone["children"]:
-            indented = "    " + shape(child["name"])
             data.append([
-                Paragraph(indented, name_style),
+                name_para(child["name"], name_style, indent="    "),
                 Paragraph(_pct_or_dash(child["actual"]), pct_style),
                 Paragraph(_pct_or_dash(child["previous"]), pct_style),
                 Paragraph(_pct_or_dash(child["planned"]), pct_style),

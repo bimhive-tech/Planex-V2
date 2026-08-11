@@ -8,9 +8,10 @@
 // layout_override instead of a template's config. Margins/page size stay
 // template-controlled; page content AND the header/footer master content are
 // both editable here.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { StateView } from "@/components/ui/StateView";
 import { useReportPageImages } from "@/hooks/useReportPageImages";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
@@ -67,6 +68,15 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
   // regenerating it (10-20s) on every keystroke would make editing unusable.
   const [imagesKey, setImagesKey] = useState(0);
   const { images: pageImages, loading: imagesLoading } = useReportPageImages(reportId, imagesKey);
+  // Blocks the canvas until the real page backgrounds have loaded once, so
+  // you can't start dragging elements against a blank/wrong background —
+  // stays true for the rest of the session once the first load settles
+  // (success or failure), so a later re-generate-after-save doesn't lock
+  // the whole editor again.
+  const [everSettled, setEverSettled] = useState(false);
+  useEffect(() => {
+    if (!imagesLoading) setEverSettled(true);
+  }, [imagesLoading]);
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);
@@ -116,6 +126,18 @@ export function ReportLayoutEditor({ reportId, template, savedOverride, liveData
     return (
       <section className={styles.tabPanel}>
         <p className={styles.hint}>Pick a template on the Setup tab first — this report's custom pages start as a copy of the template&apos;s.</p>
+      </section>
+    );
+  }
+
+  // Block the editor until the report's real pages have rendered once —
+  // dragging elements onto a canvas whose background hasn't loaded yet
+  // meant working blind against the wrong (or a missing) page image.
+  if (!everSettled) {
+    return (
+      <section className={styles.tabPanel}>
+        <StateView loading error={null} isEmpty={false}>{null}</StateView>
+        <p className={styles.hint}>Loading this report's real pages so you can start customizing…</p>
       </section>
     );
   }

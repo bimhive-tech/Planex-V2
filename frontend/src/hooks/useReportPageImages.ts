@@ -17,7 +17,12 @@ interface PageImagesResponse {
 
 export function useReportPageImages(reportId: string | null, refreshKey: number | string) {
   const [images, setImages] = useState<string[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  // True from the very first render when a fetch is about to happen — avoids
+  // a one-tick window where a caller reads loading=false before the effect
+  // below has had a chance to flip it (the Customize tab used to let you
+  // start dragging elements in exactly that window, before the real page
+  // background had loaded).
+  const [loading, setLoading] = useState(Boolean(reportId));
 
   useEffect(() => {
     if (!reportId) {

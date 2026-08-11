@@ -404,7 +404,7 @@ def _draw_placeholder(c, x, y, w, h, label):
 
 def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
     source = props.get("source", "")
-    table = resolve_table(source, cfg, ctx, inst.scope)
+    table = resolve_table(source, cfg, ctx, inst.scope, avail_width=w)
     if table is None:
         _draw_placeholder(c, x, y, w, h, f"No data: {source}")
         return
@@ -479,11 +479,15 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 
 # ── Table binding ────────────────────────────────────────────────────────────
 
-def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
+def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None):
     """Build a ready-to-draw Table flowable for one of reportElements.ts's
     TABLE_SOURCES (plus the item-scoped `item.children`, available on a
     repeating page), reusing the exact row-construction logic and labels the
-    legacy renderer uses (pdf.py) — or None when there's nothing to show."""
+    legacy renderer uses (pdf.py) — or None when there's nothing to show.
+
+    `avail_width` is the actual box width (points) this table will be drawn
+    into — passed down so long text in an auto-width column wraps correctly
+    instead of garbling (see pdf_tables._wrap_shape)."""
     styles = _styles(cfg)
     labels = cfg["labels"]
     rtl = bool(ctx.get("arabic"))
@@ -497,7 +501,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
                  f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
                  f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
         return _data_table(cfg, styles, [labels["col_zone"], labels["col_actual"], labels["col_planned"]],
-                            rows, col_widths=[None, 30 * mm, 30 * mm])
+                            rows, col_widths=[None, 30 * mm, 30 * mm], avail_width=avail_width)
     if source.startswith("item."):
         return None  # no other item-scoped table source defined
 
@@ -543,18 +547,19 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
             (labels.get("info_part_delay", "(Part) Delay (Calendar Days)"), days(p.get("part_delay_days"))),
         ]
         rows = [(k, v) for k, v in rows if v and v != "—"]
-        return _info_table(cfg, styles, rows, rtl) if rows else None
+        return _info_table(cfg, styles, rows, rtl, avail_width=avail_width) if rows else None
 
     if source == "zone_progress":
         zones = ctx.get("zones") or []
         if not zones:
             return None
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
-        return _data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows, col_widths=[None, 40 * mm])
+        return _data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
+                            col_widths=[None, 40 * mm], avail_width=avail_width)
 
     if source == "hierarchy_progress":
         hierarchy = ctx.get("hierarchy") or []
-        return _hierarchy_table(cfg, styles, hierarchy, labels, rtl) if hierarchy else None
+        return _hierarchy_table(cfg, styles, hierarchy, labels, rtl, avail_width=avail_width) if hierarchy else None
 
     if source == "discipline_progress":
         discipline = ctx.get("discipline") or []
@@ -565,7 +570,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
         rows = [[r["name"]] + [_pct_or_dash(r.get(d)) for d in
                                ("concrete", "architecture", "electrical", "mechanical", "other")]
                 for r in discipline]
-        return _data_table(cfg, styles, header, rows)
+        return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "progress_compare":
         zones = [z for z in (ctx.get("zones") or []) if z.get("planned") is not None]
@@ -577,7 +582,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
                  f"{z['progress']:.1f}%"] for z in zones]
         return _data_table(cfg, styles,
             [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
-            rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm])
+            rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm], avail_width=avail_width)
 
     if source == "milestones":
         milestones = ctx.get("milestones") or []
@@ -585,7 +590,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
             return None
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in milestones]
         return _data_table(cfg, styles, [labels["col_milestone"], labels["col_date"], labels["col_status"]],
-                            rows, col_widths=[None, 32 * mm, 34 * mm])
+                            rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=avail_width)
 
     if source == "invoices":
         invoices = ctx.get("invoices") or []
@@ -595,7 +600,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
         rows.append([labels.get("col_total", "Total"), f"{ctx.get('invoices_total', 0):,.2f}", ""])
         return _data_table(cfg, styles,
             [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]],
-            rows, col_widths=[None, 36 * mm, 30 * mm])
+            rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=avail_width)
 
     if source == "submittals":
         rows = (ctx.get("submittals") or {}).get("rows") or []
@@ -604,7 +609,7 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
         return _data_table(cfg, styles,
             [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
              labels.get("col_discipline", "Discipline"), labels["col_status"]],
-            [[r["title"], r["type"], r["discipline"], r["status"]] for r in rows])
+            [[r["title"], r["type"], r["discipline"], r["status"]] for r in rows], avail_width=avail_width)
 
     if source == "delays":
         delays = ctx.get("delays") or []
@@ -612,13 +617,13 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
             return None
         rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in delays]
         return _data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
-                            rows, col_widths=[None, 28 * mm, 28 * mm])
+                            rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=avail_width)
 
     if source == "detailed_progress":
-        return _resolve_detailed_progress_table(cfg, ctx, styles)
+        return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width)
 
     if source == "activity_schedule":
-        return _resolve_activity_schedule_table(cfg, ctx, styles)
+        return _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=avail_width)
 
     if source == "critical_path_delays":
         rows_data = ctx.get("critical_path") or []
@@ -628,12 +633,12 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict):
                 for r in rows_data]
         return _data_table(cfg, styles,
             [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]],
-            rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm])
+            rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm], avail_width=avail_width)
 
     return None
 
 
-def _resolve_detailed_progress_table(cfg, ctx, styles):
+def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None):
     """Detailed activity grid — v1 scope: only the first zone's grid, only its
     first 8 columns (the legacy `_grid_section` splits wide grids across
     multiple pages/columns; reproducing that needs a 2D repeat, deferred)."""
@@ -653,10 +658,10 @@ def _resolve_detailed_progress_table(cfg, ctx, styles):
     labels = cfg["labels"]
     header = [labels.get("col_task", "Task")] + grid["columns"][:8]
     rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
-    return _data_table(cfg, styles, header, rows)
+    return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
 
-def _resolve_activity_schedule_table(cfg, ctx, styles):
+def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None):
     """Every activity's P6 duration/SPI/schedule-variance columns — computed
     lazily and cached in ctx, the same pattern as the detailed-progress grid
     above, since a real project can carry tens of thousands of activities and
@@ -692,7 +697,7 @@ def _resolve_activity_schedule_table(cfg, ctx, styles):
          n(r["remaining_duration"]), n(r["schedule_performance_index"], 2), n(r["schedule_variance"])]
         for r in rows_data
     ]
-    return _data_table(cfg, styles, header, rows)
+    return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
 
 # ── Chart binding ────────────────────────────────────────────────────────────

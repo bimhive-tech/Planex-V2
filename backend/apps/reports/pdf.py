@@ -367,7 +367,8 @@ def _area_dashboard_section(cfg, styles, areas, width, labels, fig):
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
                 [[f'{dur["total"]} {labels["unit_days"]}', f'{dur["elapsed"]} {labels["unit_days"]}',
-                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']])
+                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']],
+                avail_width=width)
             cap_name = f'{labels["duration_section"]} — {area["name"]}'
             flow += _captioned(cfg, styles, pie, cap_name, fig) + [table, Spacer(1, 8)]
         if area.get("photos"):
@@ -411,7 +412,7 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w, fig):
     if ctx.get("duration"):
         info_rows.append((labels["delay_days"], str(ctx["duration"]["delay"])))
     info_rows = [(k, v) for k, v in info_rows if v]
-    info = _info_table(cfg, styles, info_rows, rtl)
+    info = _info_table(cfg, styles, info_rows, rtl, avail_width=0.38 * w)
 
     def cell(drawing, name):
         # A table cell accepts a list of flowables (chart then caption), stacked.
@@ -514,7 +515,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         act = labels["activities"]
         story.append(_data_table(cfg, styles,
             [labels["completed"], labels["in_progress"], labels["not_started"]],
-            [[f"{b['completed']} {act}", f"{b['in_progress']} {act}", f"{b['not_started']} {act}"]]))
+            [[f"{b['completed']} {act}", f"{b['in_progress']} {act}", f"{b['not_started']} {act}"]], avail_width=fw))
         story.append(Spacer(1, 10))
 
     if sections.get("project_info"):
@@ -554,7 +555,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             (labels.get("info_part_delay", "(Part) Delay (Calendar Days)"), days(p.get("part_delay_days"))),
         ]
         rows = [(k, v) for k, v in rows if v and v != "—"]
-        story.append(_info_table(cfg, styles, rows, rtl))
+        story.append(_info_table(cfg, styles, rows, rtl, avail_width=fw))
 
     if sections.get("description") and (p.get("description_html") or p["description"]):
         story += major(labels["description"], anchor="tab_description")
@@ -605,7 +606,8 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             table = _data_table(cfg, styles,
                 [labels["duration_days"], labels["duration_elapsed"], labels["duration_remaining"], labels["delay_days"]],
                 [[f'{dur["total"]} {labels["unit_days"]}', f'{dur["elapsed"]} {labels["unit_days"]}',
-                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']])
+                  f'{dur["remaining"]} {labels["unit_days"]}', f'{dur["delay"]} {labels["unit_days"]}']],
+                avail_width=fw)
             story.append(KeepTogether(_sub_heading(styles, labels["duration_section"]) +
                                       _captioned(cfg, styles, pie, labels["duration_section"], fig) + [table, Spacer(1, 10)]))
         if sections.get("scurve") and not dash_on:
@@ -621,17 +623,17 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             story.append(KeepTogether(_sub_heading(styles, labels["progress_compare"]) + [
                 _data_table(cfg, styles,
                     [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
-                    rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm]), Spacer(1, 10)]))
+                    rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm], avail_width=fw), Spacer(1, 10)]))
 
     if sections.get("zone_progress") and ctx["zones"]:
         story += major(labels["zone_progress"])
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in ctx["zones"]]
         story.append(_data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
-                                 col_widths=[None, 40 * mm]))
+                                 col_widths=[None, 40 * mm], avail_width=fw))
 
     if sections.get("hierarchy_progress") and ctx.get("hierarchy"):
         story += major(labels["hierarchy_progress"])
-        story.append(_hierarchy_table(cfg, styles, ctx["hierarchy"], labels, rtl))
+        story.append(_hierarchy_table(cfg, styles, ctx["hierarchy"], labels, rtl, avail_width=fw))
 
     if sections.get("discipline_progress") and ctx.get("discipline"):
         story += major(labels["discipline_progress"])
@@ -641,7 +643,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             [r["name"]] + [_pct_or_dash(r.get(d)) for d in ("concrete", "architecture", "electrical", "mechanical", "other")]
             for r in ctx["discipline"]
         ]
-        story.append(_data_table(cfg, styles, disc_header, disc_rows))
+        story.append(_data_table(cfg, styles, disc_header, disc_rows, avail_width=fw))
 
     if sections.get("area_dashboards") and ctx.get("area_dashboards"):
         story += _area_dashboard_section(cfg, styles, ctx["area_dashboards"], fw, labels, fig)
@@ -668,7 +670,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         rows.append([labels.get("col_total", "Total"), f"{ctx['invoices_total']:,.2f}", ""])
         story.append(_data_table(cfg, styles,
             [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]],
-            rows, col_widths=[None, 36 * mm, 30 * mm]))
+            rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=fw))
 
     if sections.get("submittals") and ctx.get("submittals", {}).get("rows"):
         sub = ctx["submittals"]
@@ -676,30 +678,30 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         story += _sub_heading(styles, labels.get("submittal_summary", "Status summary"))
         story.append(_data_table(cfg, styles,
             [labels["col_status"], labels.get("col_count", "Count")],
-            [[s["status"], str(s["count"])] for s in sub["summary"]], col_widths=[None, 30 * mm]))
+            [[s["status"], str(s["count"])] for s in sub["summary"]], col_widths=[None, 30 * mm], avail_width=fw))
         story.append(Spacer(1, 8))
         story.append(_data_table(cfg, styles,
             [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
              labels.get("col_discipline", "Discipline"), labels["col_status"]],
-            [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub["rows"]]))
+            [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub["rows"]], avail_width=fw))
 
     if sections.get("delays") and ctx.get("delays"):
         story += major(labels["delays"])
         rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in ctx["delays"]]
         story.append(_data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
-                                 rows, col_widths=[None, 28 * mm, 28 * mm]))
+                                 rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=fw))
 
     if sections.get("milestones") and ctx["milestones"]:
         story += major(labels["milestones"])
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in ctx["milestones"]]
         story.append(_data_table(cfg, styles, [labels["col_milestone"], labels["col_date"], labels["col_status"]],
-                                 rows, col_widths=[None, 32 * mm, 34 * mm]))
+                                 rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=fw))
 
     if sections.get("timeline") and ctx["snapshots"]:
         story += major(labels["timeline"])
         rows = [[_fmt_date(s["date"]), f"{float(s['overall_progress']):.1f}%", s["source"] or "—"] for s in ctx["snapshots"]]
         story.append(_data_table(cfg, styles, [labels["col_date"], labels["col_progress"], labels["col_source"]],
-                                 rows, col_widths=[34 * mm, 32 * mm, None]))
+                                 rows, col_widths=[34 * mm, 32 * mm, None], avail_width=fw))
 
     if sections.get("notes") and p["notes"]:
         story += major(labels["notes"])
