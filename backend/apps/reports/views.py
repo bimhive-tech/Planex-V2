@@ -6,6 +6,7 @@ sees no reports at all, not just a hidden download button.
 """
 import json
 
+from django.core.cache import cache
 from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -38,8 +39,30 @@ class ReportsAccess(BasePermission):
 
 _UNSET = object()
 
+# build_report_context is the expensive part of every render (assembles every
+# zone/activity/cashflow/etc. the project has) but doesn't depend on layout at
+# all — only on the report's own project/date/scope, none of which change
+# while you're rearranging elements on the Customize tab. Cached briefly and
+# only for `preview-images` ("Refresh preview", meant for fast iteration
+# while editing): the first refresh in a session pays the cost once, every
+# refresh after that skips straight to rendering. `pdf`/`page-images`/`data`
+# deliberately stay uncached so anything actually saved or downloaded always
+# reflects current project data. TTL, not invalidate-on-write, since it only
+# ever backs a transient in-editor preview — worst case is a few minutes of
+# staleness in that preview alone.
+_CONTEXT_CACHE_TTL = 300
 
-def _render_report_pdf(report, engine, override=_UNSET):
+
+def _cached_report_context(report):
+    key = f"report-context:{report.id}"
+    ctx = cache.get(key)
+    if ctx is None:
+        ctx = build_report_context(report)
+        cache.set(key, ctx, _CONTEXT_CACHE_TTL)
+    return ctx
+
+
+def _render_report_pdf(report, engine, override=_UNSET, use_context_cache=False):
     """Shared by the `pdf`, `page-images`, and `preview-images` actions —
     same cfg/context assembly and canvas-vs-legacy dispatch either way.
     Returns (bytes, section->page map). The Content & Labels builder tab is
@@ -51,7 +74,7 @@ def _render_report_pdf(report, engine, override=_UNSET):
     explicit dict (or None) to render a different layout instead — used by
     `preview-images` to render an unsaved Customize-tab draft without
     persisting it first."""
-    ctx = build_report_context(report)
+    ctx = _cached_report_context(report) if use_context_cache else build_report_context(report)
     cfg = merged_config(report.template.config if report.template else None)
     applied = getattr(report, "layout_override", None) if override is _UNSET else override
     cfg = merge_layout_override(cfg, applied)
@@ -208,8 +231,14 @@ class ReportViewSet(viewsets.ModelViewSet):
         in the request body instead of the report's saved one — the
         Customize tab's "Refresh preview" button, so newly added/edited
         elements can show their real rendered look without a full Save
-        (which would persist the draft) or a wait until the next one."""
+        (which would persist the draft) or a wait until the next one.
+
+        Uses the cached report context (see _cached_report_context) and a
+        lower rasterization DPI than page-images — this is a fast-iteration
+        editing aid shown on-screen, not the pixel-identical background kept
+        for a saved report, so both corners are safe to cut here specifically."""
         report = self.get_object()
         override = request.data.get("layout_override")
-        data, _ = _render_report_pdf(report, request.query_params.get("engine"), override=override)
-        return Response({"pages": _rasterize_pdf(data), "dpi": 144})
+        data, _ = _render_report_pdf(
+            report, request.query_params.get("engine"), override=override, use_context_cache=True)
+        return Response({"pages": _rasterize_pdf(data, dpi=108), "dpi": 108})

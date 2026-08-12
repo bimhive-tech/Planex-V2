@@ -1613,10 +1613,31 @@ class ReportsApiTests(TestCase):
             {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data["pages"]), 1)
-        self.assertEqual(resp.data["dpi"], 144)
+        # Lower than page-images' 144 — this is a fast-iteration editing aid,
+        # not the pixel-identical background kept for a saved report.
+        self.assertEqual(resp.data["dpi"], 108)
 
         report = Report.objects.get(id=report_id)
         self.assertIsNone(report.layout_override)
+
+    def test_preview_images_action_reuses_cached_context_across_calls(self):
+        """The expensive part of a render (build_report_context) doesn't
+        depend on layout — cached briefly so repeated "Refresh preview"
+        clicks in one editing session don't repay that cost every time."""
+        from unittest.mock import patch
+
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        from . import views
+        with patch.object(views, "build_report_context", wraps=views.build_report_context) as spy:
+            self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
+            self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
+            self.assertEqual(spy.call_count, 1)
 
     def test_preview_images_action_with_no_override_renders_saved_layout(self):
         """A falsy/missing layout_override in the body falls back to
