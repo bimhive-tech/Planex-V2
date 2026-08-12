@@ -1588,6 +1588,50 @@ class ReportsApiTests(TestCase):
         png = base64.b64decode(resp.data["pages"][0])
         self.assertTrue(png.startswith(b"\x89PNG"))
 
+    def test_preview_images_action_renders_unsaved_draft_without_persisting(self):
+        """The Customize tab's "Refresh preview" button — same rasterizing as
+        page-images, but against a layout_override sent in the POST body
+        rather than the report's saved one, and without writing it to the
+        DB (see pdf_canvas dispatch on has_canvas_layout picking it up)."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "e1", "type": "text", "x": 10, "y": 10, "w": 100, "h": 20, "z": 0,
+                     "props": {"text": "Draft heading"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/preview-images/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data["pages"]), 1)
+        self.assertEqual(resp.data["dpi"], 144)
+
+        report = Report.objects.get(id=report_id)
+        self.assertIsNone(report.layout_override)
+
+    def test_preview_images_action_with_no_override_renders_saved_layout(self):
+        """A falsy/missing layout_override in the body falls back to
+        whatever's actually saved — same behavior as page-images."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        resp = self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreaterEqual(len(resp.data["pages"]), 1)
+
     def test_data_action_trims_repeat_sources_to_light_metadata(self):
         """photos/attachments/logos only need a caption and an authed
         streaming URL to render on the Customize tab's canvas — never the

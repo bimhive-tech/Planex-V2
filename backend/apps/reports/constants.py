@@ -260,7 +260,14 @@ def apply_report_layout_override(cfg: dict, report) -> dict:
     Customize tab only ever lets a report override master_elements (its own
     header/footer content), never margins/page size/etc., so those keep
     tracking the template live even after a report has its own header."""
-    override = getattr(report, "layout_override", None)
+    return merge_layout_override(cfg, getattr(report, "layout_override", None))
+
+
+def merge_layout_override(cfg: dict, override: dict | None) -> dict:
+    """Same merge apply_report_layout_override does, but against an explicit
+    override dict rather than the report's saved one — lets the Customize
+    tab's "Refresh preview" render an unsaved draft (see the preview-images
+    action) without writing anything to the DB first."""
     if not override:
         return cfg
     cfg = copy.deepcopy(cfg)

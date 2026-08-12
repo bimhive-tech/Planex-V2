@@ -38,11 +38,16 @@ interface Props {
   pageImagesLoading?: boolean;
   /** page id -> 1-based position in pageImages — see ReportLayoutEditor. */
   pageNumberMap?: Map<string, number>;
+  /** Bumped by ReportLayoutEditor each time "Refresh preview" lands a fresh
+   * set of real backgrounds — included in LayoutEditor's key so it remounts
+   * and recomputes bornIds against the elements that are now actually baked
+   * into those backgrounds, the same way switching pages already does. */
+  previewVersion?: number;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
-  pageImages, pageImagesLoading, pageNumberMap,
+  pageImages, pageImagesLoading, pageNumberMap, previewVersion,
 }: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -297,8 +302,9 @@ export function ReportConfigurator({
       // Mode is part of the key (not just the page) — switching between
       // "Page content" and "Header & footer" is a different editable set
       // entirely, so it should get its own fresh undo history and bornIds
-      // snapshot rather than inheriting the page's.
-      key={`${active.id}-${editMode}`}
+      // snapshot rather than inheriting the page's. previewVersion is
+      // included too — see its doc comment above.
+      key={`${active.id}-${editMode}-${previewVersion ?? 0}`}
       design={design}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
       onElementsChange={editingHeader ? onMasterElementsChange! : setElements}

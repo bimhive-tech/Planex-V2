@@ -14,7 +14,7 @@ from rest_framework.response import Response
 
 from apps.accounts.constants import Permission
 
-from .constants import apply_report_layout_override, merged_config
+from .constants import merge_layout_override, merged_config
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf
@@ -36,21 +36,42 @@ class ReportsAccess(BasePermission):
         return Permission.EXPORT_REPORTS in user.effective_permissions()
 
 
-def _render_report_pdf(report, engine):
-    """Shared by the `pdf` and `page-images` actions — same cfg/context
-    assembly and canvas-vs-legacy dispatch either way. Returns (bytes,
-    section->page map). The Content & Labels builder tab is gone from the
-    UI, but existing templates that only ever had section toggles (no real
-    canvas content) still need this fallback to render at all."""
+_UNSET = object()
+
+
+def _render_report_pdf(report, engine, override=_UNSET):
+    """Shared by the `pdf`, `page-images`, and `preview-images` actions —
+    same cfg/context assembly and canvas-vs-legacy dispatch either way.
+    Returns (bytes, section->page map). The Content & Labels builder tab is
+    gone from the UI, but existing templates that only ever had section
+    toggles (no real canvas content) still need this fallback to render at
+    all.
+
+    `override` defaults to the report's own saved `layout_override`; pass an
+    explicit dict (or None) to render a different layout instead — used by
+    `preview-images` to render an unsaved Customize-tab draft without
+    persisting it first."""
     ctx = build_report_context(report)
     cfg = merged_config(report.template.config if report.template else None)
-    cfg = apply_report_layout_override(cfg, report)
+    applied = getattr(report, "layout_override", None) if override is _UNSET else override
+    cfg = merge_layout_override(cfg, applied)
     pages = {}
     if engine == "canvas" or (engine is None and has_canvas_layout(cfg)):
         data = build_canvas_pdf(report, ctx, cfg=cfg, out_pages=pages)
     else:
         data = build_report_pdf(report, ctx, out_pages=pages, cfg=cfg)
     return data, pages
+
+
+def _rasterize_pdf(data: bytes, dpi: int = 144) -> list[str]:
+    """Every page of a rendered PDF, as base64 PNG — shared by `page-images`
+    and `preview-images`."""
+    import base64
+
+    import fitz
+
+    doc = fitz.open(stream=data, filetype="pdf")
+    return [base64.b64encode(page.get_pixmap(dpi=dpi).tobytes("png")).decode("ascii") for page in doc]
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):
@@ -177,16 +198,18 @@ class ReportViewSet(viewsets.ModelViewSet):
         "regenerate on save, not on every edit" model as the PDF endpoint),
         not cached — a report's layout_override changes between calls.
         """
-        import base64
-
-        import fitz
-
         report = self.get_object()
         data, _ = _render_report_pdf(report, request.query_params.get("engine"))
-        doc = fitz.open(stream=data, filetype="pdf")
-        dpi = 144
-        pages = []
-        for page in doc:
-            pix = page.get_pixmap(dpi=dpi)
-            pages.append(base64.b64encode(pix.tobytes("png")).decode("ascii"))
-        return Response({"pages": pages, "dpi": dpi})
+        return Response({"pages": _rasterize_pdf(data), "dpi": 144})
+
+    @action(detail=True, methods=["post"], url_path="preview-images")
+    def preview_images(self, request, pk=None):
+        """Same rendering as page-images, but against a layout_override sent
+        in the request body instead of the report's saved one — the
+        Customize tab's "Refresh preview" button, so newly added/edited
+        elements can show their real rendered look without a full Save
+        (which would persist the draft) or a wait until the next one."""
+        report = self.get_object()
+        override = request.data.get("layout_override")
+        data, _ = _render_report_pdf(report, request.query_params.get("engine"), override=override)
+        return Response({"pages": _rasterize_pdf(data), "dpi": 144})

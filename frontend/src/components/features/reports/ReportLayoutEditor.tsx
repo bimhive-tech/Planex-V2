@@ -65,7 +65,7 @@ export function ReportLayoutEditor({
   // Deliberately never recomputed as pages are added/reordered during the
   // session: each page keeps showing the real image it started with, and a
   // brand-new page has no entry until the next save regenerates the set.
-  const [pageNumberMap] = useState<Map<string, number>>(() => {
+  const [pageNumberMap, setPageNumberMap] = useState<Map<string, number>>(() => {
     const base = isCustomized ? savedOverride!.layout!.pages : startingPages;
     return new Map(base.map((p, i) => [p.id, i + 1]));
   });
@@ -76,6 +76,17 @@ export function ReportLayoutEditor({
   // regenerating it (10-20s) on every keystroke would make editing unusable.
   const [imagesKey, setImagesKey] = useState(0);
   const { images: pageImages, loading: imagesLoading } = useReportPageImages(reportId, imagesKey);
+  // "Refresh preview" (manual, not automatic — a render of this size can
+  // take 30-90s, too slow to fire on every pause in editing) renders the
+  // CURRENT unsaved draft and swaps these in ahead of the saved pageImages
+  // above. Cleared on the next real save/reset, since that regenerates the
+  // saved images anyway and should take back over.
+  const [previewImages, setPreviewImages] = useState<string[] | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  useEffect(() => { setPreviewImages(null); }, [imagesKey]);
+  const effectiveImages = previewImages ?? pageImages;
   // Blocks the canvas until BOTH the real page backgrounds AND the live
   // project data have loaded once — either one finishing alone used to be
   // enough to unlock editing, so a report whose /data/ fetch was slower
@@ -134,6 +145,38 @@ export function ReportLayoutEditor({
     }
   }
 
+  // Renders the current unsaved draft into real page backgrounds without
+  // persisting anything — lets newly added/edited elements show their real
+  // rendered look ahead of a full Save. Manual (not automatic on a pause in
+  // editing): a report this size can take 30-90s to render, which would
+  // make auto-refresh feel like the editor had frozen.
+  async function refreshPreview() {
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const res = await fetch(`/reports/${reportId}/preview-images-file`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          layout_override: { layout: { pages }, page_design: { master_elements: masterElements } },
+        }),
+      });
+      if (!res.ok) throw new Error("preview refresh failed");
+      const data: { pages: string[] } = await res.json();
+      setPreviewImages(data.pages.map((b64) => `data:image/png;base64,${b64}`));
+      // The response's pages are exactly `pages` in order — recompute the
+      // number map from that so a page added this session (no entry yet in
+      // the original map) also gets a real background from here on.
+      setPageNumberMap(new Map(pages.map((p, i) => [p.id, i + 1])));
+      setPreviewVersion((v) => v + 1);
+    } catch {
+      setRefreshError("Couldn't refresh the preview — try again.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (!template || !design) {
     return (
       <section className={styles.tabPanel}>
@@ -169,6 +212,9 @@ export function ReportLayoutEditor({
                 Reset to template
               </Button>
             )}
+            <Button variant="secondary" onClick={refreshPreview} disabled={refreshing || saving}>
+              {refreshing ? "Refreshing preview…" : "Refresh preview"}
+            </Button>
             <Button onClick={save} disabled={saving || !dirty}>
               {saving ? "Saving…" : "Save custom layout"}
             </Button>
@@ -176,18 +222,30 @@ export function ReportLayoutEditor({
         )}
       </div>
       {error && <p className="formError">{error}</p>}
-      <ReportConfigurator
-        design={design}
-        pages={pages}
-        onChange={updatePages}
-        liveData={liveData}
-        reportId={reportId}
-        masterElements={masterElements}
-        onMasterElementsChange={updateMasterElements}
-        pageImages={pageImages}
-        pageImagesLoading={imagesLoading}
-        pageNumberMap={pageNumberMap}
-      />
+      {refreshError && <p className="formError">{refreshError}</p>}
+      <div className={styles.canvasWrap}>
+        {refreshing && (
+          <div className={styles.refreshOverlay} role="status" aria-live="polite">
+            <span className={styles.refreshSpinner} aria-hidden="true" />
+            <p className={styles.refreshOverlayText}>
+              Refreshing the real preview — re-rendering every page, this can take a bit on a large report…
+            </p>
+          </div>
+        )}
+        <ReportConfigurator
+          design={design}
+          pages={pages}
+          onChange={updatePages}
+          liveData={liveData}
+          reportId={reportId}
+          masterElements={masterElements}
+          onMasterElementsChange={updateMasterElements}
+          pageImages={effectiveImages}
+          pageImagesLoading={imagesLoading}
+          pageNumberMap={pageNumberMap}
+          previewVersion={previewVersion}
+        />
+      </div>
     </section>
   );
 }
