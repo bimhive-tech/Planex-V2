@@ -32,6 +32,25 @@
   text-transform: capitalize;
 }
 
+.uploadBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.uploadPreview {
+  width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+}
+
 .panelHint {
   font-size: 12px;
   color: var(--text-secondary);
@@ -115,6 +134,9 @@
 }
 
 .toolBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   border-radius: var(--radius-sm);
@@ -124,9 +146,13 @@
   font-size: 15px;
   line-height: 1;
 }
-.toolBtn:hover {
+.toolBtn:hover:not(:disabled) {
   border-color: var(--primary);
   color: var(--primary);
+}
+.toolBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .zoomLabel {
@@ -614,6 +640,14 @@
 .geomField input,
 .propField input,
 .propField select {
+  /* A <select> otherwise sizes itself to its widest <option> — some data
+     sources (e.g. "Activity schedule detail (durations, SPI, variance)")
+     are longer than the 250px sidebar, which forced it to scroll
+     horizontally. width: 100% + box-sizing makes it respect the sidebar
+     instead, same as every other field here. */
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 6px 8px;
   font-size: 13px;
   color: var(--text-primary);

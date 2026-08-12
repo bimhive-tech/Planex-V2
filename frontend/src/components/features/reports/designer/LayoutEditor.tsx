@@ -5,6 +5,7 @@
 // resize, rotate, duplicate, re-order, delete, copy/paste, undo) and zoom.
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Icon } from "@/components/ui/Icon";
 import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
@@ -57,6 +58,9 @@ interface Props {
   repeating?: boolean;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  /** This report's id — present only alongside liveData. Lets the inspector's
+   * image-upload control attach an upload to this specific report. */
+  reportId?: string;
   /** The real item (or chunk group) this page was expanded from — lets
    * item.* field/table/chart elements resolve real data instead of the
    * generic placeholder. null on a fixed page or an un-expanded template. */
@@ -71,7 +75,7 @@ interface Props {
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, backgroundImage,
+  pinnedItem, backgroundImage, reportId,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -97,6 +101,12 @@ export function LayoutEditor({
   const redoStack = useRef<LayoutElement[][]>([]);
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
+  // Stacks are refs (mutated without a re-render, by design — see `commit`),
+  // so the toolbar buttons need their own trigger to know when to update
+  // their enabled/disabled state.
+  const [, setHistoryTick] = useState(0);
+  const canUndo = undoStack.current.length > 0;
+  const canRedo = redoStack.current.length > 0;
 
   /** Every mutation goes through here instead of onElementsChange directly,
    * so undo has a snapshot of what came before it. */
@@ -105,6 +115,7 @@ export function LayoutEditor({
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     redoStack.current = [];
     onElementsChange(updater);
+    setHistoryTick((t) => t + 1);
   }
 
   function undo() {
@@ -112,6 +123,7 @@ export function LayoutEditor({
     if (!previous) return;
     redoStack.current.push(elementsRef.current);
     onElementsChange(() => previous);
+    setHistoryTick((t) => t + 1);
   }
 
   function redo() {
@@ -119,6 +131,7 @@ export function LayoutEditor({
     if (!next) return;
     undoStack.current.push(elementsRef.current);
     onElementsChange(() => next);
+    setHistoryTick((t) => t + 1);
   }
 
   const { draft, guides, startMove, startResize, startRotate } = useCanvasInteraction({
@@ -259,6 +272,28 @@ export function LayoutEditor({
             <button
               type="button"
               className={styles.toolBtn}
+              onClick={undo}
+              disabled={!canUndo}
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+            >
+              <Icon name="undo" size={14} />
+            </button>
+            <button
+              type="button"
+              className={styles.toolBtn}
+              onClick={redo}
+              disabled={!canRedo}
+              aria-label="Redo"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <Icon name="redo" size={14} />
+            </button>
+          </div>
+          <div className={styles.toolGroup}>
+            <button
+              type="button"
+              className={styles.toolBtn}
               onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)] ?? z)}
               aria-label="Zoom out"
             >
@@ -310,7 +345,7 @@ export function LayoutEditor({
         )}
       </main>
 
-      <ElementInspector el={selected} onChange={updateElement} repeating={repeating} />
+      <ElementInspector el={selected} onChange={updateElement} repeating={repeating} reportId={reportId} />
     </div>
   );
 }

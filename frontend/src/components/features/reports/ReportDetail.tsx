@@ -128,11 +128,15 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const pdfUrl = `/reports/${reportId}/pdf-file`;
 
   // Live project data (progress tables / info) — refetched after each save.
+  // Served by the route handler (app/reports/[id]/data-file), not the /api
+  // rewrite proxy: build_report_context() alone takes 30s+ on a large report,
+  // which the proxy's ~60s limit can reset mid-flight (same fix as pdfUrl).
   useEffect(() => {
     let alive = true;
     setDataLoading(true);
-    api.get<ReportData>(`/reports/${reportId}/data/`)
-      .then((d) => alive && setData(d))
+    fetch(`/reports/${reportId}/data-file`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("data fetch failed"))))
+      .then((d: ReportData) => alive && setData(d))
       .catch(() => {})
       .finally(() => alive && setDataLoading(false));
     return () => { alive = false; };

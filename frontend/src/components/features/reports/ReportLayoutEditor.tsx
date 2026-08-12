@@ -181,6 +181,7 @@ export function ReportLayoutEditor({
         pages={pages}
         onChange={updatePages}
         liveData={liveData}
+        reportId={reportId}
         masterElements={masterElements}
         onMasterElementsChange={updateMasterElements}
         pageImages={pageImages}

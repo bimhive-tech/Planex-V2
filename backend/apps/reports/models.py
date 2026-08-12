@@ -82,13 +82,17 @@ def report_image_key(instance, filename):
 
 
 class ReportImage(TimestampedModel):
-    """Per-report content images: the cover, progress photos (4/page), and
-    attachments (1/page). Logos stay on the project (branding is constant)."""
+    """Per-report content images: the cover, progress photos (4/page),
+    attachments (1/page), and canvas images (uploaded directly into one
+    non-repeat image box on the Customize tab, source="upload" in its props —
+    the only kind that isn't picked from a fixed list elsewhere). Logos stay
+    on the project (branding is constant)."""
 
     class Kind(models.TextChoices):
         COVER = "cover", "Cover Image"
         PROGRESS = "progress", "Progress Photo"
         ATTACHMENT = "attachment", "Attachment"
+        CANVAS = "canvas", "Canvas Image"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="report_images")

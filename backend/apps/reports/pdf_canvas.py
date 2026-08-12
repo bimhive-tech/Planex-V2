@@ -298,6 +298,9 @@ def _draw_image_border(c, props, x, y, w, h):
 
 def _draw_logo(c, props, x, y, w, h, ctx):
     source = props.get("source", "left")
+    if source == "upload":
+        _draw_uploaded_image(c, props, x, y, w, h, ctx)
+        return
     logos = ctx.get("logos") or {}
     if source == "extra":
         # Beyond the fixed left/right slots — any number of uploaded partner
@@ -319,9 +322,15 @@ _CAPTION_H = 8 * mm
 def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
     """`repeat.item` binds this box to one photo/attachment in the current
     repeat chunk (props["slot"] indexes inst.scope["items"]) — this is what
-    lets a 4-slot "Site Photos" page turn into N real pages. Per-report image
-    picking into an arbitrary non-repeat box is deferred (see plan §7.5)."""
-    if props.get("source") != "repeat.item":
+    lets a 4-slot "Site Photos" page turn into N real pages. `upload` binds it
+    to one specific image uploaded directly to this element (a ReportImage
+    with kind=canvas, props["upload_id"] its id) — for a plain non-repeat box
+    that isn't a project logo or a repeat photo slot."""
+    source = props.get("source")
+    if source == "upload":
+        _draw_uploaded_image(c, props, x, y, w, h, ctx)
+        return
+    if source != "repeat.item":
         return
     items = inst.scope.get("items") or []
     slot = int(props.get("slot", 0) or 0)
@@ -340,6 +349,23 @@ def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
         para = Paragraph(shape(item["caption"]), style)
         para.wrap(w, caption_h)
         para.drawOn(c, x, y)
+
+
+def _draw_uploaded_image(c, props, x, y, w, h, ctx):
+    upload_id = props.get("upload_id")
+    report = ctx.get("_report")
+    if not upload_id or report is None:
+        return
+    from .models import ReportImage
+
+    try:
+        image = ReportImage.objects.get(id=upload_id, report=report)
+    except (ReportImage.DoesNotExist, ValueError, TypeError):
+        return
+    reader = storage_image_reader(image.image.name if image.image else None)
+    if reader:
+        _draw_contained_image(c, reader, x, y, w, h)
+    _draw_image_border(c, props, x, y, w, h)
 
 
 def _draw_toc_element(c, props, x, y, w, h, inst: PageInstance, ctx):

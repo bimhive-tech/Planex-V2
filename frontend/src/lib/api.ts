@@ -21,6 +21,34 @@ interface RequestOptions extends RequestInit {
   json?: unknown;
 }
 
+// The access-token cookie is short-lived (30min default, see JWT_ACCESS_MINUTES)
+// and Next's middleware only refreshes it on page navigation — a long editing
+// session (e.g. the Customize tab canvas) that never reloads can sit past
+// expiry and get a flat 401 on its next write. Refresh once and retry rather
+// than surfacing that as a generic error. Shared across callers so concurrent
+// 401s don't each fire their own refresh.
+let refreshPromise: Promise<boolean> | null = null;
+
+function refreshAccessToken(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/auth/refresh/`, { method: "POST", credentials: "include" })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+/** Fetches, and on a 401 tries one silent token refresh + one retry before
+ * giving up — see refreshAccessToken above. */
+async function fetchWithRefresh(url: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status === 401 && (await refreshAccessToken())) {
+    return fetch(url, init);
+  }
+  return res;
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { json, headers, ...rest } = options;
   const init: RequestInit = {
@@ -33,7 +61,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   };
   if (json !== undefined) init.body = JSON.stringify(json);
 
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetchWithRefresh(`${API_BASE}${path}`, init);
 
   if (res.status === 204) return undefined as T;
 
@@ -56,7 +84,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 async function upload<T>(path: string, file: File, field = "file"): Promise<T> {
   const body = new FormData();
   body.append(field, file);
-  const res = await fetch(path, { method: "POST", credentials: "include", body });
+  const res = await fetchWithRefresh(path, { method: "POST", credentials: "include", body });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = (data as ApiErrorBody | null)?.error;
@@ -66,7 +94,7 @@ async function upload<T>(path: string, file: File, field = "file"): Promise<T> {
 }
 
 async function uploadApi<T>(path: string, form: FormData, method = "POST"): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method, credentials: "include", body: form });
+  const res = await fetchWithRefresh(`${API_BASE}${path}`, { method, credentials: "include", body: form });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
   if (!res.ok) {

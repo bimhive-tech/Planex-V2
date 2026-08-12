@@ -381,8 +381,9 @@ const LOGO_SLOT: Record<string, "left" | "right" | "cover"> = {
 
 /** This logo element's real image URL, or null to fall back to the label. */
 function resolveLogoUrl(props: Record<string, unknown>, data: ReportData | null | undefined): string | null {
-  if (!data) return null;
   const source = String(props.source ?? "left");
+  if (source === "upload") return (props.upload_url as string) || null;
+  if (!data) return null;
   if (source === "extra") {
     const idx = Number(props.slot ?? 0);
     return data.logos.extra[idx]?.url || null;
@@ -391,11 +392,14 @@ function resolveLogoUrl(props: Record<string, unknown>, data: ReportData | null 
   return slot ? data.logos[slot]?.url || null : null;
 }
 
-/** A "Photo slot" image element's real URL — bound to one photo/attachment
- * in the current repeat chunk (props.slot indexes the pinned group), same as
- * apps/reports/pdf_canvas.py's _draw_image. Non-repeat image boxes (a plain
- * "Image" element with no source) have no per-report binding yet. */
-function resolveRepeatImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string | null {
+/** An "image" element's real URL — either a "Photo slot" bound to one
+ * photo/attachment in the current repeat chunk (props.slot indexes the
+ * pinned group), or a specific image uploaded directly to this element
+ * (props.upload_url, set by ElementInspector's upload control right after
+ * upload — no extra round trip needed to preview it). Mirrors
+ * apps/reports/pdf_canvas.py's _draw_image. */
+function resolveImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string | null {
+  if (props.source === "upload") return (props.upload_url as string) || null;
   if (props.source !== "repeat.item" || !Array.isArray(pinnedItem)) return null;
   const slot = Number(props.slot ?? 0);
   const item = pinnedItem[slot];
@@ -441,7 +445,7 @@ export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps
     }
 
     case "image": {
-      const url = resolveRepeatImageUrl(p, pinnedItem);
+      const url = resolveImageUrl(p, pinnedItem);
       return url ? (
         // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
         <img className={styles.imagePreviewReal} src={url} alt="" />

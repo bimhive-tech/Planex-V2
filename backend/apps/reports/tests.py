@@ -1812,3 +1812,79 @@ class ArabicWrapTests(SimpleTestCase):
         label_cell = table._cellvalues[0][1]
         self.assertNotIn("■", label_cell.text)
         self.assertIn("•", label_cell.text)
+
+
+class UploadedImageElementTests(TestCase):
+    """An "image" element with props.source="upload" is bound to one specific
+    ReportImage (kind=canvas), uploaded directly to that box from the
+    Customize tab's inspector — see ElementInspector's upload control and
+    pdf_canvas._draw_uploaded_image. Needs a real DB-backed Report/ReportImage
+    (not SimpleTestCase) since resolution is a real ORM lookup by id."""
+
+    _PNG_BYTES = (
+        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00'
+        b'\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    )
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from .models import ReportImage
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+        self.report = Report.objects.create(company=self.company, project=self.project, title="R")
+        self.upload = ReportImage.objects.create(
+            company=self.company, report=self.report, kind=ReportImage.Kind.CANVAS,
+            image=SimpleUploadedFile("logo.png", self._PNG_BYTES, content_type="image/png"))
+
+    def _template(self, elements):
+        cfg = default_config()
+        cfg["page_design"] = {
+            "size": "A4", "orientation": "portrait", "margin_mm": 10,
+            "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+            "show_border": True, "background": "#ffffff", "master_elements": [],
+        }
+        cfg["layout"] = {"pages": [{"id": "p1", "name": "Page 1", "elements": elements}]}
+        return ReportTemplate(name="Canvas", config=cfg)
+
+    def test_uploaded_image_renders_into_the_pdf_without_crashing(self):
+        elements = [{"id": "e1", "type": "image", "x": 10, "y": 10, "w": 40, "h": 30, "z": 0,
+                     "props": {"source": "upload", "upload_id": str(self.upload.id)}}]
+        template = self._template(elements)
+        ctx = _sample_ctx()
+        # build_canvas_pdf needs a real Report row (not a bare SimpleNamespace,
+        # which every other element type is fine with) — _draw_uploaded_image
+        # does a real ORM lookup by id against ctx["_report"].
+        data = build_canvas_pdf(self.report, ctx, cfg=merged_config(template.config))
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_missing_or_wrong_report_upload_id_does_not_crash(self):
+        """A stale upload_id (image deleted, or from a different report)
+        should silently draw nothing, not error out the whole PDF."""
+        elements = [{"id": "e1", "type": "image", "x": 10, "y": 10, "w": 40, "h": 30, "z": 0,
+                     "props": {"source": "upload", "upload_id": "00000000-0000-0000-0000-000000000000"}}]
+        template = self._template(elements)
+        ctx = _sample_ctx()
+        data = build_canvas_pdf(self.report, ctx, cfg=merged_config(template.config))
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_missing_upload_id_does_not_crash(self):
+        elements = [{"id": "e1", "type": "image", "x": 10, "y": 10, "w": 40, "h": 30, "z": 0,
+                     "props": {"source": "upload"}}]
+        template = self._template(elements)
+        ctx = _sample_ctx()
+        data = build_canvas_pdf(self.report, ctx, cfg=merged_config(template.config))
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_logo_element_with_upload_source_renders_into_the_pdf(self):
+        """A "logo" element can also be bound to a specific upload — same
+        mechanism as an "image" element, see _draw_logo's dispatch to
+        _draw_uploaded_image."""
+        elements = [{"id": "e1", "type": "logo", "x": 10, "y": 10, "w": 30, "h": 15, "z": 0,
+                     "props": {"source": "upload", "upload_id": str(self.upload.id)}}]
+        template = self._template(elements)
+        ctx = _sample_ctx()
+        data = build_canvas_pdf(self.report, ctx, cfg=merged_config(template.config))
+        self.assertTrue(data.startswith(b"%PDF"))

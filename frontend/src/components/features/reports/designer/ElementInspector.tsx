@@ -2,11 +2,16 @@
 
 // Right panel: exact position/size plus the selected element's own settings.
 // Field lists are declarative per element type so adding a knob is one line.
+import { useRef, useState } from "react";
+
+import { Button } from "@/components/ui/Button";
+import { api, ApiError } from "@/lib/api";
 import {
   CHART_SOURCES, CHART_TYPES, FIELD_SOURCES, ITEM_CHART_SOURCES, ITEM_FIELD_SOURCES,
   ITEM_TABLE_SOURCES, TABLE_SOURCES,
 } from "@/lib/reportElements";
 import type { LayoutElement } from "@/lib/reportLayout";
+import type { ReportImage } from "@/types/report";
 import styles from "./designer.module.css";
 
 type PropField =
@@ -22,13 +27,16 @@ const ALIGN = [
   { value: "right", label: "Right" },
 ];
 
-/** Image source: a fixed logo/cover slot, or a repeat-page photo slot (only
- * meaningful once the active page is marked "repeat" — see `repeating`). */
+/** Image source: a fixed logo/cover slot, a repeat-page photo slot (only
+ * meaningful once the active page is marked "repeat" — see `repeating`), or
+ * an image uploaded directly to this one box (report Customize tab only —
+ * see the upload control below). */
 const IMAGE_SOURCES = [
   { value: "left", label: "Left logo" },
   { value: "right", label: "Right logo" },
   { value: "cover", label: "Cover image" },
   { value: "repeat.item", label: "Repeat photo slot" },
+  { value: "upload", label: "Uploaded image" },
 ];
 
 /** Logo element source — left/right/cover are the fixed single slots;
@@ -38,6 +46,7 @@ const LOGO_SOURCES = [
   { value: "right", label: "Right logo" },
   { value: "cover", label: "Cover image" },
   { value: "extra", label: "Additional logo (pick slot below)" },
+  { value: "upload", label: "Uploaded image" },
 ];
 
 /** Field lists per element type. `repeating` appends the item-scoped sources
@@ -137,9 +146,19 @@ interface Props {
   /** True when the active page (or master) is set to repeat — unlocks the
    * item-scoped source options above. */
   repeating?: boolean;
+  /** Present only in the report-level "Customize" tab — enables the
+   * "Uploaded image" source, since that image belongs to one specific
+   * report, not a project-agnostic template. */
+  reportId?: string;
 }
 
-export function ElementInspector({ el, onChange, repeating = false }: Props) {
+export function ElementInspector({ el, onChange, repeating = false, reportId }: Props) {
+  // Hooks must run every render regardless of `el`, so these sit above the
+  // early return below.
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!el) {
     return (
       <aside className={styles.inspector} aria-label="Element properties">
@@ -150,6 +169,26 @@ export function ElementInspector({ el, onChange, repeating = false }: Props) {
   }
 
   const fields = typeFields(el.type, repeating);
+
+  async function handleUpload(file: File) {
+    if (!reportId) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      form.append("kind", "canvas");
+      const created = await api.uploadApi<ReportImage>(`/reports/${reportId}/images/`, form);
+      onChange({
+        ...el!,
+        props: { ...el!.props, source: "upload", upload_id: created.id, upload_url: created.url },
+      });
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : "Couldn't upload the image.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   function setProp(path: string, value: unknown) {
     onChange({ ...el!, props: { ...el!.props, [path]: value } });
@@ -191,6 +230,47 @@ export function ElementInspector({ el, onChange, repeating = false }: Props) {
           />
         </label>
       </div>
+
+      {(el.type === "image" || el.type === "logo") && el.props.source === "upload" && (
+        <div className={styles.uploadBlock}>
+          {reportId ? (
+            <>
+              {el.props.upload_url ? (
+                // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
+                <img className={styles.uploadPreview} src={String(el.props.upload_url)} alt="" />
+              ) : (
+                <p className={styles.panelHint}>No image uploaded yet.</p>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleUpload(file);
+                  e.target.value = ""; // same file re-selectable next time
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploading ? "Uploading…" : el.props.upload_url ? "Change image" : "Upload image"}
+              </Button>
+              {uploadError && <p className="formError">{uploadError}</p>}
+            </>
+          ) : (
+            <p className={styles.panelHint}>
+              Uploading a specific image is only available on a report&apos;s Customize tab, not the
+              project-agnostic template.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className={styles.propFields}>
         {fields.map((f) => {

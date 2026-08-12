@@ -130,8 +130,9 @@ export interface ReportData {
   };
 }
 
-// Per-report content image (cover / progress photo / attachment).
-export type ReportImageKind = "cover" | "progress" | "attachment";
+// Per-report content image (cover / progress photo / attachment / canvas
+// image uploaded directly into one image element on the Customize tab).
+export type ReportImageKind = "cover" | "progress" | "attachment" | "canvas";
 
 export interface ReportImage {
   id: string;

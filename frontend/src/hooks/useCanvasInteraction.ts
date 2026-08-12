@@ -179,30 +179,58 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
 
       setGuides(null);
       const h = g.handle ?? "se";
-      let { x, y, w, hgt } = { x: o.x, y: o.y, w: o.w, hgt: o.h };
+      // The resize handles are drawn on the element's own box, which is
+      // visually rotated (CSS transform, around its center) — a raw
+      // screen-space pointer delta doesn't line up with the element's own
+      // width/height axes once it's rotated (drag "right" on a 90°-rotated
+      // box and you're actually dragging along its height, not its width).
+      // Rotate the delta into the element's local, unrotated frame first;
+      // for rotation 0 this is the identity (cos 0=1, sin 0=0), so unrotated
+      // elements resize exactly as before.
+      const rot = ((o.rotation ?? 0) * Math.PI) / 180;
+      const cosR = Math.cos(rot);
+      const sinR = Math.sin(rot);
+      const ldx = dx * cosR + dy * sinR;
+      const ldy = -dx * sinR + dy * cosR;
 
-      if (h.includes("w")) {
-        // Dragging the left edge moves x and shrinks w by the same amount.
-        const nx = snap(o.x + dx, fine);
-        const maxX = o.x + o.w - MIN_MM;
-        x = Math.min(nx, maxX);
-        w = o.x + o.w - x;
-      }
-      if (h.includes("e")) w = Math.max(MIN_MM, snap(o.w + dx, fine));
-      if (h.includes("n")) {
-        const ny = snap(o.y + dy, fine);
-        const maxY = o.y + o.h - MIN_MM;
-        y = Math.min(ny, maxY);
-        hgt = o.y + o.h - y;
-      }
-      if (h.includes("s")) hgt = Math.max(MIN_MM, snap(o.h + dy, fine));
+      let w = o.w;
+      let hgt = o.h;
+      if (h.includes("e")) w = Math.max(MIN_MM, snap(o.w + ldx, fine));
+      else if (h.includes("w")) w = Math.max(MIN_MM, snap(o.w - ldx, fine));
+      if (h.includes("s")) hgt = Math.max(MIN_MM, snap(o.h + ldy, fine));
+      else if (h.includes("n")) hgt = Math.max(MIN_MM, snap(o.h - ldy, fine));
+
+      // CSS rotates the box around its own center (transform-origin default),
+      // and that center moves whenever w/h changes — so just keeping the
+      // *local* opposite edge's x/y fixed (as the old code did) still lets a
+      // rotated box visibly swing/drift on screen as it resizes. Instead,
+      // solve for the x/y that keeps the opposite corner/edge's actual
+      // *screen* position fixed: locate that anchor once (in the original,
+      // unresized box), then re-derive the new box's position so the same
+      // anchor lands back on that exact screen point after rotation. At
+      // rotation 0 this reduces to exactly the old "opposite edge stays put"
+      // behavior — verified algebraically, not just visually.
+      const fx = h.includes("e") ? 0 : h.includes("w") ? 1 : 0.5;
+      const fy = h.includes("s") ? 0 : h.includes("n") ? 1 : 0.5;
+      const oldCenterX = o.x + o.w / 2;
+      const oldCenterY = o.y + o.h / 2;
+      const oldOffX = (fx - 0.5) * o.w;
+      const oldOffY = (fy - 0.5) * o.h;
+      const anchorX = oldCenterX + oldOffX * cosR - oldOffY * sinR;
+      const anchorY = oldCenterY + oldOffX * sinR + oldOffY * cosR;
+      const newOffX = (fx - 0.5) * w;
+      const newOffY = (fy - 0.5) * hgt;
+      const newCenterX = anchorX - (newOffX * cosR - newOffY * sinR);
+      const newCenterY = anchorY - (newOffX * sinR + newOffY * cosR);
+      const x = newCenterX - w / 2;
+      const y = newCenterY - hgt / 2;
 
       apply(clampToPage({
         ...o,
         x: roundMm(Math.max(0, x)),
         y: roundMm(Math.max(0, y)),
-        w: roundMm(Math.max(MIN_MM, w)),
-        h: roundMm(Math.max(MIN_MM, hgt)),
+        w: roundMm(w),
+        h: roundMm(hgt),
       }, d));
     }
 

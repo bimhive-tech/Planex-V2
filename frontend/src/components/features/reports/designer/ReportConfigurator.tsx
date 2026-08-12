@@ -23,6 +23,9 @@ interface Props {
   /** Present only in the report-level "Customize" tab — undefined in the
    * project-agnostic Template Builder, where placeholders are all there is. */
   liveData?: ReportData | null;
+  /** This report's id — present only alongside liveData. Passed through to
+   * the inspector's image-upload control. */
+  reportId?: string;
   /** This report's own header/footer content — present only alongside
    * liveData. Undefined in the Template Builder, where the master is edited
    * on its own dedicated Page Designer tab instead. */
@@ -38,7 +41,7 @@ interface Props {
 }
 
 export function ReportConfigurator({
-  design, pages, onChange, liveData, masterElements, onMasterElementsChange,
+  design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
   pageImages, pageImagesLoading, pageNumberMap,
 }: Props) {
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
@@ -308,6 +311,7 @@ export function ReportConfigurator({
       }
       repeating={Boolean(active.repeat)}
       liveData={liveData}
+      reportId={reportId}
       pinnedItem={editingHeader ? null : pinnedItem}
       backgroundImage={backgroundImage}
     />
