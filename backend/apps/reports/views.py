@@ -43,13 +43,13 @@ _UNSET = object()
 # zone/activity/cashflow/etc. the project has) but doesn't depend on layout at
 # all — only on the report's own project/date/scope, none of which change
 # while you're rearranging elements on the Customize tab. Cached briefly and
-# only for `preview-images` ("Refresh preview", meant for fast iteration
-# while editing): the first refresh in a session pays the cost once, every
-# refresh after that skips straight to rendering. `pdf`/`page-images`/`data`
-# deliberately stay uncached so anything actually saved or downloaded always
-# reflects current project data. TTL, not invalidate-on-write, since it only
-# ever backs a transient in-editor preview — worst case is a few minutes of
-# staleness in that preview alone.
+# only for chart_svgs/table_images (the Customize tab's live, per-element
+# previews — see their docstrings): the first one in an editing session pays
+# the cost once, every call after that skips straight to rendering. `pdf`/
+# `data` deliberately stay uncached so anything actually saved or downloaded
+# always reflects current project data. TTL, not invalidate-on-write, since
+# it only ever backs transient in-editor previews — worst case is a few
+# minutes of staleness in those, never in what's actually saved/downloaded.
 _CONTEXT_CACHE_TTL = 300
 
 
@@ -62,19 +62,16 @@ def _cached_report_context(report):
     return ctx
 
 
-def _render_report_pdf(report, engine, override=_UNSET, use_context_cache=False):
-    """Shared by the `pdf`, `page-images`, and `preview-images` actions —
-    same cfg/context assembly and canvas-vs-legacy dispatch either way.
-    Returns (bytes, section->page map). The Content & Labels builder tab is
-    gone from the UI, but existing templates that only ever had section
-    toggles (no real canvas content) still need this fallback to render at
-    all.
+def _render_report_pdf(report, engine, override=_UNSET):
+    """Shared by the `pdf` action and anything else that needs the whole
+    rendered document. Returns (bytes, section->page map). The Content &
+    Labels builder tab is gone from the UI, but existing templates that only
+    ever had section toggles (no real canvas content) still need this
+    fallback to render at all.
 
     `override` defaults to the report's own saved `layout_override`; pass an
-    explicit dict (or None) to render a different layout instead — used by
-    `preview-images` to render an unsaved Customize-tab draft without
-    persisting it first."""
-    ctx = _cached_report_context(report) if use_context_cache else build_report_context(report)
+    explicit dict (or None) to render a different layout instead."""
+    ctx = build_report_context(report)
     cfg = merged_config(report.template.config if report.template else None)
     applied = getattr(report, "layout_override", None) if override is _UNSET else override
     cfg = merge_layout_override(cfg, applied)
@@ -87,8 +84,8 @@ def _render_report_pdf(report, engine, override=_UNSET, use_context_cache=False)
 
 
 def _rasterize_pdf(data: bytes, dpi: int = 144) -> list[str]:
-    """Every page of a rendered PDF, as base64 PNG — shared by `page-images`
-    and `preview-images`."""
+    """Every page of a rendered PDF, as base64 PNG — used by table_images
+    to rasterize a single table's own tiny standalone PDF."""
     import base64
 
     import fitz
@@ -207,38 +204,117 @@ class ReportViewSet(viewsets.ModelViewSet):
         resp["Access-Control-Expose-Headers"] = "X-Section-Pages"
         return resp
 
-    @action(detail=True, methods=["get"], url_path="page-images")
-    def page_images(self, request, pk=None):
-        """Every page of the report's current PDF, rasterized to PNG.
+    @action(detail=True, methods=["post"], url_path="chart-svgs")
+    def chart_svgs(self, request, pk=None):
+        """Live per-chart-element SVGs for the Customize tab canvas.
 
-        The Customize tab's canvas uses these as each page's real background
-        — pixel-identical to the actual PDF — instead of trying to render
-        the PDF in the browser (pdf.js's own network-stream fetcher hangs
-        mid-render against this app's PDF route; see lib/pdfWorker.ts on the
-        frontend for the same issue in the plain preview panel). Rasterizing
-        server-side with PyMuPDF, which already ships for the P6 export
-        pipeline, sidesteps that entirely. Generated once per request (same
-        "regenerate on save, not on every edit" model as the PDF endpoint),
-        not cached — a report's layout_override changes between calls.
+        Built from the exact same Drawing objects pdf_canvas.resolve_chart
+        produces for the real PDF — reportlab.graphics.renderSVG just exports
+        that same shape tree to SVG instead of drawing it into a page, so
+        there's no second chart implementation to keep visually in sync.
+        Skips PDF assembly and PyMuPDF rasterization entirely (resolves only
+        the chart elements actually on the draft, not a whole document),
+        so — combined with the cached report context — this is cheap enough
+        to call on every edit, not just on an explicit refresh.
+
+        Keyed by element id; "too_small"/"no_data" statuses mirror exactly
+        what the real PDF itself draws in those same cases (see
+        pdf_canvas._draw_chart_element) — never a fake/placeholder chart.
+
+        Only meaningful with a real layout_override from the report
+        Customize tab: pages arriving there are already expanded to concrete,
+        uniquely-id'd pages (see expandRepeatingPages on the frontend), so
+        expand_pages here never re-multiplies a page and every element id in
+        the response is unique. Not used by the project-agnostic Template
+        Builder, which has no real project data for a chart to match anyway.
         """
-        report = self.get_object()
-        data, _ = _render_report_pdf(report, request.query_params.get("engine"))
-        return Response({"pages": _rasterize_pdf(data), "dpi": 144})
+        from reportlab.graphics import renderSVG
+        from reportlab.lib.units import mm as _mm
 
-    @action(detail=True, methods=["post"], url_path="preview-images")
-    def preview_images(self, request, pk=None):
-        """Same rendering as page-images, but against a layout_override sent
-        in the request body instead of the report's saved one — the
-        Customize tab's "Refresh preview" button, so newly added/edited
-        elements can show their real rendered look without a full Save
-        (which would persist the draft) or a wait until the next one.
+        from .pdf_base import ensure_fonts
+        from .pdf_canvas import MIN_CHART_H_MM, MIN_CHART_W_MM, expand_pages, resolve_chart
 
-        Uses the cached report context (see _cached_report_context) and a
-        lower rasterization DPI than page-images — this is a fast-iteration
-        editing aid shown on-screen, not the pixel-identical background kept
-        for a saved report, so both corners are safe to cut here specifically."""
         report = self.get_object()
         override = request.data.get("layout_override")
-        data, _ = _render_report_pdf(
-            report, request.query_params.get("engine"), override=override, use_context_cache=True)
-        return Response({"pages": _rasterize_pdf(data, dpi=108), "dpi": 108})
+        ctx = _cached_report_context(report)
+        cfg = merged_config(report.template.config if report.template else None)
+        applied = override if override is not None else getattr(report, "layout_override", None)
+        cfg = merge_layout_override(cfg, applied)
+
+        ensure_fonts()  # normally done inside build_canvas_pdf — this path skips that entirely
+        min_w, min_h = MIN_CHART_W_MM * _mm, MIN_CHART_H_MM * _mm
+        charts = {}
+        for inst in expand_pages(cfg, ctx, report):
+            for el in inst.page.get("elements", []):
+                if el.get("type") != "chart":
+                    continue
+                props = el.get("props") or {}
+                w, h = float(el.get("w", 0)) * _mm, float(el.get("h", 0)) * _mm
+                if w < min_w or h < min_h:
+                    charts[el["id"]] = {"status": "too_small"}
+                    continue
+                drawing = resolve_chart(props.get("source", ""), props.get("chart_type"), cfg, ctx, inst.scope, w, h)
+                if drawing is None:
+                    charts[el["id"]] = {"status": "no_data"}
+                    continue
+                charts[el["id"]] = {"status": "ok", "svg": renderSVG.drawToString(drawing)}
+        return Response({"charts": charts})
+
+    @action(detail=True, methods=["post"], url_path="table-images")
+    def table_images(self, request, pk=None):
+        """Live per-table-element PNGs for the Customize tab canvas.
+
+        Tables don't have a direct vector export the way a chart's Drawing
+        does (draw_table_in_box draws straight onto an open canvas, not a
+        standalone shape tree) — so each table element gets its own tiny
+        single-page PDF, drawn with the exact same draw_table_in_box call
+        the real page uses, then rasterized. Small and fast (one table, not
+        a whole document) — combined with the cached report context, cheap
+        enough to call on every edit, not just an explicit refresh.
+
+        Keyed by element id; "too_small"/"no_data" statuses mirror exactly
+        what the real PDF draws in those same cases (see
+        pdf_canvas._draw_table_element) — never a fake table.
+
+        Same Customize-tab-only scoping as chart_svgs — see its docstring.
+        """
+        from io import BytesIO
+
+        from reportlab.lib.units import mm as _mm
+        from reportlab.pdfgen import canvas as _canvas
+
+        from .pdf_base import ensure_fonts
+        from .pdf_canvas import expand_pages, resolve_table
+        from .pdf_tables import draw_table_in_box
+
+        report = self.get_object()
+        override = request.data.get("layout_override")
+        ctx = _cached_report_context(report)
+        cfg = merged_config(report.template.config if report.template else None)
+        applied = override if override is not None else getattr(report, "layout_override", None)
+        cfg = merge_layout_override(cfg, applied)
+
+        ensure_fonts()
+        tables = {}
+        for inst in expand_pages(cfg, ctx, report):
+            for el in inst.page.get("elements", []):
+                if el.get("type") != "table":
+                    continue
+                props = el.get("props") or {}
+                source = props.get("source", "")
+                w, h = float(el.get("w", 0)) * _mm, float(el.get("h", 0)) * _mm
+                table = resolve_table(source, cfg, ctx, inst.scope, avail_width=w)
+                if table is None:
+                    tables[el["id"]] = {"status": "no_data"}
+                    continue
+                buf = BytesIO()
+                c = _canvas.Canvas(buf, pagesize=(w, h))
+                fits = draw_table_in_box(c, table, 0, 0, w, h)
+                if not fits:
+                    tables[el["id"]] = {"status": "too_small"}
+                    continue
+                c.showPage()
+                c.save()
+                png = _rasterize_pdf(buf.getvalue(), dpi=150)[0]
+                tables[el["id"]] = {"status": "ok", "png": png}
+        return Response({"tables": tables})

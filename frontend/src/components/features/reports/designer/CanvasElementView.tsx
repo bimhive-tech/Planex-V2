@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
-import type { LayoutElement } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, TableImageMap, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
@@ -29,15 +29,20 @@ interface Props {
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
-  /** This element is already baked into a real background image behind it —
-   * render an invisible hit-box (still selectable/draggable) instead of a
-   * second, visible copy of its content. */
-  hideContent?: boolean;
+  /** Live, real per-chart previews — see useChartSvgs. */
+  chartSvgs?: ChartSvgMap;
+  /** Live, real per-table previews — see useTableImages. */
+  tableImages?: TableImageMap;
+  /** Every page in the current draft with its real page number — see
+   * ReportConfigurator. */
+  tocEntries?: TocEntry[];
+  /** The page this element is being drawn on — see ElementPreview. */
+  ownPageId?: string;
 }
 
 export function CanvasElementView({
   el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData, pinnedItem,
-  hideContent,
+  chartSvgs, tableImages, tocEntries, ownPageId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -67,7 +72,10 @@ export function CanvasElementView({
     const ghostClass = liveData ? styles.elementGhostReal : styles.elementGhost;
     return (
       <div className={`${styles.element} ${ghostClass}`} style={style} aria-hidden="true">
-        <ElementPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />
+        <ElementPreview
+          el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+          chartSvgs={chartSvgs} tableImages={tableImages} tocEntries={tocEntries} ownPageId={ownPageId}
+        />
       </div>
     );
   }
@@ -93,7 +101,10 @@ export function CanvasElementView({
         }
       }}
     >
-      {!hideContent && <ElementPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />}
+      <ElementPreview
+        el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+        chartSvgs={chartSvgs} tableImages={tableImages} tocEntries={tocEntries} ownPageId={ownPageId}
+      />
 
       {selected && (
         <>

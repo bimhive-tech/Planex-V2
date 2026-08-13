@@ -266,8 +266,8 @@ def apply_report_layout_override(cfg: dict, report) -> dict:
 def merge_layout_override(cfg: dict, override: dict | None) -> dict:
     """Same merge apply_report_layout_override does, but against an explicit
     override dict rather than the report's saved one — lets the Customize
-    tab's "Refresh preview" render an unsaved draft (see the preview-images
-    action) without writing anything to the DB first."""
+    tab's live chart/table previews (see chart_svgs/table_images) render an
+    unsaved draft without writing anything to the DB first."""
     if not override:
         return cfg
     cfg = copy.deepcopy(cfg)

@@ -9,7 +9,7 @@
 // agnostic Template Builder both are undefined and every element falls back
 // to the representative placeholder it always showed.
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
-import type { LayoutElement } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, TableImageMap, TocEntry } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
@@ -26,6 +26,25 @@ interface PreviewProps {
   scale: number;
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
+  /** Live, real per-chart previews (see useChartSvgs) — the same Drawing
+   * the real PDF renders for this exact chart, exported to SVG. Present
+   * only in the report Customize tab; a chart element falls back to the
+   * approximate client-side mockup below until its entry lands (briefly,
+   * on first load) or when there's no reportId at all (Template Builder,
+   * which has no real project data for a chart to match anyway). */
+  chartSvgs?: ChartSvgMap;
+  /** Live, real per-table previews — see useTableImages. Same fallback
+   * reasoning as chartSvgs above. */
+  tableImages?: TableImageMap;
+  /** Every page in the current draft, in order, with its real page number
+   * — see ReportConfigurator, which computes this once from `pages`.
+   * Present in both the report Customize tab and the Template Builder
+   * (it only needs the page list, not real project data), so a "toc"
+   * element never falls back to a sample list. */
+  tocEntries?: TocEntry[];
+  /** The page this element is being drawn on — a toc element skips its
+   * own page, mirroring pdf_canvas._draw_toc_element. */
+  ownPageId?: string;
 }
 
 /** 1pt = 1/72in = 25.4/72mm — matches how apps/reports/pdf_canvas.py's
@@ -39,6 +58,16 @@ function ptToPx(pt: number, scale: number): number {
 
 function label(list: { value: string; label: string }[], value: unknown, fallback: string) {
   return list.find((o) => o.value === value)?.label ?? fallback;
+}
+
+/** Mirrors pdf_canvas.py's _draw_image_border exactly — opt-in via
+ * props.border, same color/width. Undefined (not `border: "none"`) when
+ * off, so it doesn't override the CSS class's own box-sizing. */
+function imageBorderStyle(props: Record<string, unknown>): React.CSSProperties | undefined {
+  if (!props.border) return undefined;
+  const width = Number(props.border_width ?? 0.3);
+  const color = String(props.border_color ?? "#000000");
+  return { border: `${width}mm solid ${color}`, boxSizing: "border-box" };
 }
 
 /** item.* sources bind to one item, never a chunk group. */
@@ -129,10 +158,27 @@ function realTableRows(source: unknown, data: ReportData | null | undefined, pin
   }
 }
 
-function TablePreview({ el, liveData, pinnedItem }: PreviewProps) {
+function TablePreview({ el, liveData, pinnedItem, tableImages }: PreviewProps) {
   const p = el.props;
   const headerBg = String(p.header_bg ?? "#1F4E79");
   const headerText = String(p.header_text ?? "#ffffff");
+
+  // The real thing — same draw_table_in_box call the PDF itself uses (see
+  // useTableImages/apps/reports/views.py's table_images), not an
+  // approximation. Falls through to the client-side mockup below only
+  // while this hasn't landed yet or outside the report Customize tab.
+  const live = tableImages?.[el.id];
+  if (live) {
+    if (live.status === "ok") {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element -- a data URI rebuilt on every edit, not an optimizable static asset
+        <img className={styles.tableImageLive} src={`data:image/png;base64,${live.png}`} alt="" />
+      );
+    }
+    const message = live.status === "too_small" ? `Table too small: ${String(p.source ?? "")}` : `No data: ${String(p.source ?? "")}`;
+    return <div className={styles.chartPlaceholder}>{message}</div>;
+  }
+
   const real = realTableRows(p.source, liveData, pinnedItem);
   return (
     <div className={styles.tablePreview}>
@@ -273,13 +319,30 @@ function realDonutFrac(source: unknown, liveData: ReportData | null | undefined,
   return null;
 }
 
-function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
+function ChartPreview({ el, liveData, pinnedItem, chartSvgs }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
   const source = p.source;
   const a = String(p.color_a ?? "#4F81BD");
   const b = String(p.color_b ?? "#C0504D");
   const item = singleItem(pinnedItem);
+
+  // The real thing — same Drawing the PDF itself renders for this exact
+  // chart (see useChartSvgs/apps/reports/views.py's chart_svgs), not an
+  // approximation. Falls through to the client-side mockup below only
+  // while this hasn't landed yet (briefly, on first load) or outside the
+  // report Customize tab (chartSvgs is undefined there — no real project
+  // data for a chart to match in the first place).
+  const live = chartSvgs?.[el.id];
+  if (live) {
+    if (live.status === "ok") {
+      return (
+        <div className={styles.chartSvgLive} dangerouslySetInnerHTML={{ __html: live.svg }} />
+      );
+    }
+    const message = live.status === "too_small" ? `Chart too small: ${String(source ?? "")}` : `No data: ${String(source ?? "")}`;
+    return <div className={styles.chartPlaceholder}>{message}</div>;
+  }
 
   let body: React.ReactNode;
   if (type === "gauge") {
@@ -332,25 +395,53 @@ function ChartPreview({ el, liveData, pinnedItem }: PreviewProps) {
   );
 }
 
-function TocPreview() {
+/** Same Arabic-detection heuristic as apps/reports/pdf_base.py's has_arabic
+ * — used only to pick the row's reading direction; the actual text always
+ * renders as typed either way. */
+const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
+
+function TocPreview({ el, tocEntries, ownPageId }: PreviewProps) {
+  const p = el.props;
+  const excludeCover = p.exclude_cover ?? true;
+  const size = Number(p.size ?? 11);
+  const color = String(p.color ?? "#1e2430");
+
+  // Real page names + real page numbers from the current draft — mirrors
+  // apps/reports/pdf_canvas.py's _draw_toc_element exactly (same exclusion
+  // rules, same "skip my own page" rule), never a fake sample list.
+  const rows = (tocEntries ?? [])
+    .filter((e) => e.id !== ownPageId)
+    .filter((e) => !(excludeCover && e.name.trim().toLowerCase() === "cover"));
+
+  if (!tocEntries) {
+    return <div className={styles.chartPlaceholder}>Table of contents</div>;
+  }
+
   return (
-    <div className={styles.tocPreview}>
-      {["Cover", "Project Info", "Executive Dashboard", "Cash Flow", "Photos"].map((name, i) => (
-        <div key={name} className={styles.tocPreviewRow}>
-          <span>{name}</span>
-          <span className={styles.tocPreviewDots} />
-          <span>{i + 1}</span>
-        </div>
-      ))}
+    <div className={styles.tocPreview} style={{ fontSize: `${size}px`, color }}>
+      {rows.map((row) => {
+        const rtl = ARABIC_RE.test(row.name);
+        return (
+          <div key={row.id} className={styles.tocPreviewRow} dir={rtl ? "rtl" : "ltr"}>
+            <span>{row.name}</span>
+            <span className={styles.tocPreviewDots} />
+            <span>{row.number}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 /** Real text for a field source, or null to fall back to the generic token. */
-function resolveField(source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined): string | null {
+function resolveField(
+  source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined,
+  ownPageNumber?: number,
+): string | null {
   if (typeof source === "string" && source.startsWith("item.")) {
     return resolveItemField(source, singleItem(pinnedItem));
   }
+  if (source === "page.number") return ownPageNumber != null ? String(ownPageNumber) : null;
   if (!data) return null;
   const p = data.project;
   switch (source) {
@@ -369,7 +460,7 @@ function resolveField(source: unknown, data: ReportData | null | undefined, pinn
         ? `${fmtDate(data.report.period_start)} – ${fmtDate(data.report.period_finish)}` : null;
     case "progress.overall": return fmtPct(data.overall);
     case "progress.planned": return data.planned != null ? fmtPct(data.planned) : null;
-    default: return null; // page.number is resolved at PDF-render time only
+    default: return null;
   }
 }
 
@@ -406,7 +497,9 @@ function resolveImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem 
   return (item?.url as string) || null;
 }
 
-export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps) {
+export function ElementPreview({
+  el, scale, liveData, pinnedItem, chartSvgs, tableImages, tocEntries, ownPageId,
+}: PreviewProps) {
   const p = el.props;
 
   switch (el.type) {
@@ -427,7 +520,8 @@ export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps
       );
 
     case "field": {
-      const real = resolveField(p.source, liveData, pinnedItem);
+      const ownPageNumber = tocEntries?.find((e) => e.id === ownPageId)?.number;
+      const real = resolveField(p.source, liveData, pinnedItem, ownPageNumber);
       return (
         <div
           className={styles.fieldPreview}
@@ -448,7 +542,7 @@ export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps
       const url = resolveImageUrl(p, pinnedItem);
       return url ? (
         // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
-        <img className={styles.imagePreviewReal} src={url} alt="" />
+        <img className={styles.imagePreviewReal} src={url} alt="" style={imageBorderStyle(p)} />
       ) : (
         <div className={styles.imagePreview}>
           <span>Image</span>
@@ -460,7 +554,7 @@ export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps
       const url = resolveLogoUrl(p, liveData);
       return url ? (
         // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
-        <img className={styles.imagePreviewReal} src={url} alt="" />
+        <img className={styles.imagePreviewReal} src={url} alt="" style={imageBorderStyle(p)} />
       ) : (
         <div className={styles.logoPreview}>
           <span>{p.source === "project" ? "Project logo" : "Company logo"}</span>
@@ -505,13 +599,13 @@ export function ElementPreview({ el, scale, liveData, pinnedItem }: PreviewProps
       );
 
     case "table":
-      return <TablePreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />;
+      return <TablePreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} tableImages={tableImages} />;
 
     case "chart":
-      return <ChartPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} />;
+      return <ChartPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} chartSvgs={chartSvgs} />;
 
     case "toc":
-      return <TocPreview />;
+      return <TocPreview el={el} scale={scale} tocEntries={tocEntries} ownPageId={ownPageId} />;
 
     default:
       return null;

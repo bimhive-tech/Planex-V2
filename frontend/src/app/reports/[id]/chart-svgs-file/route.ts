@@ -1,8 +1,7 @@
-// Customize tab's "Refresh preview" front door. Renders an UNSAVED draft
-// layout (posted in the body) into real page-background images, the same
-// heavy render + rasterize work as page-images — so it needs the same
-// dedicated-route bypass of Next's /api rewrite proxy (~60s reset) as
-// ../page-images-file and ../data-file.
+// Customize tab's live chart preview front door. Cheap (no PDF assembly, no
+// rasterization — just resolves the chart elements on the draft), but still
+// routed through a dedicated handler rather than the /api proxy: a report
+// with many charts could still add up past the proxy's ~60s window.
 import { NextRequest } from "next/server";
 
 import { BACKEND_INTERNAL_URL } from "@/lib/constants";
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const cookie = req.headers.get("cookie") ?? "";
   const body = await req.text();
 
-  const res = await fetch(`${BACKEND_INTERNAL_URL}/api/reports/${id}/preview-images/`, {
+  const res = await fetch(`${BACKEND_INTERNAL_URL}/api/reports/${id}/chart-svgs/`, {
     method: "POST",
     headers: { cookie, "content-type": "application/json" },
     body,

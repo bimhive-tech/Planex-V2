@@ -1,6 +1,27 @@
 /* Canva-style report designer: palette | paper | inspector.
    Mobile stacks the three columns; the paper stays scrollable at any width. */
 
+/* The exact same font file apps/reports/pdf_base.py registers for the real
+   PDF (FONT_NAME = "Amiri", backend/apps/reports/fonts/) — copied into
+   public/fonts/ verbatim (not a Google Fonts CDN copy, which can differ in
+   hinting/version) so text/field/toc elements render with the identical
+   glyphs the PDF does, not a generic system font. */
+@font-face {
+  font-family: "Amiri";
+  src: url("/fonts/Amiri-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Amiri";
+  src: url("/fonts/Amiri-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 .editor {
   display: flex;
   flex-direction: column;
@@ -194,20 +215,6 @@
   box-shadow: var(--shadow-pop);
   border: 1px solid var(--border);
   overflow: hidden;
-}
-
-/* The report Customize tab's real page — a server-rasterized PNG of the
-   actual PDF page, pixel-identical to it. Sits behind everything else;
-   elements already baked into it render as invisible hit-boxes on top
-   (see CanvasElementView's hideContent) instead of a second, abstract copy. */
-.pageBackgroundImage {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  pointer-events: none;
-  user-select: none;
 }
 
 /* The actual PDF page-border rect, inset by border_offset_mm — not the
@@ -427,7 +434,10 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  line-height: 1.25;
+  /* Matches pdf_canvas.py's _text_style exactly: fontName=Amiri,
+     leading=size*1.3 (line-height 1.3 of the font-size these render at). */
+  font-family: "Amiri", "Traditional Arabic", serif;
+  line-height: 1.3;
   padding: 1px 2px;
   word-break: break-word;
 }
@@ -553,14 +563,16 @@
   overflow: hidden;
   background: #fff;
   border: 1px solid var(--border-strong);
+  /* Matches pdf_canvas.py's _draw_toc_element: c.setFont(FONT_NAME, size) —
+     font-size/color come from the element's own props via inline style
+     (see ElementPreview's TocPreview), this only sets the typeface. */
+  font-family: "Amiri", "Traditional Arabic", serif;
 }
 
 .tocPreviewRow {
   display: flex;
   align-items: baseline;
   gap: 4px;
-  font-size: 9px;
-  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -598,6 +610,51 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The live, real chart — same Drawing the PDF renders, exported to SVG (see
+   useChartSvgs). The SVG's own width/height attributes are in points; these
+   rules override them (CSS beats SVG presentation attributes) so it fills
+   the box exactly like every other element while keeping its internal
+   viewBox, i.e. its actual proportions, intact. */
+.chartSvgLive {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chartSvgLive svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Mirrors apps/reports/pdf_canvas.py's _draw_placeholder exactly (dashed
+   border, centered gray caption) — shown only for the same two cases the
+   real PDF itself falls back to a placeholder for, never a fake chart. */
+.chartPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4px;
+  border: 1px dashed #a0a0a0;
+  color: #a0a0a0;
+  font-size: 9px;
+  background: #fff;
+}
+
+/* The live, real table — a small PNG of just this table, drawn with the
+   exact same draw_table_in_box call the PDF page uses (see
+   useTableImages). Sized to exactly fill the box like every other
+   element; object-fit isn't needed since the PNG's own aspect ratio
+   already matches the box it was rendered for. */
+.tableImageLive {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .barRow {

@@ -1569,61 +1569,11 @@ class ReportsApiTests(TestCase):
         self.assertEqual(pdf["Content-Type"], "application/pdf")
         self.assertTrue(b"".join(pdf.streaming_content if hasattr(pdf, "streaming_content") else [pdf.content]).startswith(b"%PDF"))
 
-    def test_page_images_action_rasterizes_every_pdf_page(self):
-        """The Customize tab's real-page background — rasterized server-side
-        (PyMuPDF) so the browser never has to render the PDF itself."""
-        self.client.force_authenticate(self.admin)
-        res = self.client.post(
-            "/api/reports/",
-            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
-            format="json")
-        report_id = res.data["id"]
-
-        resp = self.client.get(f"/api/reports/{report_id}/page-images/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertGreaterEqual(len(resp.data["pages"]), 1)
-        self.assertEqual(resp.data["dpi"], 144)
-        # Each entry decodes to a real PNG (magic bytes), not just any bytes.
-        import base64
-        png = base64.b64decode(resp.data["pages"][0])
-        self.assertTrue(png.startswith(b"\x89PNG"))
-
-    def test_preview_images_action_renders_unsaved_draft_without_persisting(self):
-        """The Customize tab's "Refresh preview" button — same rasterizing as
-        page-images, but against a layout_override sent in the POST body
-        rather than the report's saved one, and without writing it to the
-        DB (see pdf_canvas dispatch on has_canvas_layout picking it up)."""
-        self.client.force_authenticate(self.admin)
-        res = self.client.post(
-            "/api/reports/",
-            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
-            format="json")
-        report_id = res.data["id"]
-
-        draft_override = {
-            "layout": {"pages": [{
-                "id": "p1", "name": "Page 1", "elements": [
-                    {"id": "e1", "type": "text", "x": 10, "y": 10, "w": 100, "h": 20, "z": 0,
-                     "props": {"text": "Draft heading"}},
-                ],
-            }]},
-        }
-        resp = self.client.post(
-            f"/api/reports/{report_id}/preview-images/",
-            {"layout_override": draft_override}, format="json")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.data["pages"]), 1)
-        # Lower than page-images' 144 — this is a fast-iteration editing aid,
-        # not the pixel-identical background kept for a saved report.
-        self.assertEqual(resp.data["dpi"], 108)
-
-        report = Report.objects.get(id=report_id)
-        self.assertIsNone(report.layout_override)
-
-    def test_preview_images_action_reuses_cached_context_across_calls(self):
+    def test_chart_and_table_actions_reuse_cached_context_across_calls(self):
         """The expensive part of a render (build_report_context) doesn't
-        depend on layout — cached briefly so repeated "Refresh preview"
-        clicks in one editing session don't repay that cost every time."""
+        depend on layout — cached briefly so repeated live-preview calls in
+        one editing session don't repay that cost every time (see
+        _cached_report_context)."""
         from unittest.mock import patch
 
         self.client.force_authenticate(self.admin)
@@ -1635,13 +1585,14 @@ class ReportsApiTests(TestCase):
 
         from . import views
         with patch.object(views, "build_report_context", wraps=views.build_report_context) as spy:
-            self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
-            self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
+            self.client.post(f"/api/reports/{report_id}/chart-svgs/", {}, format="json")
+            self.client.post(f"/api/reports/{report_id}/table-images/", {}, format="json")
             self.assertEqual(spy.call_count, 1)
 
-    def test_preview_images_action_with_no_override_renders_saved_layout(self):
-        """A falsy/missing layout_override in the body falls back to
-        whatever's actually saved — same behavior as page-images."""
+    def test_chart_svgs_action_returns_real_svg_for_a_resolvable_chart(self):
+        """The Customize tab's live chart preview — the exact same Drawing
+        pdf_canvas.resolve_chart builds for the real PDF, exported to SVG
+        instead of drawn into a page (see chart_svgs' docstring)."""
         self.client.force_authenticate(self.admin)
         res = self.client.post(
             "/api/reports/",
@@ -1649,9 +1600,152 @@ class ReportsApiTests(TestCase):
             format="json")
         report_id = res.data["id"]
 
-        resp = self.client.post(f"/api/reports/{report_id}/preview-images/", {}, format="json")
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    # "breakdown" (overall_donut) always resolves — ctx["overall"]
+                    # is computed for every real project, even with no activities.
+                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 50, "z": 0,
+                     "props": {"source": "breakdown", "chart_type": "donut"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/chart-svgs/",
+            {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
-        self.assertGreaterEqual(len(resp.data["pages"]), 1)
+        result = resp.data["charts"]["chart1"]
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("<svg", result["svg"])
+
+    def test_chart_svgs_action_flags_a_too_small_box(self):
+        """Below pdf_canvas.MIN_CHART_W_MM/H_MM the real PDF draws a "too
+        small" placeholder rather than garbage — the live preview must show
+        the exact same status, not silently render something inaccurate."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 10, "h": 10, "z": 0,
+                     "props": {"source": "breakdown"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/chart-svgs/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["charts"]["chart1"], {"status": "too_small"})
+
+    def test_chart_svgs_action_flags_no_data_for_an_unresolvable_source(self):
+        """A chart source with nothing to show (e.g. no cashflow rows) gets
+        the same "no data" status the real PDF's own placeholder uses."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 50, "z": 0,
+                     "props": {"source": "cashflow_monthly"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/chart-svgs/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["charts"]["chart1"], {"status": "no_data"})
+
+    def test_table_images_action_returns_real_png_for_a_resolvable_table(self):
+        """The Customize tab's live table preview — the exact same
+        draw_table_in_box call the real PDF uses, rasterized on its own
+        instead of drawn into a page (see table_images' docstring)."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    # "project_info" always resolves — built from the project's
+                    # own fields, no activities/zones needed.
+                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                     "props": {"source": "project_info"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-images/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        result = resp.data["tables"]["table1"]
+        self.assertEqual(result["status"], "ok")
+        import base64
+        png = base64.b64decode(result["png"])
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_table_images_action_flags_a_too_small_box(self):
+        """A box too short for even the header row gets the same "too
+        small" status the real PDF's own placeholder uses — never a
+        squashed or garbled table image."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 30, "h": 3, "z": 0,
+                     "props": {"source": "project_info"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-images/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["tables"]["table1"], {"status": "too_small"})
+
+    def test_table_images_action_flags_no_data_for_an_unresolvable_source(self):
+        """A table source with nothing to show (e.g. no milestones) gets
+        the same "no data" status the real PDF's own placeholder uses."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                     "props": {"source": "milestones"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-images/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["tables"]["table1"], {"status": "no_data"})
 
     def test_data_action_trims_repeat_sources_to_light_metadata(self):
         """photos/attachments/logos only need a caption and an authed

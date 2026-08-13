@@ -144,10 +144,9 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
 
   // Real-time preview: fetch the PDF as a blob (bypasses X-Frame-Options).
   // Skipped on the Customize tab — PdfViewer isn't rendered there (see the
-  // detailGridFull branch below), and ReportLayoutEditor's own <Document>
-  // already fetches pdfUrl for its page backgrounds; fetching it here too
-  // would mean generating this report's PDF twice (10-17s each) just to
-  // open that tab.
+  // detailGridFull branch below), and its canvas already renders live from
+  // real project data (see ElementPreview), so there's nothing there that
+  // needs this render at all.
   useEffect(() => {
     if (tab === "layout") return;
     let revoked = false;

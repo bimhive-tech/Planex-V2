@@ -36,6 +36,33 @@ export interface LayoutElement {
   props: Record<string, unknown>;
 }
 
+/** One chart element's live, real preview — see useChartSvgs and
+ * apps/reports/views.py's chart_svgs action, which builds this from the
+ * exact same Drawing the real PDF renders (just exported to SVG). Statuses
+ * mirror what the PDF itself draws for the same cases, never a fake chart. */
+export type ChartSvgResult = { status: "ok"; svg: string } | { status: "too_small" | "no_data" };
+export type ChartSvgMap = Record<string, ChartSvgResult>;
+
+/** One table element's live, real preview — see useTableImages and
+ * apps/reports/views.py's table_images action. Tables have no direct vector
+ * export the way a chart's Drawing does, so this is a small PNG of just
+ * that table, drawn with the exact same draw_table_in_box call the real
+ * page uses. Statuses mirror what the PDF itself draws, never a fake table. */
+export type TableImageResult = { status: "ok"; png: string } | { status: "too_small" | "no_data" };
+export type TableImageMap = Record<string, TableImageResult>;
+
+/** One row a "toc" element can list — mirrors apps/reports/pdf_canvas.py's
+ * build_canvas_pdf toc_map/toc_order exactly: `number` is the page's 1-based
+ * position in the real, current page sequence (every page counts, including
+ * the cover — exclude_cover only hides the cover *row*, not its numbering).
+ * Computed purely client-side from the pages array already in memory — no
+ * placeholder names/numbers, ever. */
+export interface TocEntry {
+  id: string;
+  name: string;
+  number: number;
+}
+
 /** Data sources a repeating page can clone itself against — mirrors
  * apps/reports/pdf_canvas.py's _REPEAT_SOURCES. */
 export type RepeatSource = "photos" | "attachments" | "area_dashboards" | "zones" | "areas";

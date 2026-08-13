@@ -6,7 +6,7 @@
 // a rendered PDF image. A page is an editable "layer" of positioned
 // elements, closer to Photoshop frames than a pixel-perfect page preview.
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
-import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, PageDesign, TableImageMap, TocEntry } from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
@@ -33,18 +33,21 @@ interface Props {
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
-  /** This page's real, rasterized PDF page — see LayoutEditor. */
-  backgroundImage?: string | null;
-  /** Element ids that existed before this mount — already baked into
-   * backgroundImage, so their own preview renders invisible (see
-   * CanvasElementView) rather than duplicating what the image shows. */
-  bornIds?: Set<string>;
+  /** Live, real per-chart previews — see useChartSvgs. */
+  chartSvgs?: ChartSvgMap;
+  /** Live, real per-table previews — see useTableImages. */
+  tableImages?: TableImageMap;
+  /** Every page in the current draft with its real page number — see
+   * ReportConfigurator. */
+  tocEntries?: TocEntry[];
+  /** This page's own id — a "toc" element on this page skips its own row. */
+  ownPageId?: string;
 }
 
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedId, showGuides, alignGuides,
   onSelect, onStartMove, onStartResize, onStartRotate, onAction, onDropSpec, liveData, pinnedItem,
-  backgroundImage, bornIds,
+  chartSvgs, tableImages, tocEntries, ownPageId,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -74,11 +77,6 @@ export function CanvasPage({
         onDropSpec(key, (e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
       }}
     >
-      {backgroundImage && (
-        // eslint-disable-next-line @next/next/no-img-element -- a data URI, not an optimizable public asset
-        <img src={backgroundImage} alt="" className={styles.pageBackgroundImage} draggable={false} />
-      )}
-
       {design.show_border && (
         <div
           className={styles.pageBorder}
@@ -140,9 +138,7 @@ export function CanvasPage({
         </>
       )}
 
-      {/* The real page image already shows the true header/footer pixel-for-
-          pixel — the ghost approximation would just sit on top of it. */}
-      {!backgroundImage && masterElements.map((el) => (
+      {masterElements.map((el) => (
         <CanvasElementView
           key={`master-${el.id}`}
           el={el}
@@ -155,6 +151,10 @@ export function CanvasPage({
           onAction={() => {}}
           liveData={liveData}
           pinnedItem={pinnedItem}
+          chartSvgs={chartSvgs}
+          tableImages={tableImages}
+          tocEntries={tocEntries}
+          ownPageId={ownPageId}
         />
       ))}
 
@@ -164,7 +164,6 @@ export function CanvasPage({
           el={el}
           scale={scale}
           selected={el.id === selectedId}
-          hideContent={Boolean(backgroundImage) && (bornIds?.has(el.id) ?? false)}
           onSelect={onSelect}
           onStartMove={onStartMove}
           onStartResize={onStartResize}
@@ -172,6 +171,10 @@ export function CanvasPage({
           onAction={onAction}
           liveData={liveData}
           pinnedItem={pinnedItem}
+          chartSvgs={chartSvgs}
+          tableImages={tableImages}
+          tocEntries={tocEntries}
+          ownPageId={ownPageId}
         />
       ))}
 

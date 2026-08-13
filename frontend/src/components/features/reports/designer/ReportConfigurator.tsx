@@ -7,7 +7,9 @@ import { useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
-import type { LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource } from "@/lib/reportLayout";
+import type {
+  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableImageMap, TocEntry,
+} from "@/lib/reportLayout";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
@@ -31,24 +33,24 @@ interface Props {
    * on its own dedicated Page Designer tab instead. */
   masterElements?: LayoutElement[];
   onMasterElementsChange?: (updater: (prev: LayoutElement[]) => LayoutElement[]) => void;
-  /** Every page of the report's current real PDF, rasterized — see
-   * useReportPageImages. null while template-builder (never fetched) or
-   * still loading. */
-  pageImages?: string[] | null;
-  pageImagesLoading?: boolean;
-  /** page id -> 1-based position in pageImages — see ReportLayoutEditor. */
-  pageNumberMap?: Map<string, number>;
-  /** Bumped by ReportLayoutEditor each time "Refresh preview" lands a fresh
-   * set of real backgrounds — included in LayoutEditor's key so it remounts
-   * and recomputes bornIds against the elements that are now actually baked
-   * into those backgrounds, the same way switching pages already does. */
-  previewVersion?: number;
+  /** Live, real per-chart previews — see useChartSvgs. Present only
+   * alongside liveData; undefined in the Template Builder. */
+  chartSvgs?: ChartSvgMap;
+  /** Live, real per-table previews — see useTableImages. */
+  tableImages?: TableImageMap;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
-  pageImages, pageImagesLoading, pageNumberMap, previewVersion,
+  chartSvgs, tableImages,
 }: Props) {
+  // Every page's real name + real page number, for any "toc" element on the
+  // canvas — mirrors apps/reports/pdf_canvas.py's build_canvas_pdf toc_map/
+  // toc_order exactly (1-based position in this exact page sequence).
+  // Needs only the page list, so it's available in both the report
+  // Customize tab and the project-agnostic Template Builder.
+  const tocEntries: TocEntry[] = pages.map((p, i) => ({ id: p.id, name: p.name, number: i + 1 }));
+
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // Whether you're moving this page's own content around, or the shared
@@ -137,9 +139,6 @@ export function ReportConfigurator({
 
   const pageList = (
     <section className={styles.setupPanel} aria-label="Report pages">
-      {pageImagesLoading && (
-        <p className={styles.panelHint}>Loading the real page previews (this can take a bit)…</p>
-      )}
       {onMasterElementsChange && (
         <div className={styles.editModeTabs} role="tablist" aria-label="What to edit">
           <button
@@ -293,18 +292,14 @@ export function ReportConfigurator({
 
   const pinnedItem = liveData ? resolvePinnedItem(active, liveData) : null;
   const editingHeader = editMode === "header" && Boolean(onMasterElementsChange);
-  const backgroundPageNumber = pageNumberMap?.get(active.id);
-  const backgroundImage =
-    pageImages && backgroundPageNumber ? pageImages[backgroundPageNumber - 1] ?? null : null;
 
   return (
     <LayoutEditor
       // Mode is part of the key (not just the page) — switching between
       // "Page content" and "Header & footer" is a different editable set
-      // entirely, so it should get its own fresh undo history and bornIds
-      // snapshot rather than inheriting the page's. previewVersion is
-      // included too — see its doc comment above.
-      key={`${active.id}-${editMode}-${previewVersion ?? 0}`}
+      // entirely, so it should get its own fresh undo history rather than
+      // inheriting the page's.
+      key={`${active.id}-${editMode}`}
       design={design}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
       onElementsChange={editingHeader ? onMasterElementsChange! : setElements}
@@ -319,7 +314,10 @@ export function ReportConfigurator({
       liveData={liveData}
       reportId={reportId}
       pinnedItem={editingHeader ? null : pinnedItem}
-      backgroundImage={backgroundImage}
+      chartSvgs={chartSvgs}
+      tableImages={tableImages}
+      tocEntries={tocEntries}
+      ownPageId={active.id}
     />
   );
 }

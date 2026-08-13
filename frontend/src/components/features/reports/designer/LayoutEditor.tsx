@@ -9,7 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
-import type { LayoutElement, PageDesign } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, PageDesign, TableImageMap, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasPage } from "./CanvasPage";
@@ -65,17 +65,20 @@ interface Props {
    * item.* field/table/chart elements resolve real data instead of the
    * generic placeholder. null on a fixed page or an un-expanded template. */
   pinnedItem?: RepeatItem | RepeatItem[] | null;
-  /** This page's real, rasterized PDF page (see useReportPageImages) — shown
-   * as the canvas background so it reads as the actual final page. Elements
-   * already present when this mount happened are drawn as invisible hit-
-   * boxes over it (see bornIds below); only newly-added ones still show the
-   * abstract preview, since they have no corresponding real pixels yet. */
-  backgroundImage?: string | null;
+  /** Live, real per-chart previews — see useChartSvgs. */
+  chartSvgs?: ChartSvgMap;
+  /** Live, real per-table previews — see useTableImages. */
+  tableImages?: TableImageMap;
+  /** Every page in the current draft with its real page number — see
+   * ReportConfigurator. */
+  tocEntries?: TocEntry[];
+  /** The active page's own id — a "toc" element on it skips its own row. */
+  ownPageId?: string;
 }
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, backgroundImage, reportId,
+  pinnedItem, reportId, chartSvgs, tableImages, tocEntries, ownPageId,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -85,14 +88,6 @@ export function LayoutEditor({
   // available via the checkbox for a moment of precise alignment.
   const [showGuides, setShowGuides] = useState(!liveData);
   const scale = BASE_SCALE * zoom;
-
-  // Snapshot of which element ids already existed when this page (or edit
-  // mode — see ReportConfigurator's key) was first shown. With a real
-  // background image, those are already baked into it pixel-for-pixel —
-  // rendering their abstract preview too would duplicate them visibly.
-  // Never recomputed after mount, so an element added this session keeps
-  // showing its preview (nothing real to show yet) even once selected/moved.
-  const [bornIds] = useState<Set<string>>(() => new Set(elements.map((e) => e.id)));
 
   // Undo/redo history for this editor instance (Page Designer's master
   // elements and each Report Configuration page each get their own — a page
@@ -335,8 +330,10 @@ export function LayoutEditor({
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
             liveData={liveData}
             pinnedItem={pinnedItem}
-            backgroundImage={backgroundImage}
-            bornIds={bornIds}
+            chartSvgs={chartSvgs}
+            tableImages={tableImages}
+            tocEntries={tocEntries}
+            ownPageId={ownPageId}
           />
         </div>
 
