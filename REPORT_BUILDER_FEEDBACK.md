@@ -255,13 +255,38 @@ not preview/rendering mismatches, genuine problems in the report's own data/logi
   as genuinely different physical shapes (portrait taller, landscape wider,
   same paper swapped) not just a config flag nothing reads.
 - Upload a PDF → pick which pages to pull in as images/attachments
-- 4 TOCs (Contents / Tables / Charts / Images), each a clickable link to the right page
-
-Confirmed real in the reference PDF: 3 of the 4 TOCs (Contents, Tables, Figures) exist
-already in their live workflow, dot-leader style, matching what Planex's TOC element
-already does. Every table and chart also carries a sequential number ("جدول 1", "رسم
-توضيحي 1"...) with a caption printed under it, not just listed in the TOC — the
-legacy Planex renderer already does this for charts, needs porting to the canvas.
+- ~~4 TOCs (Contents / Tables / Charts / Images), each a clickable link to the right
+  page~~ **[built]** — every table/chart element now has a "Show caption" toggle
+  (Properties panel) plus an optional caption text override; when on, the canvas
+  reserves an 8mm footer strip under the box (same pattern the image element's
+  existing caption already used) and the real PDF draws "جدول N: name" / "شكل N:
+  name" there, N a running counter across the whole document — mirrors the legacy
+  flowing renderer's per-chart `fig[0]` counter (`pdf.py`'s `_captioned`), extended
+  to tables and to captioned repeat-photo images ("صورة N"). The `toc` element
+  gained a `variant` prop (`contents` / `tables` / `figures` / `images`) — three new
+  palette entries ("List of tables/figures/images") drop one in pre-set to each
+  variant. Getting the numbering right needed a pre-pass (`_collect_captions`,
+  `pdf_canvas.py`) that walks the final page order and assigns every caption its
+  number *before* any page draws — the render loop is a single forward pass, so a
+  "List of tables" page that comes BEFORE the tables it lists would otherwise see
+  an empty list at draw time (same reasoning `build_canvas_pdf`'s existing
+  `toc_map`/`toc_order` pre-pass already used for the Contents variant). A table's
+  synthetic continuation pages (`_expand_table_overflow`) don't get their own
+  caption — same logical table, not a second one. Not real clickable PDF
+  hyperlinks (the pre-existing Contents TOC doesn't have those either — out of
+  scope here, same as it always was). The Customize-tab canvas can't replicate the
+  real cross-document numbering live (depends on repeat expansion and table-
+  overflow pagination, i.e. the whole document, not just one page), so a captioned
+  table/chart shows its caption text without a number in the editor, and a non-
+  Contents TOC variant shows a "resolved in the downloaded PDF" placeholder instead
+  of a fake list — the real numbered/paginated thing only exists in the actual PDF,
+  same "honest placeholder over a wrong preview" precedent as the earlier table-
+  overflow note. Verified: 3 new backend tests (sequential numbering across pages,
+  continuation pages not double-captioned, a "List of tables" TOC page before its
+  table still resolves correctly) plus live browser verification — toggled "Show
+  caption" on a real table, confirmed the canvas box shrank and a caption footer
+  rendered; switched a real TOC element's "Lists" dropdown to "Tables", confirmed
+  the placeholder text swapped in; reverted both without saving.
 
 ---
 

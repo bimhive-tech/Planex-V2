@@ -176,6 +176,8 @@ DEFAULT_CONFIG = {
         "gauge_excellent": "Excellent",
         "progress_compare": "Progress vs Plan",
         "figure": "شكل",
+        "table_caption": "جدول",
+        "image_caption": "صورة",
         "col_previous": "Previous %",
         "col_planned": "Planned %",
         "col_actual": "Actual %",

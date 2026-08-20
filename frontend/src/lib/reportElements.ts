@@ -155,8 +155,17 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
           + "look — the page's own name, centered and large. Add a Line element under it "
           + "for the reference's underline rule." },
       { key: "toc", label: "Table of contents", type: "toc", icon: "list", w: 170, h: 120,
-        props: { size: 11, row_height: 8, color: "#1e2430", exclude_cover: true },
+        props: { size: 11, row_height: 8, color: "#1e2430", exclude_cover: true, variant: "contents" },
         hint: "Lists every other page in this template with its real page number — resolved at render time, no manual upkeep." },
+      { key: "toc_tables", label: "List of tables", type: "toc", icon: "table", w: 170, h: 100,
+        props: { size: 11, row_height: 8, color: "#1e2430", variant: "tables" },
+        hint: "Lists every table with its Properties panel \"Show caption\" turned on, numbered in the order they appear in the PDF." },
+      { key: "toc_figures", label: "List of figures", type: "toc", icon: "dashboard", w: 170, h: 100,
+        props: { size: 11, row_height: 8, color: "#1e2430", variant: "figures" },
+        hint: "Lists every chart with \"Show caption\" turned on, numbered in the order they appear in the PDF." },
+      { key: "toc_images", label: "List of images", type: "toc", icon: "image", w: 170, h: 100,
+        props: { size: 11, row_height: 8, color: "#1e2430", variant: "images" },
+        hint: "Lists every captioned Site Photos slot, numbered in the order it appears in the PDF." },
     ],
   },
   {

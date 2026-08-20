@@ -659,8 +659,43 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
   );
 }
 
+/** Reserves a footer strip under a table/chart box when its "Show caption"
+ * toggle is on — mirrors apps/reports/pdf_canvas.py's _CAPTION_H reservation
+ * in _draw_table_element/_draw_chart_element. The real PDF prefixes this
+ * text with a running "جدول N:"/"شكل N:" number computed across the whole
+ * document (repeat expansion, table-overflow pagination) — not reproducible
+ * from this one page in isolation, so the canvas shows the caption's name
+ * without a number rather than a wrong or fake one. */
+function CaptionedBox({ show, text, children }: { show: boolean; text: string; children: React.ReactNode }) {
+  if (!show) return <>{children}</>;
+  return (
+    <div className={styles.captionedBox}>
+      <div className={styles.captionedBoxBody}>{children}</div>
+      <div className={styles.elementCaption}>{text}</div>
+    </div>
+  );
+}
+
 function TocPreview({ el, liveData, tocEntries, ownPageId, onElementChange }: PreviewProps) {
   const p = el.props;
+  const variant = String(p.variant ?? "contents");
+
+  // "Tables"/"Figures"/"Images" variants list every OTHER captioned element
+  // in the template, in final PDF page order — numbering that depends on
+  // the whole document (repeat expansion, table-overflow pagination), not
+  // just this one page's data, so it isn't something this per-page canvas
+  // editor can recompute live the way the Contents variant does from
+  // tocEntries. apps/reports/pdf_canvas.py's _collect_captions pre-pass
+  // computes the real thing; this placeholder just says so.
+  if (variant !== "contents") {
+    const label = variant === "tables" ? "tables" : variant === "figures" ? "figures / charts" : "images";
+    return (
+      <div className={styles.chartPlaceholder}>
+        {`List of ${label} — numbered and resolved in the downloaded PDF`}
+      </div>
+    );
+  }
+
   const excludeCover = p.exclude_cover ?? true;
   const size = Number(p.size ?? 11);
   const color = String(p.color ?? "#1e2430");
@@ -895,19 +930,29 @@ export function ElementPreview({
 
     case "table":
       return (
-        <TablePreview
-          el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-          tableData={tableData} previewsReady={previewsReady}
-          onElementChange={onElementChange}
-        />
+        <CaptionedBox
+          show={Boolean(p.show_caption)}
+          text={String(p.caption || label(TABLE_SOURCES, p.source, "Table"))}
+        >
+          <TablePreview
+            el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+            tableData={tableData} previewsReady={previewsReady}
+            onElementChange={onElementChange}
+          />
+        </CaptionedBox>
       );
 
     case "chart":
       return (
-        <ChartPreview
-          el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-          chartSvgs={chartSvgs} previewsReady={previewsReady}
-        />
+        <CaptionedBox
+          show={Boolean(p.show_caption)}
+          text={String(p.caption || label(CHART_SOURCES, p.source, "Chart"))}
+        >
+          <ChartPreview
+            el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+            chartSvgs={chartSvgs} previewsReady={previewsReady}
+          />
+        </CaptionedBox>
       );
 
     case "toc":

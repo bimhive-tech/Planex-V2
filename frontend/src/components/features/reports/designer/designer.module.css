@@ -738,6 +738,33 @@
   text-overflow: ellipsis;
 }
 
+/* A table/chart element with "Show caption" on — reserves a footer strip
+   below the live content, mirroring pdf_canvas.py's _CAPTION_H box split. */
+.captionedBox {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.captionedBoxBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.elementCaption {
+  flex: 0 0 auto;
+  font-size: 8px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  text-align: center;
+  padding-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The live, real chart — same Drawing the PDF renders, exported to SVG (see
    useChartSvgs). The SVG's own width/height attributes are in points; these
    rules override them (CSS beats SVG presentation attributes) so it fills

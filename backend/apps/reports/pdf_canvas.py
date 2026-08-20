@@ -150,6 +150,11 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
             seen.add(pid)
             toc_order.append((pid, inst.page.get("name") or ""))
     ctx["_toc_map"], ctx["_toc_order"] = toc_map, toc_order
+    # Same reasoning as toc_map above, extended to captioned tables/charts/
+    # photos: a "List of tables"/"figures"/"images" TOC variant needs every
+    # entry's final number and page before it draws, even when the TOC page
+    # itself comes before the elements it lists — see _collect_captions.
+    _collect_captions(instances, cfg, ctx)
 
     for inst in instances:
         # This exact page's own size — its `orientation` override if it has
@@ -246,11 +251,11 @@ def _draw_element(c, el: dict, box, inst: PageInstance, cfg, ctx):
         elif t == "logo":
             _draw_logo(c, props, x, y, w, h, ctx)
         elif t == "image":
-            _draw_image(c, props, x, y, w, h, inst, ctx)
+            _draw_image(c, props, x, y, w, h, inst, ctx, el.get("id"))
         elif t == "table":
             _draw_table_element(c, props, x, y, w, h, inst, cfg, ctx, el.get("id"))
         elif t == "chart":
-            _draw_chart_element(c, props, x, y, w, h, inst, cfg, ctx)
+            _draw_chart_element(c, props, x, y, w, h, inst, cfg, ctx, el.get("id"))
         elif t == "toc":
             _draw_toc_element(c, props, x, y, w, h, inst, ctx)
     except Exception:
@@ -377,6 +382,16 @@ def _draw_logo(c, props, x, y, w, h, ctx):
 _CAPTION_H = 8 * mm
 
 
+def _draw_caption_text(c, x, y, w, caption_h, text):
+    """Centered caption strip under a table/chart/image box — one shared
+    look for every captioned element type."""
+    style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
+                           textColor=hexcolor("#595959"), alignment=TA_CENTER)
+    para = Paragraph(shape(text), style)
+    para.wrap(w, caption_h)
+    para.drawOn(c, x, y)
+
+
 def _draw_fitted_image(c, reader, x, y, w, h, props):
     """draw_fitted_image, reading its fit/focal_x/focal_y from this element's
     own props — the "image" element's Properties-panel "Fit" control
@@ -389,7 +404,7 @@ def _draw_fitted_image(c, reader, x, y, w, h, props):
     )
 
 
-def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
+def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx, el_id=None):
     """`repeat.item` binds this box to one photo/attachment in the current
     repeat chunk (props["slot"] indexes inst.scope["items"]) — this is what
     lets a 4-slot "Site Photos" page turn into N real pages. `upload` binds it
@@ -414,11 +429,11 @@ def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
         _draw_fitted_image(c, reader, x, y + caption_h, w, h - caption_h, props)
     _draw_image_border(c, props, x, y + caption_h, w, h - caption_h)
     if show_caption and item.get("caption"):
-        style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
-                               textColor=hexcolor("#595959"), alignment=TA_CENTER)
-        para = Paragraph(shape(item["caption"]), style)
-        para.wrap(w, caption_h)
-        para.drawOn(c, x, y)
+        # Text (with its running "صورة N:" number) was already assigned by
+        # the _collect_captions pre-pass — see build_canvas_pdf.
+        text = (ctx.get("_image_caption_text") or {}).get((id(inst), el_id))
+        if text:
+            _draw_caption_text(c, x, y, w, caption_h, text)
 
 
 def _draw_uploaded_image(c, props, x, y, w, h, ctx):
@@ -438,30 +453,45 @@ def _draw_uploaded_image(c, props, x, y, w, h, ctx):
     _draw_image_border(c, props, x, y, w, h)
 
 
+_TOC_CAPTION_LISTS = {
+    "tables": "_table_captions",
+    "figures": "_figure_captions",
+    "images": "_image_captions",
+}
+
+
 def _draw_toc_element(c, props, x, y, w, h, inst: PageInstance, ctx):
-    """Lists every other page in the template with its real, resolved page
-    number and a dotted leader — built from the number map build_canvas_pdf
-    computes up front (see build_canvas_pdf's toc_map/toc_order)."""
-    toc_map, toc_order = ctx.get("_toc_map") or {}, ctx.get("_toc_order") or []
-    own_id = inst.page.get("id")
-    exclude_cover = props.get("exclude_cover", True)
+    """`variant` (default "contents") picks what this element lists:
+    "contents" — every other page in the template, its real resolved page
+    number, from build_canvas_pdf's toc_map/toc_order pre-pass; "tables" /
+    "figures" / "images" — every captioned table/chart/photo instead, in
+    the order they were drawn (build_canvas_pdf's _collect_captions
+    pre-pass). Same dot-leader visual either way — only where `rows` comes
+    from differs."""
+    variant = props.get("variant", "contents")
     size = float(props.get("size", 11))
     row_h = float(props.get("row_height", 8)) * mm
     color = hexcolor(props.get("color", "#1e2430"))
     rtl = bool(ctx.get("arabic"))
 
-    # A manual override (edited via the Customize tab's canvas) replaces
-    # this row's displayed name only — the page's own title elsewhere is
-    # untouched, same as a table cell override doesn't change the project
-    # data it was read from.
-    name_overrides = props.get("name_overrides") or {}
-    rows = []
-    for pid, name in toc_order:
-        if pid == own_id or pid not in toc_map:
-            continue
-        if exclude_cover and name.strip().lower() in ("cover",):
-            continue
-        rows.append((name_overrides.get(pid, name), toc_map[pid]))
+    if variant in _TOC_CAPTION_LISTS:
+        rows = list(ctx.get(_TOC_CAPTION_LISTS[variant]) or [])
+    else:
+        toc_map, toc_order = ctx.get("_toc_map") or {}, ctx.get("_toc_order") or []
+        own_id = inst.page.get("id")
+        exclude_cover = props.get("exclude_cover", True)
+        # A manual override (edited via the Customize tab's canvas) replaces
+        # this row's displayed name only — the page's own title elsewhere is
+        # untouched, same as a table cell override doesn't change the project
+        # data it was read from.
+        name_overrides = props.get("name_overrides") or {}
+        rows = []
+        for pid, name in toc_order:
+            if pid == own_id or pid not in toc_map:
+                continue
+            if exclude_cover and name.strip().lower() in ("cover",):
+                continue
+            rows.append((name_overrides.get(pid, name), toc_map[pid]))
 
     c.setFont(FONT_NAME, size)
     cy = y + h - size
@@ -512,6 +542,10 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         inst.continues_chunk.drawOn(c, x, y + h - chunk_h)
         return
 
+    show_caption = bool(props.get("show_caption"))
+    caption_h = _CAPTION_H if show_caption else 0
+    content_h = h - caption_h
+
     source = props.get("source", "")
     table = resolve_table(
         source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
@@ -526,28 +560,42 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     # draw that same piece rather than resolving/splitting it again.
     chunk0 = (inst.table_chunk0 or {}).get(el_id) if el_id else None
     if chunk0 is not None:
-        _, chunk_h = chunk0.wrap(w, h)
-        chunk0.drawOn(c, x, y + h - chunk_h)
+        _, chunk_h = chunk0.wrap(w, content_h)
+        chunk0.drawOn(c, x, y + caption_h + content_h - chunk_h)
+    elif not draw_table_in_box(c, table, x, y + caption_h, w, content_h):
+        _draw_placeholder(c, x, y + caption_h, w, content_h, f"Table too small: {source}")
         return
 
-    if not draw_table_in_box(c, table, x, y, w, h):
-        _draw_placeholder(c, x, y, w, h, f"Table too small: {source}")
+    if show_caption:
+        # Text (with its running "جدول N:" number) was already assigned by
+        # the _collect_captions pre-pass — see build_canvas_pdf.
+        text = (ctx.get("_table_caption_text") or {}).get((id(inst), el_id))
+        if text:
+            _draw_caption_text(c, x, y, w, caption_h, text)
 
 
-def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
+def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_id=None):
     source = props.get("source", "")
+    show_caption = bool(props.get("show_caption"))
+    caption_h = _CAPTION_H if show_caption else 0
+    content_h = h - caption_h
     min_w, min_h = MIN_CHART_W_MM * mm, MIN_CHART_H_MM * mm
-    if w < min_w or h < min_h:
+    if w < min_w or content_h < min_h:
         _draw_placeholder(c, x, y, w, h, f"Chart too small: {source}")
         return
     drawing = resolve_chart(
-        source, props.get("chart_type"), cfg, ctx, inst.scope, w, h, scope_zone_id=props.get("scope_zone_id"),
+        source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h, scope_zone_id=props.get("scope_zone_id"),
     )
     if drawing is None:
         _draw_placeholder(c, x, y, w, h, f"No data: {source}")
         return
     from reportlab.graphics import renderPDF
-    renderPDF.draw(drawing, c, x, y)
+    renderPDF.draw(drawing, c, x, y + caption_h)
+
+    if show_caption:
+        text = (ctx.get("_figure_caption_text") or {}).get((id(inst), el_id))
+        if text:
+            _draw_caption_text(c, x, y, w, caption_h, text)
 
 
 # ── Field binding ────────────────────────────────────────────────────────────
@@ -1078,16 +1126,26 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
             props = el.get("props") or {}
             source = props.get("source", "")
             x, y, w, h = el_box(el, page_h_mm)
+            # A captioned table reserves _CAPTION_H at the bottom of its box
+            # (see _draw_table_element) — split against that same reduced
+            # height so a continuing table's chunk boundaries land exactly
+            # where the real draw pass will later need them to. Every chunk
+            # (including continuation ones, which don't carry their own
+            # caption) uses this one reduced height rather than a taller one
+            # for the continuation chunks specifically — simpler than
+            # re-splitting per chunk, at the cost of a little unused space
+            # on continuation pages.
+            content_h = h - (_CAPTION_H if props.get("show_caption") else 0)
             table = resolve_table(
                 source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
                 scope_zone_id=props.get("scope_zone_id"),
             )
             if table is None:
                 continue
-            _, natural_h = table.wrap(w, h)
-            if natural_h <= h:
+            _, natural_h = table.wrap(w, content_h)
+            if natural_h <= content_h:
                 continue
-            candidate = _split_table_chunks(table, w, h)
+            candidate = _split_table_chunks(table, w, content_h)
             if len(candidate) > 1:
                 overflow_el, chunks = el, candidate
                 break
@@ -1112,6 +1170,66 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
     for i, inst in enumerate(out, start=1):
         inst.number = i
     return out
+
+
+def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:
+    """Pre-pass, run once before any page is drawn: assigns every captioned
+    table/chart/photo its running number ("جدول N"/"شكل N"/"صورة N") and
+    records (caption text, page number) for a "List of tables/figures/images"
+    TOC variant to read — same reason toc_map/toc_order above are a pre-pass
+    rather than computed inline while drawing: a TOC page can come BEFORE the
+    elements it lists, and a single forward render pass would still find an
+    empty list for it at that point. Scoped to each page's own `elements`
+    (not master_elements) — a header/footer repeats on every page, so
+    numbering it as a distinct table/figure per page would be meaningless.
+
+    Sets ctx["_table_captions"]/"_figure_captions"/"_image_captions" (ordered
+    [(text, page_no), ...] lists, read by _draw_toc_element) and
+    ctx["_table_caption_text"]/"_figure_caption_text"/"_image_caption_text"
+    (keyed by (id(instance), element_id), read by the matching _draw_*
+    function so its live draw pass reuses the exact same text/number instead
+    of recomputing — recomputing independently could drift if either side's
+    logic ever changed without the other)."""
+    seq = {"table": 0, "figure": 0, "image": 0}
+    lists = {"table": [], "figure": [], "image": []}
+    text_maps = {"table": {}, "figure": {}, "image": {}}
+
+    for inst in instances:
+        if inst.continues_chunk is not None:
+            continue  # continuation pages don't get their own caption
+        for el in inst.page.get("elements") or []:
+            props = el.get("props") or {}
+            if not props.get("show_caption"):
+                continue
+            t = el.get("type")
+            if t == "table":
+                kind, label_key = "table", "table_caption"
+                name = props.get("caption") or cfg["labels"].get(props.get("source", ""), props.get("source", ""))
+            elif t == "chart":
+                kind, label_key = "figure", "figure"
+                name = props.get("caption") or cfg["labels"].get(props.get("source", ""), props.get("source", ""))
+            elif t == "image" and props.get("source") == "repeat.item":
+                items = inst.scope.get("items") or []
+                slot = int(props.get("slot", 0) or 0)
+                item = items[slot] if 0 <= slot < len(items) else None
+                if not item or not item.get("caption"):
+                    continue
+                kind, label_key, name = "image", "image_caption", item["caption"]
+            else:
+                continue
+
+            seq[kind] += 1
+            prefix = cfg["labels"].get(label_key, label_key)
+            text = f"{prefix} {seq[kind]}: {name}" if name else f"{prefix} {seq[kind]}"
+            lists[kind].append((text, inst.number))
+            text_maps[kind][(id(inst), el.get("id"))] = text
+
+    ctx["_table_captions"], ctx["_figure_captions"], ctx["_image_captions"] = (
+        lists["table"], lists["figure"], lists["image"],
+    )
+    ctx["_table_caption_text"], ctx["_figure_caption_text"], ctx["_image_caption_text"] = (
+        text_maps["table"], text_maps["figure"], text_maps["image"],
+    )
 
 
 _REPEAT_SOURCES = {

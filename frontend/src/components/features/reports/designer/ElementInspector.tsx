@@ -27,6 +27,16 @@ const ALIGN = [
   { value: "right", label: "Right" },
 ];
 
+/** What a "toc" element lists — see apps/reports/pdf_canvas.py's
+ * _draw_toc_element. "tables"/"figures"/"images" only pick up elements that
+ * have their own "Show caption" toggle turned on elsewhere in the template. */
+const TOC_VARIANTS = [
+  { value: "contents", label: "Contents (pages)" },
+  { value: "tables", label: "Tables" },
+  { value: "figures", label: "Figures / charts" },
+  { value: "images", label: "Images" },
+];
+
 /** Image source: a fixed logo/cover slot, a repeat-page photo slot (only
  * meaningful once the active page is marked "repeat" — see `repeating`), or
  * an image uploaded directly to this one box (report Customize tab only —
@@ -126,6 +136,8 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "zebra_color", label: "Zebra stripe color", kind: "color" },
         { path: "border", label: "Borders", kind: "toggle" },
         { path: "border_color", label: "Border color", kind: "color" },
+        { path: "show_caption", label: "Show caption", kind: "toggle" },
+        { path: "caption", label: "Caption text (optional — defaults to the data source's name)", kind: "text" },
       ];
     case "chart":
       return [
@@ -135,9 +147,12 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "legend", label: "Show legend", kind: "toggle" },
         { path: "color_a", label: "Series A", kind: "color" },
         { path: "color_b", label: "Series B", kind: "color" },
+        { path: "show_caption", label: "Show caption", kind: "toggle" },
+        { path: "caption", label: "Caption text (optional — defaults to the data source's name)", kind: "text" },
       ];
     case "toc":
       return [
+        { path: "variant", label: "Lists", kind: "select", options: TOC_VARIANTS },
         { path: "size", label: "Size (pt)", kind: "number" },
         { path: "row_height", label: "Row height (mm)", kind: "number", step: 0.5 },
         { path: "color", label: "Color", kind: "color" },

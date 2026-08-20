@@ -380,6 +380,87 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertAlmostEqual(p1.width, p2.height, delta=1)
         self.assertAlmostEqual(p1.height, p2.width, delta=1)
 
+    def test_captioned_table_and_chart_get_sequential_numbers(self):
+        """Phase 4's "every table/chart carries a sequential number with a
+        caption printed under it" ask — a table's "show_caption" prop draws
+        "جدول N: name" beneath its box, a chart's draws "شكل N: name",
+        numbered in the order they're drawn (across pages, not per-page).
+        The caption's Arabic prefix reorders the whole line to RTL visual
+        order (see shape()'s docstring/the divider-heading tests elsewhere
+        in this file for the same effect) — so the English name/number this
+        test controls ends up FIRST in extracted text, not last."""
+        import fitz
+
+        pages = [
+            {"id": "p1", "name": "Page 1", "elements": [
+                {"id": "tbl", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                 "props": {"source": "zone_progress", "show_caption": True, "caption": "Zone Table"}},
+            ]},
+            {"id": "p2", "name": "Page 2", "elements": [
+                {"id": "chart", "type": "chart", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                 "props": {"source": "zone_progress", "chart_type": "bar", "show_caption": True,
+                           "caption": "Progress Chart"}},
+                {"id": "tbl2", "type": "table", "x": 10, "y": 80, "w": 100, "h": 60, "z": 1,
+                 "props": {"source": "zone_progress", "show_caption": True, "caption": "Second Table"}},
+            ]},
+        ]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertIn("Zone Table :1", full_text)
+        self.assertIn("Progress Chart :1", full_text)  # its own, separate figure counter
+        self.assertIn("Second Table :2", full_text)    # second table, not reset per page
+
+    def test_table_continuation_pages_do_not_repeat_the_caption(self):
+        """Only the table's first page gets a caption/number — a synthetic
+        continuation page (see _expand_table_overflow) is the same logical
+        table, not a second one."""
+        import fitz
+
+        zones = [{"name": f"Zone {i}", "progress": 50.0} for i in range(20)]
+        ctx = {**_sample_ctx(), "zones": zones}
+        pages = [{"id": "p1", "name": "Zones", "elements": [
+            {"id": "tbl", "type": "table", "x": 10, "y": 20, "w": 100, "h": 60, "z": 0,
+             "props": {"source": "zone_progress", "show_caption": True, "caption": "Zone Table"}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, ctx)
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertGreater(doc.page_count, 1)
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertEqual(full_text.count("Zone Table"), 1)
+
+    def test_list_of_tables_toc_variant_lists_captioned_tables_with_page_numbers(self):
+        """A "toc" element with props.variant="tables" (Phase 4's 4-TOC ask)
+        lists every captioned table — even though this TOC page comes BEFORE
+        the table it lists, proving the caption numbering is a pre-pass, not
+        computed only as each table itself draws."""
+        import fitz
+
+        pages = [
+            {"id": "toc", "name": "List of Tables", "elements": [
+                {"id": "lot", "type": "toc", "x": 10, "y": 10, "w": 190, "h": 100, "z": 0,
+                 "props": {"variant": "tables", "size": 11, "row_height": 8}},
+            ]},
+            {"id": "p2", "name": "Data Page", "elements": [
+                {"id": "tbl", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                 "props": {"source": "zone_progress", "show_caption": True, "caption": "Zone Table"}},
+            ]},
+        ]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        toc_text = doc[0].get_text()
+        self.assertIn("Zone Table :1", toc_text)
+        self.assertIn("2", toc_text)  # the table's real page number (page 2)
+
 
 class CoverFitGeometryTests(SimpleTestCase):
     """The "image" element's Fit=Cover crop math (see draw_fitted_image) —
