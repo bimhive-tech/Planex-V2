@@ -11,16 +11,17 @@
 //
 // Every element renders live from real project data (see ElementPreview) —
 // tables and charts specifically render the exact same output the real PDF
-// does (useTableImages/useChartSvgs), not an approximation and not a static
+// does (useTableData/useChartSvgs), not an approximation and not a static
 // full-page snapshot. There's nothing to "refresh": moving or editing an
 // element updates its own live preview directly, the same way every other
 // element type already did.
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { StateView } from "@/components/ui/StateView";
 import { useChartSvgs } from "@/hooks/useChartSvgs";
-import { useTableImages } from "@/hooks/useTableImages";
+import { useTableData } from "@/hooks/useTableData";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
 import type { LayoutElement, LayoutPage } from "@/lib/reportLayout";
@@ -69,12 +70,21 @@ export function ReportLayoutEditor({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Resetting discards every custom page/text edit this report has of its
+  // own (including any table/TOC/field overrides — see ElementPreview's
+  // InlineEditableText) with no undo once saved, so it's gated behind an
+  // explicit confirmation rather than firing on the first click.
+  const [confirmingReset, setConfirmingReset] = useState(false);
   // Live, real chart/table previews — see each hook's own doc comment.
   // Debounced and cheap (no PDF assembly, no full-page rasterization), so
   // every edit updates them directly instead of waiting on an explicit
   // refresh or a save.
-  const chartSvgs = useChartSvgs(reportId, pages, masterElements);
-  const tableImages = useTableImages(reportId, pages, masterElements);
+  const { charts: chartSvgs, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
+  const { tables: tableData, loaded: tablesLoaded } = useTableData(reportId, pages, masterElements);
+  // Neither hook has produced its first real response yet — chart/table
+  // boxes grey out instead of showing the generic client-side mockup, so a
+  // still-loading canvas never looks like it's already showing real content.
+  const previewsReady = chartsLoaded && tablesLoaded;
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);
@@ -103,6 +113,7 @@ export function ReportLayoutEditor({
   }
 
   async function resetToTemplate() {
+    setConfirmingReset(false);
     setSaving(true);
     setError(null);
     try {
@@ -149,7 +160,7 @@ export function ReportLayoutEditor({
         {canManage && (
           <div className={styles.detailActions}>
             {isCustomized && (
-              <Button variant="secondary" onClick={resetToTemplate} disabled={saving}>
+              <Button variant="secondary" onClick={() => setConfirmingReset(true)} disabled={saving}>
                 Reset to template
               </Button>
             )}
@@ -169,8 +180,27 @@ export function ReportLayoutEditor({
         masterElements={masterElements}
         onMasterElementsChange={updateMasterElements}
         chartSvgs={chartSvgs}
-        tableImages={tableImages}
+        tableData={tableData}
+        previewsReady={previewsReady}
       />
+      <Modal
+        open={confirmingReset}
+        title="Reset to template?"
+        onClose={() => setConfirmingReset(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmingReset(false)}>Cancel</Button>
+            <Button onClick={resetToTemplate} disabled={saving}>
+              {saving ? "Resetting…" : "Reset to template"}
+            </Button>
+          </>
+        }
+      >
+        <p>
+          This discards every page, text edit, and table/field/TOC override this report has of its own — including
+          anything not yet saved — and goes back to exactly what the template says. This can&apos;t be undone.
+        </p>
+      </Modal>
     </section>
   );
 }

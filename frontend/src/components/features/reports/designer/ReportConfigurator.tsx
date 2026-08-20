@@ -8,11 +8,12 @@ import { useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type {
-  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableImageMap, TocEntry,
+  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableDataMap, TocEntry,
 } from "@/lib/reportLayout";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
+import { PageStrip } from "./PageStrip";
 import styles from "./designer.module.css";
 
 const DEFAULT_REPEAT: PageRepeat = { source: "photos", mode: "chunk", chunk_size: 4 };
@@ -36,13 +37,19 @@ interface Props {
   /** Live, real per-chart previews — see useChartSvgs. Present only
    * alongside liveData; undefined in the Template Builder. */
   chartSvgs?: ChartSvgMap;
-  /** Live, real per-table previews — see useTableImages. */
-  tableImages?: TableImageMap;
+  /** Live, real per-table data — each table's own effective style (colors,
+   * font size, padding) travels with it — see useTableData. */
+  tableData?: TableDataMap;
+  /** False until chartSvgs/tableData's first real response has landed —
+   * chart/table boxes grey out instead of showing the generic mockup.
+   * Defaults true (Template Builder — chartSvgs/tableData never load at
+   * all there, so the mockup is the only look and always "ready"). */
+  previewsReady?: boolean;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
-  chartSvgs, tableImages,
+  chartSvgs, tableData, previewsReady = true,
 }: Props) {
   // Every page's real name + real page number, for any "toc" element on the
   // canvas — mirrors apps/reports/pdf_canvas.py's build_canvas_pdf toc_map/
@@ -315,9 +322,23 @@ export function ReportConfigurator({
       reportId={reportId}
       pinnedItem={editingHeader ? null : pinnedItem}
       chartSvgs={chartSvgs}
-      tableImages={tableImages}
+      tableData={tableData}
+      previewsReady={previewsReady}
       tocEntries={tocEntries}
       ownPageId={active.id}
+      bottomPanel={
+        editingHeader ? undefined : (
+          <PageStrip
+            pages={pages}
+            design={design}
+            activeId={active.id}
+            onSelect={setActiveId}
+            onDuplicate={duplicatePage}
+            onDelete={deletePage}
+            onAdd={addPage}
+          />
+        )
+      }
     />
   );
 }

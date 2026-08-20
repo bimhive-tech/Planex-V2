@@ -43,13 +43,46 @@ export interface LayoutElement {
 export type ChartSvgResult = { status: "ok"; svg: string } | { status: "too_small" | "no_data" };
 export type ChartSvgMap = Record<string, ChartSvgResult>;
 
-/** One table element's live, real preview — see useTableImages and
- * apps/reports/views.py's table_images action. Tables have no direct vector
- * export the way a chart's Drawing does, so this is a small PNG of just
- * that table, drawn with the exact same draw_table_in_box call the real
- * page uses. Statuses mirror what the PDF itself draws, never a fake table. */
-export type TableImageResult = { status: "ok"; png: string } | { status: "too_small" | "no_data" };
-export type TableImageMap = Record<string, TableImageResult>;
+/** One table element's live, real data — see useTableData and
+ * apps/reports/views.py's table_data action, which returns the exact same
+ * header/rows resolve_table computes for the real PDF table (raw=True mode)
+ * as plain JSON — not an image of any kind, so the canvas renders it as a
+ * genuine HTML table. `kind` picks which of the three real PDF table shapes
+ * (pdf_tables.py's _info_table/_data_table/_hierarchy_table) these rows map
+ * to. "no_data" mirrors exactly what the PDF itself draws in that case,
+ * never fake rows. */
+export type TableDataRow = string[];
+export interface TableHierarchyRow {
+  name: string;
+  actual: number | null;
+  previous: number | null;
+  planned: number | null;
+  level: 0 | 1;
+}
+/** The real colors/toggles/font size pdf_tables.py's table builders draw
+ * this exact table with — the report's global defaults, patched by this
+ * element's own `props.style` if it has one (see
+ * apps/reports/pdf_tables.py's table_style_override, which resolve_table
+ * itself uses for the real PDF, so this can never show a look the PDF
+ * doesn't also produce). Per element, not one shared style for the whole
+ * report — see ElementInspector's table style panel, which writes here. */
+export interface TableStyle {
+  header_bg: string;
+  header_text: string;
+  border_color: string;
+  zebra_color: string;
+  border: boolean;
+  zebra: boolean;
+  header_bold: boolean;
+  font_size: number;
+  cell_padding: number;
+}
+export type TableDataResult =
+  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle }
+  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle }
+  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle }
+  | { status: "no_data"; style: TableStyle };
+export type TableDataMap = Record<string, TableDataResult>;
 
 /** One row a "toc" element can list — mirrors apps/reports/pdf_canvas.py's
  * build_canvas_pdf toc_map/toc_order exactly: `number` is the page's 1-based

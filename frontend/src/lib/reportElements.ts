@@ -51,6 +51,7 @@ export const FIELD_SOURCES = [
   { value: "progress.overall", label: "Overall progress %" },
   { value: "progress.planned", label: "Planned progress %" },
   { value: "page.number", label: "Page number" },
+  { value: "page.title", label: "Page title (this page's own name)" },
 ];
 
 /** Data behind a table element. */
@@ -148,6 +149,11 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
                  label: "", show_label: false } },
       { key: "page_number", label: "Page number", type: "field", icon: "listOrdered", w: 30, h: 8,
         props: { source: "page.number", size: 10, color: "#595959", align: "right" } },
+      { key: "divider_heading", label: "Divider heading", type: "field", icon: "heading", w: 170, h: 20,
+        props: { source: "page.title", size: 22, color: "#1F4E79", align: "center", bold: true },
+        hint: "Drop on an otherwise-blank page to reproduce the classic section-divider "
+          + "look — the page's own name, centered and large. Add a Line element under it "
+          + "for the reference's underline rule." },
       { key: "toc", label: "Table of contents", type: "toc", icon: "list", w: 170, h: 120,
         props: { size: 11, row_height: 8, color: "#1e2430", exclude_cover: true },
         hint: "Lists every other page in this template with its real page number — resolved at render time, no manual upkeep." },

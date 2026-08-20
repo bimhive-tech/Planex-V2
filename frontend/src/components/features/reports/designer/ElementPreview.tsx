@@ -8,8 +8,11 @@
 // reportRepeat.ts), letting item.* bindings resolve too. In the project-
 // agnostic Template Builder both are undefined and every element falls back
 // to the representative placeholder it always showed.
+import { useEffect, useRef, useState } from "react";
+
+import { Skeleton } from "@/components/ui/Skeleton";
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
-import type { ChartSvgMap, LayoutElement, TableImageMap, TocEntry } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, TableDataMap, TableStyle, TocEntry } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
@@ -33,9 +36,17 @@ interface PreviewProps {
    * on first load) or when there's no reportId at all (Template Builder,
    * which has no real project data for a chart to match anyway). */
   chartSvgs?: ChartSvgMap;
-  /** Live, real per-table previews — see useTableImages. Same fallback
-   * reasoning as chartSvgs above. */
-  tableImages?: TableImageMap;
+  /** Live, real per-table data — see useTableData. Same fallback reasoning
+   * as chartSvgs above. Each entry carries its own effective style (colors,
+   * font size, padding — the report's defaults patched by this element's
+   * own props.style, if it has one), not a separate shared prop. */
+  tableData?: TableDataMap;
+  /** False until chartSvgs/tableData's first real response has landed —
+   * chart/table boxes show a neutral grey skeleton instead of the generic
+   * client-side mockup, so a still-loading canvas never reads as if it's
+   * already showing real content. Defaults true (Template Builder, where
+   * chartSvgs/tableData never load at all — the mockup is the only look). */
+  previewsReady?: boolean;
   /** Every page in the current draft, in order, with its real page number
    * — see ReportConfigurator, which computes this once from `pages`.
    * Present in both the report Customize tab and the Template Builder
@@ -45,6 +56,12 @@ interface PreviewProps {
   /** The page this element is being drawn on — a toc element skips its
    * own page, mirroring pdf_canvas._draw_toc_element. */
   ownPageId?: string;
+  /** Commits an inline text edit (double-click a table cell, TOC row,
+   * field value, or plain text box directly on the canvas) — see
+   * CanvasPage's doc comment. Undefined outside the report Customize tab
+   * (the Template Builder has no real project data to override) and for
+   * ghost/master-as-background elements. */
+  onElementChange?: (el: LayoutElement) => void;
 }
 
 /** 1pt = 1/72in = 25.4/72mm — matches how apps/reports/pdf_canvas.py's
@@ -70,10 +87,92 @@ function imageBorderStyle(props: Record<string, unknown>): React.CSSProperties |
   return { border: `${width}mm solid ${color}`, boxSizing: "border-box" };
 }
 
+/** Mirrors pdf_layout.py's draw_fitted_image exactly — an "image" element's
+ * `fit` (cover/contain) and `focal_x`/`focal_y` crop-offset props, via the
+ * browser's own native `object-fit`/`object-position` (identical math to
+ * what draw_fitted_image derives by hand for ReportLab, since CSS
+ * object-position is precisely "which point of the image lands at which
+ * point of the box"). Previously always contain, regardless of `fit` — the
+ * "Cover" option existed in the Properties panel but nothing behind it
+ * read it, on this side or the real PDF's. */
+function imageFitStyle(props: Record<string, unknown>): React.CSSProperties {
+  const fit = props.fit === "cover" ? "cover" : "contain";
+  const focalX = Number(props.focal_x ?? 50);
+  const focalY = Number(props.focal_y ?? 50);
+  return { objectFit: fit, objectPosition: `${focalX}% ${focalY}%` };
+}
+
 /** item.* sources bind to one item, never a chunk group. */
 function singleItem(pinnedItem: RepeatItem | RepeatItem[] | null | undefined): RepeatItem | null {
   if (!pinnedItem) return null;
   return Array.isArray(pinnedItem) ? (pinnedItem[0] ?? null) : pinnedItem;
+}
+
+/** Double-click any live/computed piece of text on the canvas — a table
+ * cell, a TOC row's name, a field's resolved value, a plain text box — to
+ * edit it directly, Canva-style. Committing calls `onCommit`, which the
+ * caller wires to the exact override the real PDF also applies (see
+ * pdf_tables.apply_table_overrides / pdf_canvas._draw_toc_element /
+ * _draw_field's docstrings) — never just a cosmetic canvas-only change.
+ * `undefined` `onCommit` (outside the report Customize tab, where there's
+ * no real project data to override in the first place) falls back to
+ * plain, non-editable text. */
+function InlineEditableText({
+  value, onCommit, className, dir, style,
+}: {
+  value: string;
+  onCommit?: (next: string) => void;
+  className?: string;
+  dir?: "ltr" | "rtl";
+  style?: React.CSSProperties;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  useEffect(() => {
+    if (editing) { inputRef.current?.focus(); inputRef.current?.select(); }
+  }, [editing]);
+
+  if (!onCommit) {
+    return <span className={className} style={style} dir={dir}>{value}</span>;
+  }
+
+  function commit() {
+    setEditing(false);
+    if (draft !== value) onCommit!(draft);
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className={`${styles.inlineEditInput} ${className ?? ""}`}
+        style={style}
+        dir={dir}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { e.preventDefault(); setDraft(value); setEditing(false); }
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={className}
+      style={style}
+      dir={dir}
+      onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+    >
+      {value}
+    </span>
+  );
 }
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—");
@@ -158,27 +257,187 @@ function realTableRows(source: unknown, data: ReportData | null | undefined, pin
   }
 }
 
-function TablePreview({ el, liveData, pinnedItem, tableImages }: PreviewProps) {
-  const p = el.props;
-  const headerBg = String(p.header_bg ?? "#1F4E79");
-  const headerText = String(p.header_text ?? "#ffffff");
+/** Same Arabic-detection heuristic as apps/reports/pdf_base.py's has_arabic
+ * — picks each cell's own reading direction; the text always renders as
+ * received either way. Declared once, shared by every live-data preview
+ * (table cells here, TOC rows further down). */
+const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
 
-  // The real thing — same draw_table_in_box call the PDF itself uses (see
-  // useTableImages/apps/reports/views.py's table_images), not an
-  // approximation. Falls through to the client-side mockup below only
-  // while this hasn't landed yet or outside the report Customize tab.
-  const live = tableImages?.[el.id];
-  if (live) {
-    if (live.status === "ok") {
-      return (
-        // eslint-disable-next-line @next/next/no-img-element -- a data URI rebuilt on every edit, not an optimizable static asset
-        <img className={styles.tableImageLive} src={`data:image/png;base64,${live.png}`} alt="" />
-      );
-    }
-    const message = live.status === "too_small" ? `Table too small: ${String(p.source ?? "")}` : `No data: ${String(p.source ?? "")}`;
-    return <div className={styles.chartPlaceholder}>{message}</div>;
+function TableCell({ text, onCommit }: { text: string; onCommit?: (next: string) => void }) {
+  return <InlineEditableText value={text} onCommit={onCommit} dir={ARABIC_RE.test(text) ? "rtl" : "ltr"} />;
+}
+
+/** Mirrors pdf_tables.py's _pct_or_dash exactly (one decimal place, an
+ * em-dash for a missing value) — hierarchy rows are numbers, not
+ * pre-formatted strings, unlike every other table kind. */
+const fmtPctOrDash = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
+
+/** CSS custom properties, not literal colors — the one CLAUDE.md-sanctioned
+ * use of inline style, since these values are genuinely dynamic (the real
+ * PDF's own per-report color scheme, from cfg["colors"]/cfg["table"] — see
+ * table_data's docstring), not something a stylesheet could hardcode. */
+function tableStyleVars(style: TableStyle | null | undefined): React.CSSProperties {
+  return {
+    "--tableBorder": style?.border ? (style?.border_color ?? "#000000") : "transparent",
+    "--tableHeaderBg": style?.header_bg ?? "#1F4E79",
+    "--tableHeaderText": style?.header_text ?? "#ffffff",
+    "--tableZebra": style?.zebra_color ?? "#eef3f8",
+    "--tableFontSize": `${style?.font_size ?? 8}px`,
+    "--tableCellPadding": `${style?.cell_padding ?? 3}px`,
+  } as React.CSSProperties;
+}
+
+/** Clips a live table to its element's own box instead of letting an
+ * over-tall table (more rows than the box has room for) spill past it —
+ * previously it grew right past the box, past the page, off the bottom of
+ * the paper. The real PDF now genuinely continues an overflowing table onto
+ * extra pages (see apps/reports/pdf_canvas.py's _expand_table_overflow);
+ * the canvas doesn't synthesize matching extra pages into the editor's own
+ * page list (a much bigger UI change — phantom pages the user never
+ * created), so this shows what fits and says so, rather than either
+ * spilling or silently cutting rows with no indication anything's missing. */
+function TableOverflowClip({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    setOverflowing(node.scrollHeight > node.clientHeight + 1);
+  });
+
+  return (
+    <div ref={ref} className={styles.tableClip}>
+      {children}
+      {overflowing && (
+        <div className={styles.tableOverflowNote}>More rows than fit here — continues in the downloaded PDF</div>
+      )}
+    </div>
+  );
+}
+
+function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = true, onElementChange }: PreviewProps) {
+  const p = el.props;
+
+  // The real thing — the exact same header/rows resolve_table computes for
+  // the real PDF table (see useTableData/apps/reports/views.py's table_data,
+  // raw=True mode), rendered as a genuine HTML table: real, selectable text,
+  // not an image of any kind. Falls through to the client-side mockup below
+  // only while this hasn't landed yet or outside the report Customize tab.
+  const live = tableData?.[el.id];
+  // The report Customize tab, but the first real response hasn't landed yet
+  // — a neutral grey skeleton, not the generic mockup below (which would
+  // otherwise be mistaken for this element's actual real content).
+  if (!live && !previewsReady) {
+    return <Skeleton width="100%" height="100%" radius="var(--radius-sm)" />;
   }
 
+  // A double-clicked cell writes into props.overrides, keyed `hc{col}` for
+  // a header cell and `r{row}c{col}` for a body cell — the exact same keys
+  // pdf_tables.apply_table_overrides reads, so this edit reaches the real
+  // downloaded PDF too (see resolve_table's docstring), not just this
+  // preview. Undefined when there's nowhere to commit to (Template
+  // Builder) — InlineEditableText then renders plain, non-editable text.
+  const commitCell = onElementChange
+    ? (key: string, value: string) => {
+        const overrides = { ...(p.overrides as Record<string, string> | undefined), [key]: value };
+        onElementChange({ ...el, props: { ...p, overrides } });
+      }
+    : undefined;
+
+  if (live) {
+    if (live.status !== "ok") {
+      return <div className={styles.chartPlaceholder}>{`No data: ${String(p.source ?? "")}`}</div>;
+    }
+    const vars = tableStyleVars(live.style);
+
+    if (live.kind === "info") {
+      return (
+        <TableOverflowClip>
+          <table className={styles.tableLive} data-kind="info" style={vars}>
+            <tbody>
+              {live.rows.map(([labelText, valueText], i) => (
+                <tr key={i}>
+                  <td className={styles.tableLiveInfoLabel}>
+                    <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${i}c0`, v))} /> •
+                  </td>
+                  <td className={styles.tableLiveInfoValue}>
+                    <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${i}c1`, v))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableOverflowClip>
+      );
+    }
+
+    if (live.kind === "hierarchy") {
+      return (
+        <TableOverflowClip>
+          <table className={styles.tableLive} data-kind="hierarchy" style={vars}>
+            <thead>
+              <tr>
+                {live.header.map((h, i) => (
+                  <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {live.rows.map((row, i) => (
+                <tr key={i} data-zone={row.level === 0 ? "on" : undefined}>
+                  <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
+                    <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
+                      <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${i}c0`, v))} />
+                    </span>
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.actual)} onCommit={commitCell && ((v) => commitCell(`r${i}c1`, v))} />
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.previous)} onCommit={commitCell && ((v) => commitCell(`r${i}c2`, v))} />
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.planned)} onCommit={commitCell && ((v) => commitCell(`r${i}c3`, v))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableOverflowClip>
+      );
+    }
+
+    // "data" — a plain header + flat rows grid (zone_progress, milestones,
+    // invoices, etc.).
+    return (
+      <TableOverflowClip>
+        <table className={styles.tableLive} data-kind="data" style={vars}>
+          <thead>
+            <tr>
+              {live.header.map((h, i) => (
+                <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {live.rows.map((row, i) => (
+              <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined}>
+                {row.map((cell, j) => (
+                  <td key={j} data-align="center">
+                    <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${i}c${j}`, v))} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableOverflowClip>
+    );
+  }
+
+  const headerBg = String(p.header_bg ?? "#1F4E79");
+  const headerText = String(p.header_text ?? "#ffffff");
   const real = realTableRows(p.source, liveData, pinnedItem);
   return (
     <div className={styles.tablePreview}>
@@ -319,7 +578,7 @@ function realDonutFrac(source: unknown, liveData: ReportData | null | undefined,
   return null;
 }
 
-function ChartPreview({ el, liveData, pinnedItem, chartSvgs }: PreviewProps) {
+function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = true }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
   const source = p.source;
@@ -334,6 +593,11 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs }: PreviewProps) {
   // report Customize tab (chartSvgs is undefined there — no real project
   // data for a chart to match in the first place).
   const live = chartSvgs?.[el.id];
+  // The report Customize tab, but the first real response hasn't landed yet
+  // — grey skeleton, not the generic mockup (see TablePreview's same check).
+  if (!live && !previewsReady) {
+    return <Skeleton width="100%" height="100%" radius="var(--radius-sm)" />;
+  }
   if (live) {
     if (live.status === "ok") {
       return (
@@ -395,16 +659,27 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs }: PreviewProps) {
   );
 }
 
-/** Same Arabic-detection heuristic as apps/reports/pdf_base.py's has_arabic
- * — used only to pick the row's reading direction; the actual text always
- * renders as typed either way. */
-const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
-
-function TocPreview({ el, tocEntries, ownPageId }: PreviewProps) {
+function TocPreview({ el, liveData, tocEntries, ownPageId, onElementChange }: PreviewProps) {
   const p = el.props;
   const excludeCover = p.exclude_cover ?? true;
   const size = Number(p.size ?? 11);
   const color = String(p.color ?? "#1e2430");
+  // One global direction for the whole TOC — mirrors pdf_canvas.py's
+  // _draw_toc_element exactly (`rtl = bool(ctx.get("arabic"))`, computed
+  // once for the report, not re-guessed per row). A per-row guess would put
+  // the page-number column on a different side for an Arabic row than an
+  // English one, which the real PDF never does.
+  const rtl = liveData?.arabic ?? false;
+  // A double-clicked row writes into props.name_overrides, keyed by page id
+  // — the same keys pdf_canvas._draw_toc_element reads, so a renamed TOC
+  // entry reaches the downloaded PDF too, without touching the page's own
+  // title anywhere else.
+  const nameOverrides = (p.name_overrides as Record<string, string> | undefined) ?? {};
+  const commitName = onElementChange
+    ? (pid: string, value: string) => {
+        onElementChange({ ...el, props: { ...p, name_overrides: { ...nameOverrides, [pid]: value } } });
+      }
+    : undefined;
 
   // Real page names + real page numbers from the current draft — mirrors
   // apps/reports/pdf_canvas.py's _draw_toc_element exactly (same exclusion
@@ -418,17 +693,17 @@ function TocPreview({ el, tocEntries, ownPageId }: PreviewProps) {
   }
 
   return (
-    <div className={styles.tocPreview} style={{ fontSize: `${size}px`, color }}>
-      {rows.map((row) => {
-        const rtl = ARABIC_RE.test(row.name);
-        return (
-          <div key={row.id} className={styles.tocPreviewRow} dir={rtl ? "rtl" : "ltr"}>
-            <span>{row.name}</span>
-            <span className={styles.tocPreviewDots} />
-            <span>{row.number}</span>
-          </div>
-        );
-      })}
+    <div className={styles.tocPreview} dir={rtl ? "rtl" : "ltr"} style={{ fontSize: `${size}px`, color }}>
+      {rows.map((row) => (
+        <div key={row.id} className={styles.tocPreviewRow}>
+          <InlineEditableText
+            value={nameOverrides[row.id] ?? row.name}
+            onCommit={commitName && ((v) => commitName(row.id, v))}
+          />
+          <span className={styles.tocPreviewDots} />
+          <span>{row.number}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -436,12 +711,16 @@ function TocPreview({ el, tocEntries, ownPageId }: PreviewProps) {
 /** Real text for a field source, or null to fall back to the generic token. */
 function resolveField(
   source: unknown, data: ReportData | null | undefined, pinnedItem: RepeatItem | RepeatItem[] | null | undefined,
-  ownPageNumber?: number,
+  ownPageNumber?: number, ownPageTitle?: string,
 ): string | null {
   if (typeof source === "string" && source.startsWith("item.")) {
     return resolveItemField(source, singleItem(pinnedItem));
   }
   if (source === "page.number") return ownPageNumber != null ? String(ownPageNumber) : null;
+  // Neither liveData nor pinnedItem — this page's own name is already known
+  // purely from the page list (see ReportConfigurator's tocEntries), so a
+  // divider heading resolves in the Template Builder too, not just a report.
+  if (source === "page.title") return ownPageTitle || null;
   if (!data) return null;
   const p = data.project;
   switch (source) {
@@ -498,7 +777,8 @@ function resolveImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem 
 }
 
 export function ElementPreview({
-  el, scale, liveData, pinnedItem, chartSvgs, tableImages, tocEntries, ownPageId,
+  el, scale, liveData, pinnedItem, chartSvgs, tableData, previewsReady, tocEntries, ownPageId,
+  onElementChange,
 }: PreviewProps) {
   const p = el.props;
 
@@ -515,13 +795,23 @@ export function ElementPreview({
             fontStyle: p.italic ? "italic" : "normal",
           }}
         >
-          {String(p.text ?? "Text")}
+          <InlineEditableText
+            value={String(p.text ?? "Text")}
+            onCommit={onElementChange && ((v) => onElementChange({ ...el, props: { ...p, text: v } }))}
+          />
         </div>
       );
 
     case "field": {
-      const ownPageNumber = tocEntries?.find((e) => e.id === ownPageId)?.number;
-      const real = resolveField(p.source, liveData, pinnedItem, ownPageNumber);
+      const ownPage = tocEntries?.find((e) => e.id === ownPageId);
+      // A manual override (see pdf_canvas._draw_field's docstring) replaces
+      // the live-computed value outright — real PDF and preview both check
+      // it before falling back to resolveField.
+      const override = p.value_override as string | undefined;
+      const real = override ?? resolveField(p.source, liveData, pinnedItem, ownPage?.number, ownPage?.name);
+      const commitValue = onElementChange
+        ? (v: string) => onElementChange({ ...el, props: { ...p, value_override: v } })
+        : undefined;
       return (
         <div
           className={styles.fieldPreview}
@@ -533,7 +823,9 @@ export function ElementPreview({
           }}
         >
           {p.show_label && p.label ? `${String(p.label)} ` : ""}
-          {real ?? <span className={styles.fieldToken}>{label(FIELD_SOURCES, p.source, "Field")}</span>}
+          {real != null
+            ? <InlineEditableText value={real} onCommit={commitValue} />
+            : <span className={styles.fieldToken}>{label(FIELD_SOURCES, p.source, "Field")}</span>}
         </div>
       );
     }
@@ -542,7 +834,10 @@ export function ElementPreview({
       const url = resolveImageUrl(p, pinnedItem);
       return url ? (
         // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
-        <img className={styles.imagePreviewReal} src={url} alt="" style={imageBorderStyle(p)} />
+        <img
+          className={styles.imagePreviewReal} src={url} alt=""
+          style={{ ...imageFitStyle(p), ...imageBorderStyle(p) }}
+        />
       ) : (
         <div className={styles.imagePreview}>
           <span>Image</span>
@@ -599,13 +894,29 @@ export function ElementPreview({
       );
 
     case "table":
-      return <TablePreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} tableImages={tableImages} />;
+      return (
+        <TablePreview
+          el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+          tableData={tableData} previewsReady={previewsReady}
+          onElementChange={onElementChange}
+        />
+      );
 
     case "chart":
-      return <ChartPreview el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem} chartSvgs={chartSvgs} />;
+      return (
+        <ChartPreview
+          el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
+          chartSvgs={chartSvgs} previewsReady={previewsReady}
+        />
+      );
 
     case "toc":
-      return <TocPreview el={el} scale={scale} tocEntries={tocEntries} ownPageId={ownPageId} />;
+      return (
+        <TocPreview
+          el={el} scale={scale} liveData={liveData} tocEntries={tocEntries} ownPageId={ownPageId}
+          onElementChange={onElementChange}
+        />
+      );
 
     default:
       return null;

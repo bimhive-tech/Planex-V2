@@ -389,7 +389,12 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     # Value line directly under the hub, caption below that — same top-to-
     # bottom order as the reference (arc, then value, then caption), the
     # reverse of this drawing's earlier title-on-top layout.
-    value_text = f"{shape(title)}= {v:.0f}%" if title else f"{v:.0f}%"
+    # shape() the whole composed string, not the Arabic title alone with a
+    # plain "= N%" tacked on after — concatenating raw text onto an already
+    # bidi-reordered string is the same gotcha documented for table cells
+    # (pdf_tables.py's _wrap_shape docstring): the reorder has to see the
+    # full logical string to place the trailing "=", not just the title.
+    value_text = shape(f"{title}= {v:.0f}%") if title else f"{v:.0f}%"
     d.add(String(cx, cy - 14, value_text, fontName=_gauge_font(title or ""), fontSize=11,
                  fillColor=hexcolor(cfg["colors"]["text"]), textAnchor="middle"))
     if title:
@@ -582,7 +587,10 @@ def gantt_chart(cfg, rows, width, labels, height=None):
         # To the legend's left on the same row, not stacked below it — a
         # fixed vertical offset collided with the legend's own swatch/text
         # height (varies with font metrics), overlapping "Planned".
-        note = "— " + shape(labels.get("gantt_revised", "Revised finish"))
+        # shape() the dash and the label together, not the label alone with
+        # a raw "— " prefixed after — same reasoning as the SPI gauge fix
+        # above: bidi needs the whole logical string to place the dash.
+        note = shape("— " + labels.get("gantt_revised", "Revised finish"))
         note_w = pdfmetrics.stringWidth(note, FONT_NAME, 7)
         d.add(String(legend_x - note_w - 10, height - 6, note,
                      fontName=FONT_NAME, fontSize=7, fillColor=delay_color))

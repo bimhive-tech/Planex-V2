@@ -7,9 +7,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
+import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
-import type { ChartSvgMap, LayoutElement, PageDesign, TableImageMap, TocEntry } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasPage } from "./CanvasPage";
@@ -21,14 +22,17 @@ import styles from "./designer.module.css";
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5];
 /** Base pixels-per-mm at 100% — A4 portrait then reads ~460px wide. */
 const BASE_SCALE = 2.2;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 3;
 /** How many past states Ctrl+Z can step back through, per editor session. */
 const MAX_HISTORY = 50;
 
 // A single, module-level clipboard: Page Designer and Report Configuration
 // are two separate LayoutEditor mounts (only one visible at a time — see
-// TemplateBuilder), so this is what lets you copy an element on one page (or
-// even the master) and paste it onto another without losing it on unmount.
-let elementClipboard: LayoutElement | null = null;
+// TemplateBuilder), so this is what lets you copy an element (or a whole
+// multi-selected group) on one page — even the master — and paste it onto
+// another without losing it on unmount.
+let elementClipboard: LayoutElement[] | null = null;
 
 /** True while focus is in a text field — Delete/Ctrl+Z etc. there should edit
  * the text, not the canvas selection. */
@@ -67,21 +71,28 @@ interface Props {
   pinnedItem?: RepeatItem | RepeatItem[] | null;
   /** Live, real per-chart previews — see useChartSvgs. */
   chartSvgs?: ChartSvgMap;
-  /** Live, real per-table previews — see useTableImages. */
-  tableImages?: TableImageMap;
+  /** Live, real per-table data — see useTableData. */
+  tableData?: TableDataMap;
+  /** False until chartSvgs/tableData's first real response has landed. */
+  previewsReady?: boolean;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
   /** The active page's own id — a "toc" element on it skips its own row. */
   ownPageId?: string;
+  /** Rendered below the canvas — the Report Configuration tab's page
+   * thumbnail strip (see PageStrip). Undefined in the Page Designer, which
+   * has only the one master, page-less surface. */
+  bottomPanel?: React.ReactNode;
 }
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, reportId, chartSvgs, tableImages, tocEntries, ownPageId,
+  pinnedItem, reportId, chartSvgs, tableData, previewsReady, tocEntries, ownPageId, bottomPanel,
 }: Props) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
   // Margin/header/footer guides help while laying out a template, but on a
   // report (liveData present) they're just chrome between you and seeing
   // the page as its final, real self — off by default there, still
@@ -134,17 +145,65 @@ export function LayoutEditor({
     design,
     elements,
     masterElements,
-    onCommit: (el) => commit((prev) => prev.map((e) => (e.id === el.id ? el : e))),
+    // A group drag/resize commits every moved member in the same updater —
+    // one undo step for the whole gesture, not one per element.
+    onCommit: (moved) => commit((prev) => {
+      const byId = new Map(moved.map((e) => [e.id, e]));
+      return prev.map((e) => byId.get(e.id) ?? e);
+    }),
   });
 
-  // While a gesture is live the draft stands in for the real element so the
-  // canvas moves at pointer speed without re-rendering the whole builder.
-  const rendered = useMemo(
-    () => (draft ? elements.map((e) => (e.id === draft.id ? draft : e)) : elements),
-    [elements, draft],
-  );
+  // While a gesture is live the draft elements stand in for the real ones
+  // so the canvas moves at pointer speed without re-rendering the whole
+  // builder — a group drag replaces every dragged member at once.
+  const rendered = useMemo(() => {
+    if (!draft) return elements;
+    const byId = new Map(draft.map((e) => [e.id, e]));
+    return elements.map((e) => byId.get(e.id) ?? e);
+  }, [elements, draft]);
 
-  const selected = rendered.find((e) => e.id === selectedId) ?? null;
+  const selected = selectedIds.length === 1 ? (rendered.find((e) => e.id === selectedIds[0]) ?? null) : null;
+
+  /** Selects `id` — `additive` (shift/ctrl/cmd) toggles it in/out of the
+   * current selection instead of replacing it. `null` clears everything
+   * (background click, empty marquee, Escape). */
+  function selectElement(id: string | null, additive = false) {
+    if (id === null) { setSelectedIds([]); return; }
+    if (!additive) { setSelectedIds([id]); return; }
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  /** A finished marquee drag — replaces or extends the selection with every
+   * element the rectangle touched. */
+  function selectMarquee(ids: string[], additive: boolean) {
+    setSelectedIds((prev) => (additive ? Array.from(new Set([...prev, ...ids])) : ids));
+  }
+
+  // No startGroupMove counterpart — dragging any selected member already
+  // moves the whole group (see handleStartMove below); a dedicated group
+  // "grab the box body" gesture would have to sit on top of every member
+  // it covers, which is exactly what broke shift-click-to-deselect a
+  // member (see GroupSelectionBox's docstring in CanvasPage.tsx).
+  function startGroupResize(e: React.PointerEvent, handle: ResizeHandle) {
+    startResize(e, rendered.filter((el) => selectedIds.includes(el.id)), handle);
+  }
+
+  /** Grabbing any member of an already-selected group drags the whole
+   * group; grabbing an element outside the current selection drags just
+   * that one (CanvasElementView already collapsed the selection to it). */
+  function handleStartMove(e: React.PointerEvent, el: LayoutElement) {
+    const group = selectedIds.length > 1 && selectedIds.includes(el.id)
+      ? rendered.filter((x) => selectedIds.includes(x.id))
+      : [el];
+    startMove(e, group);
+  }
+
+  // Per-element resize handles only render while a single element is
+  // selected (see CanvasPage's showControls) — group resize goes through
+  // startGroupResize instead — so this is always exactly one element.
+  function handleStartResize(e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) {
+    startResize(e, [el], handle);
+  }
 
   const topZ = (list: LayoutElement[]) => list.reduce((max, e) => Math.max(max, e.z), 0);
 
@@ -170,7 +229,7 @@ export function LayoutEditor({
         ),
       ];
     });
-    setSelectedId(id);
+    setSelectedIds([id]);
   }
 
   function updateElement(next: LayoutElement) {
@@ -179,24 +238,31 @@ export function LayoutEditor({
     );
   }
 
+  /** Pastes the whole clipboard (one element, or a copied multi-selection)
+   * as a group, offset from where it was copied — and selects the new
+   * copies, same as a single paste always has. */
   function pasteElement() {
-    if (!elementClipboard) return;
-    const copyId = newElementId();
-    const source = elementClipboard;
-    commit((prev) => [
-      ...prev,
-      clampToPage(
-        { ...source, id: copyId, x: source.x + 5, y: source.y + 5, z: topZ(prev) + 1, props: { ...source.props } },
+    if (!elementClipboard || elementClipboard.length === 0) return;
+    const sources = elementClipboard;
+    const idMap = new Map(sources.map((s) => [s.id, newElementId()]));
+    commit((prev) => {
+      const baseZ = topZ(prev);
+      const copies = sources.map((source, i) => clampToPage(
+        {
+          ...source, id: idMap.get(source.id)!, x: source.x + 5, y: source.y + 5,
+          z: baseZ + i + 1, props: { ...source.props },
+        },
         design,
-      ),
-    ]);
-    setSelectedId(copyId);
+      ));
+      return [...prev, ...copies];
+    });
+    setSelectedIds(Array.from(idMap.values()));
   }
 
   function runAction(action: ElementAction, id: string) {
     if (action === "delete") {
       commit((prev) => prev.filter((e) => e.id !== id));
-      setSelectedId(null);
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
       return;
     }
     if (action === "duplicate") {
@@ -212,7 +278,7 @@ export function LayoutEditor({
           ),
         ];
       });
-      setSelectedId(copyId);
+      setSelectedIds([copyId]);
       return;
     }
     // Re-order: nudge z past the neighbour in that direction.
@@ -222,20 +288,38 @@ export function LayoutEditor({
     );
   }
 
+  /** Deletes every currently-selected element as one undo step. */
+  function deleteSelection() {
+    const ids = new Set(selectedIds);
+    commit((prev) => prev.filter((e) => !ids.has(e.id)));
+    setSelectedIds([]);
+  }
+
+  /** Copies the whole current selection (one element, or a group) to the
+   * shared clipboard — see `pasteElement`. */
+  function copySelection() {
+    const ids = new Set(selectedIds);
+    const els = elementsRef.current.filter((e) => ids.has(e.id));
+    if (els.length) elementClipboard = els.map((e) => ({ ...e, props: { ...e.props } }));
+  }
+
   // Keyboard shortcuts: Delete/Backspace, Ctrl/Cmd+C/V, Ctrl/Cmd+Z (+Shift for redo).
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (isTypingTarget(event.target)) return;
       const mod = event.ctrlKey || event.metaKey;
 
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length) {
         event.preventDefault();
-        runAction("delete", selectedId);
+        deleteSelection();
         return;
       }
-      if (mod && event.key.toLowerCase() === "c" && selectedId) {
-        const el = elementsRef.current.find((e) => e.id === selectedId);
-        if (el) elementClipboard = { ...el, props: { ...el.props } };
+      if (event.key === "Escape" && selectedIds.length) {
+        setSelectedIds([]);
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "c" && selectedIds.length) {
+        copySelection();
         return;
       }
       if (mod && event.key.toLowerCase() === "v") {
@@ -252,7 +336,28 @@ export function LayoutEditor({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedId, design, elements, onElementsChange]);
+  }, [selectedIds, design, elements, onElementsChange]);
+
+  // Shift+scroll to zoom (Canva/Figma convention) — a plain scroll still
+  // pans the canvas natively, `.canvasScroll`'s own overflow:auto already
+  // does that for free. Needs a real (non-passive) listener via a ref: React
+  // registers onWheel as passive by default, which silently drops
+  // preventDefault and lets the page scroll *and* zoom at once.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    function onWheel(e: WheelEvent) {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      setZoom((z) => {
+        const raw = z - e.deltaY * 0.001;
+        const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, raw));
+        return Math.round(clamped * 100) / 100; // 2 decimal places — smooth, not jittery
+      });
+    }
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
 
   return (
     <div className={styles.editor}>
@@ -289,7 +394,10 @@ export function LayoutEditor({
             <button
               type="button"
               className={styles.toolBtn}
-              onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)] ?? z)}
+              // Nearest step below the current zoom, not ZOOMS.indexOf — shift+scroll
+              // leaves zoom at an arbitrary value between steps, where indexOf would
+              // find nothing and silently snap all the way to the smallest step.
+              onClick={() => setZoom((z) => [...ZOOMS].reverse().find((s) => s < z - 0.001) ?? ZOOMS[0])}
               aria-label="Zoom out"
             >
               −
@@ -298,7 +406,7 @@ export function LayoutEditor({
             <button
               type="button"
               className={styles.toolBtn}
-              onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)] ?? z)}
+              onClick={() => setZoom((z) => ZOOMS.find((s) => s > z + 0.001) ?? ZOOMS[ZOOMS.length - 1])}
               aria-label="Zoom in"
             >
               +
@@ -313,25 +421,29 @@ export function LayoutEditor({
           </span>
         </div>
 
-        <div className={styles.canvasScroll}>
+        <div className={styles.canvasScroll} ref={scrollRef}>
           <CanvasPage
             design={design}
             elements={rendered}
             masterElements={masterElements}
             scale={scale}
-            selectedId={selectedId}
+            selectedIds={selectedIds}
             showGuides={showGuides}
             alignGuides={guides}
-            onSelect={setSelectedId}
-            onStartMove={startMove}
-            onStartResize={startResize}
+            onSelect={selectElement}
+            onMarqueeSelect={selectMarquee}
+            onStartMove={handleStartMove}
+            onStartResize={handleStartResize}
             onStartRotate={startRotate}
+            onStartGroupResize={startGroupResize}
             onAction={runAction}
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
+            onElementChange={updateElement}
             liveData={liveData}
             pinnedItem={pinnedItem}
             chartSvgs={chartSvgs}
-            tableImages={tableImages}
+            tableData={tableData}
+            previewsReady={previewsReady}
             tocEntries={tocEntries}
             ownPageId={ownPageId}
           />
@@ -340,9 +452,18 @@ export function LayoutEditor({
         {elements.length === 0 && emptyHint && (
           <p className={styles.emptyHint}>{emptyHint}</p>
         )}
+
+        {bottomPanel}
       </main>
 
-      <ElementInspector el={selected} onChange={updateElement} repeating={repeating} reportId={reportId} />
+      <ElementInspector
+        el={selected}
+        onChange={updateElement}
+        repeating={repeating}
+        reportId={reportId}
+        selectedCount={selectedIds.length}
+        onDeleteSelection={deleteSelection}
+      />
     </div>
   );
 }

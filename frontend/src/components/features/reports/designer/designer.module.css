@@ -215,6 +215,13 @@
   box-shadow: var(--shadow-pop);
   border: 1px solid var(--border);
   overflow: hidden;
+  /* A marquee (drag-to-select) drag starts with a plain pointerdown on this
+     background — without this, the same drag also triggers the browser's
+     native text selection over whatever text elements it passes across
+     (header/footer, field labels...), which paints its own blue highlight
+     on top of our selection rectangle. `onPointerDown` also calls
+     preventDefault for the same reason; this is the belt-and-braces half. */
+  user-select: none;
 }
 
 /* The actual PDF page-border rect, inset by border_offset_mm — not the
@@ -231,6 +238,93 @@
   color: var(--text-secondary);
   text-align: center;
   padding: var(--space-3);
+}
+
+/* ── Page strip (Report Configuration bottom thumbnail row) ────────────── */
+.pageStrip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  margin-top: var(--space-3);
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
+}
+
+.pageStripItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pageStripThumb {
+  position: relative;
+  border: 1.5px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.pageStripItemActive .pageStripThumb {
+  border-color: var(--primary);
+  border-width: 2px;
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.pageStripEl {
+  position: absolute;
+  border-radius: 1px;
+  opacity: 0.85;
+}
+
+.pageStripFoot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pageStripNumber {
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 12px;
+  text-align: center;
+}
+
+.pageStripAction {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  border-radius: 2px;
+}
+.pageStripAction:hover:not(:disabled) {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+}
+.pageStripAction:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pageStripAdd {
+  flex-shrink: 0;
+  width: 40px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 2px;
+  color: var(--text-secondary);
+  align-self: flex-start;
+}
+.pageStripAdd:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* ── Guides ──────────────────────────────────────────────────────────── */
@@ -349,6 +443,38 @@
 }
 .rotateHandle:active {
   cursor: grabbing;
+}
+
+/* Multi-select: one shared bounding-box outline for the whole group (see
+   CanvasPage's GroupSelectionBox), drawn on top of every member's own thin
+   selected-outline. `pointer-events: none` on the box itself is load-
+   bearing, not decorative: its rectangle necessarily covers every member
+   element beneath it, and if the box itself were clickable, hit-testing
+   would always resolve to the box first — a shift-click aimed at one
+   specific member (to toggle it back out of the selection) would land on
+   the box instead and start a group-move, never reaching that element's
+   own pointerdown handler, so it could never be deselected. Dragging any
+   member already moves the whole group (see CanvasElementView/LayoutEditor's
+   handleStartMove) — the box's only remaining job is the resize handles,
+   which opt back into pointer-events explicitly below. */
+.groupBox {
+  position: absolute;
+  outline: 1.5px dashed var(--primary);
+  pointer-events: none;
+  z-index: 998;
+}
+.groupBox .handle {
+  pointer-events: auto;
+}
+
+/* Drag-to-select rectangle on empty canvas. */
+.marqueeBox {
+  position: absolute;
+  background: var(--primary-soft);
+  opacity: 0.6;
+  border: 1px solid var(--primary);
+  pointer-events: none;
+  z-index: 999;
 }
 
 /* Canva-style alignment guides, shown while dragging. */
@@ -646,15 +772,130 @@
   background: #fff;
 }
 
-/* The live, real table — a small PNG of just this table, drawn with the
-   exact same draw_table_in_box call the PDF page uses (see
-   useTableImages). Sized to exactly fill the box like every other
-   element; object-fit isn't needed since the PNG's own aspect ratio
-   already matches the box it was rendered for. */
-.tableImageLive {
-  display: block;
+/* Contains a live table to its own element box (see ElementPreview's
+   TableOverflowClip) — a table with more rows than fit used to just grow
+   straight past its box, past the page, off the bottom of the paper.
+   Scrolls vertically rather than hard-clipping: the real PDF now paginates
+   an overflowing table for real (apps/reports/pdf_canvas.py's
+   _expand_table_overflow), but this editor's own page list stays exactly
+   what you authored — no phantom continuation pages appear here to match —
+   so a scrollbar is how you reach and edit every row without the box
+   itself needing to grow past what you sized it to. */
+.tableClip {
+  position: relative;
   width: 100%;
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.tableOverflowNote {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 5px;
+  font-size: 7px;
+  line-height: 1.3;
+  color: #fff;
+  background: var(--danger-text);
+  text-align: center;
+}
+
+/* The live, real table — the exact same header/rows resolve_table computes
+   for the real PDF table (see useTableData), rendered as a genuine HTML
+   table: real, selectable text, not an image of any kind. Colors come from
+   --table* custom properties (see ElementPreview's tableStyleVars) — the
+   real report's own color scheme, not a stylesheet guess. */
+.tableLive {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-family: "Amiri", "Traditional Arabic", serif;
+  font-size: var(--tableFontSize);
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.tableLive th,
+.tableLive td {
+  border: 1px solid var(--tableBorder);
+  padding: var(--tableCellPadding) 5px;
+  vertical-align: middle;
+}
+
+/* "data"/"hierarchy" header row — mirrors pdf_tables.py's _data_table and
+   _hierarchy_table (BACKGROUND table_header_bg, centered, bold). */
+.tableLive[data-kind="data"] th,
+.tableLive[data-kind="hierarchy"] th {
+  background: var(--tableHeaderBg);
+  color: var(--tableHeaderText);
+  text-align: center;
+  font-weight: 700;
+}
+
+.tableLive[data-kind="data"] td[data-align="center"],
+.tableLive[data-kind="hierarchy"] td[data-align="center"] {
+  text-align: center;
+}
+
+/* _data_table's alternating-row BACKGROUND, only when tcfg["zebra"] (see
+   useTableData's style.zebra) — mirrors the real PDF exactly, not every
+   table unconditionally. */
+.tableLive[data-kind="data"] tr[data-zebra="on"] td {
+  background: var(--tableZebra);
+}
+
+/* "info" (project_info) — mirrors pdf_tables.py's _info_table: the label
+   column always shaded, label right-aligned + trailing bullet, value
+   left-aligned — regardless of any zebra setting, since _info_table shades
+   unconditionally. */
+.tableLiveInfoLabel {
+  background: var(--tableZebra);
+  text-align: right;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tableLiveInfoValue {
+  text-align: left;
+}
+
+/* _hierarchy_table shades every zone (level 0) row unconditionally — not
+   gated by the zebra toggle, which only affects _data_table. */
+.tableLive[data-kind="hierarchy"] tr[data-zone="on"] td {
+  background: var(--tableZebra);
+}
+
+.tableLiveZoneName {
+  font-weight: 700;
+}
+
+/* Child (level 1) rows are indented one level, mirroring _hierarchy_table's
+   literal 4-space prefix — margin-inline-start (not padding on the cell
+   itself) so it respects each name's own reading direction. */
+.tableLiveIndent {
+  display: inline-block;
+  margin-inline-start: 10px;
+}
+
+/* Double-click any live text on the canvas (table cell, TOC row, field
+   value, text box) to edit it in place — see ElementPreview's
+   InlineEditableText. Inherits the surrounding element's own font/color/
+   alignment instead of imposing its own look, so editing doesn't visually
+   jolt; the focus ring is the only thing marking it as active. */
+.inlineEditInput {
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  background: var(--bg-surface);
+  border: 1px solid var(--primary);
+  border-radius: 2px;
+  padding: 0 2px;
+  margin: -1px -2px;
+  width: 100%;
+  min-width: 24px;
+  outline: none;
 }
 
 .barRow {

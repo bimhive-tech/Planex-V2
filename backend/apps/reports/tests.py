@@ -13,6 +13,7 @@ from .constants import apply_report_layout_override, default_config, merged_conf
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
+from .pdf_layout import cover_fit_geometry
 from .pdf_canvas import (
     build_canvas_pdf,
     el_box,
@@ -281,6 +282,129 @@ class CanvasPdfTests(SimpleTestCase):
         data = build_canvas_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_overflowing_table_continues_onto_extra_pages_not_truncated(self):
+        """A table with more rows than fit its box used to get a "+N more
+        rows" note and silently drop the rest (draw_table_in_box's fallback,
+        meant for a genuinely tight box) — it must now continue onto as many
+        extra pages as it takes, with every row's real data present."""
+        import fitz
+
+        zones = [{"name": f"Zone {i}", "progress": 50.0} for i in range(20)]
+        ctx = {**_sample_ctx(), "zones": zones}
+        pages = [{"id": "p1", "name": "Zones", "elements": [
+            {"id": "title", "type": "text", "x": 10, "y": 5, "w": 100, "h": 8, "z": 0,
+             "props": {"text": "Zone Table Page"}},
+            # 60mm fits only a few of these 20 rows per page (confirmed empirically —
+            # 20mm doesn't even fit the header, this is comfortably past that floor).
+            {"id": "tbl", "type": "table", "x": 10, "y": 20, "w": 100, "h": 60, "z": 1,
+             "props": {"source": "zone_progress"}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, ctx)
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertGreater(doc.page_count, 1, "20 rows in a 60mm box must overflow onto more than one page")
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertNotIn("more rows", full_text)  # no truncation note anywhere
+        self.assertIn("Zone 19", full_text)  # the very last row really did make it in
+        # The page's own non-table content (its heading) drew once, on the
+        # first page — continuation pages hold only the table's overflow.
+        self.assertEqual(full_text.count("Zone Table Page"), 1)
+
+    def test_table_continuation_pages_still_get_the_running_header(self):
+        import fitz
+
+        master = [{"id": "m1", "type": "text", "x": 5, "y": 5, "w": 60, "h": 8, "z": 0,
+                  "props": {"text": "Running Header"}}]
+        zones = [{"name": f"Zone {i}", "progress": 50.0} for i in range(20)]
+        ctx = {**_sample_ctx(), "zones": zones}
+        pages = [{"id": "p1", "name": "Zones", "elements": [
+            {"id": "tbl", "type": "table", "x": 10, "y": 20, "w": 100, "h": 60, "z": 0,
+             "props": {"source": "zone_progress"}},
+        ]}]
+        template = self._template(pages, master_elements=master)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, ctx)
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertGreater(doc.page_count, 1)
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertEqual(full_text.count("Running Header"), doc.page_count)
+
+    def test_page_title_field_reproduces_a_divider_page(self):
+        """The Phase 4 "blank divider page" ask — a page.title field on an
+        otherwise-blank page pulls that exact page's own name, matching what
+        the legacy renderer's `dividers` config did with a dedicated page
+        type, without needing one here."""
+        import fitz
+
+        pages = [
+            {"id": "p1", "name": "Cover", "elements": []},
+            {"id": "p2", "name": "Executive Summary", "elements": [
+                {"id": "divider", "type": "field", "x": 10, "y": 140, "w": 190, "h": 20, "z": 0,
+                 "props": {"source": "page.title", "size": 22, "align": "center", "bold": True}},
+            ]},
+        ]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertEqual(doc.page_count, 2)
+        self.assertNotIn("Executive Summary", doc[0].get_text())  # not on the Cover page
+        self.assertIn("Executive Summary", doc[1].get_text())     # only its own page
+
+
+class CoverFitGeometryTests(SimpleTestCase):
+    """The "image" element's Fit=Cover crop math (see draw_fitted_image) —
+    scale-to-fill plus focal-point positioning, the part of the real crop
+    tool worth pinning down exactly, independent of ReportLab/an image file."""
+
+    def test_wider_image_scales_to_box_height_and_centers_horizontally(self):
+        # 200x100 image into a 50x50 box: box is relatively taller, so the
+        # image must scale by height (50/100=0.5) to cover, landing at
+        # 100x50 — wider than the box, centered by default (focal 50/50).
+        dw, dh, ix, iy = cover_fit_geometry(0, 0, 50, 50, 200, 100)
+        self.assertAlmostEqual(dw, 100)
+        self.assertAlmostEqual(dh, 50)
+        self.assertAlmostEqual(ix, -25)  # (50-100)*0.5
+        self.assertAlmostEqual(iy, 0)    # dh already matches box height exactly
+
+    def test_taller_image_scales_to_box_width_and_centers_vertically(self):
+        dw, dh, ix, iy = cover_fit_geometry(0, 0, 50, 50, 100, 200)
+        self.assertAlmostEqual(dw, 50)
+        self.assertAlmostEqual(dh, 100)
+        self.assertAlmostEqual(ix, 0)
+        self.assertAlmostEqual(iy, -25)  # (50-100)*0.5
+
+    def test_focal_x_0_keeps_the_left_edge_visible(self):
+        # Left-anchored: the image's own left edge lines up with the box's
+        # left edge (ix == box x), so the crop keeps what's on the left.
+        _, _, ix, _ = cover_fit_geometry(0, 0, 50, 50, 200, 100, focal_x=0)
+        self.assertAlmostEqual(ix, 0)
+
+    def test_focal_x_100_keeps_the_right_edge_visible(self):
+        dw, _, ix, _ = cover_fit_geometry(0, 0, 50, 50, 200, 100, focal_x=100)
+        self.assertAlmostEqual(ix + dw, 50)  # image's right edge lines up with the box's
+
+    def test_focal_y_0_keeps_the_top_visible_pdf_y_up(self):
+        # PDF y grows upward — "keep the top visible" (CSS object-position
+        # 0%) means the image's top edge (iy + dh) sits at the box's top
+        # (y + height), the opposite of a naive iy==y assumption.
+        _, dh, _, iy = cover_fit_geometry(0, 0, 50, 50, 100, 200, focal_y=0)
+        self.assertAlmostEqual(iy + dh, 50)
+
+    def test_focal_y_100_keeps_the_bottom_visible_pdf_y_up(self):
+        _, _, _, iy = cover_fit_geometry(0, 0, 50, 50, 100, 200, focal_y=100)
+        self.assertAlmostEqual(iy, 0)
+
+    def test_box_offset_carries_through(self):
+        # A box not anchored at the origin — ix/iy must stay relative to it.
+        dw, dh, ix, iy = cover_fit_geometry(20, 30, 50, 50, 200, 100)
+        self.assertAlmostEqual(ix, 20 - 25)
+        self.assertAlmostEqual(iy, 30)
+
 
 class ResolveFieldTests(SimpleTestCase):
     """`resolve_field` covers every non-item entry FIELD_SOURCES declares
@@ -291,7 +415,7 @@ class ResolveFieldTests(SimpleTestCase):
         "project.name", "project.code", "project.client", "project.consultant",
         "project.contractor", "project.location", "project.description",
         "report.title", "report.number",
-        "report.period", "report.date", "progress.overall", "progress.planned", "page.number",
+        "report.period", "report.date", "progress.overall", "progress.planned", "page.number", "page.title",
     ]
 
     def test_covers_every_declared_source(self):
@@ -303,6 +427,17 @@ class ResolveFieldTests(SimpleTestCase):
 
     def test_page_number_reflects_the_expanded_instance(self):
         self.assertEqual(resolve_field("page.number", _sample_ctx(), {}, page_no=7), "7")
+
+    def test_page_title_reflects_this_pages_own_name(self):
+        # The divider-page pattern: a "page.title" field dropped on an
+        # otherwise-blank page, centered and large, reproduces the legacy
+        # renderer's dividers config — same string the TOC lists this page
+        # under (build_canvas_pdf's toc_order reads the identical page.name).
+        self.assertEqual(
+            resolve_field("page.title", _sample_ctx(), {}, page_no=1, page_title="الموقف التنفيذي"),
+            "الموقف التنفيذي",
+        )
+        self.assertEqual(resolve_field("page.title", _sample_ctx(), {}, page_no=1), "")
 
     def test_project_fields_read_from_ctx(self):
         ctx = _sample_ctx()
@@ -420,6 +555,36 @@ class ResolveTableTests(SimpleTestCase):
 
     def test_unknown_source_returns_none(self):
         self.assertIsNone(resolve_table("not_a_real_source", default_config(), _full_ctx(), {"item": None}))
+
+    @staticmethod
+    def _cell_text(table, row, col):
+        cell = table._cellvalues[row][col]
+        return cell.getPlainText() if hasattr(cell, "getPlainText") else str(cell)
+
+    def test_data_kind_override_reaches_the_real_pdf_table(self):
+        """A manual cell override (see apply_table_overrides) isn't just a
+        JSON-preview trick — it's applied before _data_table ever builds the
+        real ReportLab Table, so the downloaded PDF shows the exact same
+        edited text."""
+        table = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
+                               overrides={"r0c0": "Custom Zone Name"})
+        self.assertEqual(self._cell_text(table, 1, 0), "Custom Zone Name")  # row 0 = header, row 1 = first zone
+        self.assertEqual(self._cell_text(table, 1, 1), "90.0%")  # untouched cell in the same row
+
+    def test_info_kind_override_reaches_the_real_pdf_table(self):
+        # _full_ctx() is Arabic (rtl) — _info_table swaps the rendered column
+        # order to [value, label] for rtl, so the override (applied to the
+        # raw [label, value] row *before* that swap — see apply_table_
+        # overrides) ends up in rendered column 0, not 1.
+        table = resolve_table("project_info", default_config(), _full_ctx(), {"item": None},
+                               overrides={"r0c1": "Custom Project Name"})
+        self.assertEqual(self._cell_text(table, 0, 0), "Custom Project Name")
+
+    def test_hierarchy_kind_override_reaches_the_real_pdf_table(self):
+        table = resolve_table("hierarchy_progress", default_config(), _full_ctx(), {"item": None},
+                               overrides={"r0c1": "Custom%"})
+        self.assertEqual(self._cell_text(table, 1, 1), "Custom%")  # row 0 = header, row 1 = the zone row
+        self.assertEqual(self._cell_text(table, 1, 2), "85.0%")  # untouched "previous" cell in the same row
 
     def test_item_scoped_source_returns_none_until_phase_2(self):
         self.assertIsNone(resolve_table("item.children", default_config(), _full_ctx(), {"item": None}))
@@ -1586,7 +1751,7 @@ class ReportsApiTests(TestCase):
         from . import views
         with patch.object(views, "build_report_context", wraps=views.build_report_context) as spy:
             self.client.post(f"/api/reports/{report_id}/chart-svgs/", {}, format="json")
-            self.client.post(f"/api/reports/{report_id}/table-images/", {}, format="json")
+            self.client.post(f"/api/reports/{report_id}/table-data/", {}, format="json")
             self.assertEqual(spy.call_count, 1)
 
     def test_chart_svgs_action_returns_real_svg_for_a_resolvable_chart(self):
@@ -1667,10 +1832,11 @@ class ReportsApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["charts"]["chart1"], {"status": "no_data"})
 
-    def test_table_images_action_returns_real_png_for_a_resolvable_table(self):
+    def test_table_data_action_returns_real_rows_for_a_resolvable_table(self):
         """The Customize tab's live table preview — the exact same
-        draw_table_in_box call the real PDF uses, rasterized on its own
-        instead of drawn into a page (see table_images' docstring)."""
+        resolve_table computation the real PDF uses (raw=True mode), as
+        plain JSON rows, not an image of any kind (see table_data's
+        docstring)."""
         self.client.force_authenticate(self.admin)
         res = self.client.post(
             "/api/reports/",
@@ -1689,20 +1855,74 @@ class ReportsApiTests(TestCase):
             }]},
         }
         resp = self.client.post(
-            f"/api/reports/{report_id}/table-images/",
+            f"/api/reports/{report_id}/table-data/",
             {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
         result = resp.data["tables"]["table1"]
         self.assertEqual(result["status"], "ok")
-        import base64
-        png = base64.b64decode(result["png"])
-        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertEqual(result["kind"], "info")
+        self.assertIsNone(result["header"])
+        # A real row: the project's actual name, not a placeholder.
+        self.assertTrue(any(row[1] == "Tower" for row in result["rows"]))
+        # The real colors pdf_tables.py's builders draw with — never a
+        # frontend-invented palette (see table_data's docstring on why
+        # per-element props aren't the source of truth here).
+        self.assertEqual(resp.data["style"]["header_bg"], "#1F4E79")
+        self.assertTrue(resp.data["style"]["border"])
 
-    def test_table_images_action_flags_a_too_small_box(self):
-        """A box too short for even the header row gets the same "too
-        small" status the real PDF's own placeholder uses — never a
-        squashed or garbled table image."""
+    def test_table_data_action_applies_a_manual_cell_override(self):
+        """A table element's own `overrides` prop (edited via the Customize
+        tab's live preview — see pdf_tables.apply_table_overrides) replaces
+        the live-computed cell text in the JSON response, keyed r{row}c{col}
+        — the exact same substitution the real PDF applies, so what's shown
+        here is what gets downloaded, not just a cosmetic preview trick."""
         self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        table_el = {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                    "props": {"source": "project_info"}}
+        page = {"id": "p1", "name": "Page 1", "elements": [table_el]}
+
+        # Which row is "Tower" (the project name) in depends on which other
+        # fields this fixture project has set — fetch once unoverridden to
+        # find its real row index rather than assuming a fixed one.
+        before = self.client.post(
+            f"/api/reports/{report_id}/table-data/",
+            {"layout_override": {"layout": {"pages": [page]}}}, format="json")
+        rows_before = before.data["tables"]["table1"]["rows"]
+        name_row = next(i for i, row in enumerate(rows_before) if row[1] == "Tower")
+
+        table_el["props"]["overrides"] = {f"r{name_row}c1": "Custom Project Name"}
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-data/",
+            {"layout_override": {"layout": {"pages": [page]}}}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.data["tables"]["table1"]["rows"]
+        # The override replaces only that one cell's value; the label, and
+        # every other row's real data, are untouched.
+        self.assertEqual(rows[name_row][1], "Custom Project Name")
+        self.assertNotEqual(rows[name_row][0], "Custom Project Name")
+        self.assertEqual(len(rows), len(rows_before))
+        untouched = [r for i, r in enumerate(rows) if i != name_row]
+        untouched_before = [r for i, r in enumerate(rows_before) if i != name_row]
+        self.assertEqual(untouched, untouched_before)
+
+    def test_table_data_action_returns_data_kind_with_real_zone_rows(self):
+        """A "data" kind table (header + flat rows) — zone_progress, using
+        real zone names/percentages from the project."""
+        from apps.projects.models import Activity, ProjectScope
+
+        self.client.force_authenticate(self.admin)
+        zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, name="Zone A", scope_type=ProjectScope.ScopeType.ZONE)
+        # A zone only rolls up into ctx["zones"] once it has weighted, included
+        # tasks — a bare zone with no activities is invisible to the rollup.
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=zone, name="Task", weight=1, progress_percent=50)
         res = self.client.post(
             "/api/reports/",
             {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
@@ -1712,18 +1932,59 @@ class ReportsApiTests(TestCase):
         draft_override = {
             "layout": {"pages": [{
                 "id": "p1", "name": "Page 1", "elements": [
-                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 30, "h": 3, "z": 0,
-                     "props": {"source": "project_info"}},
+                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                     "props": {"source": "zone_progress"}},
                 ],
             }]},
         }
         resp = self.client.post(
-            f"/api/reports/{report_id}/table-images/",
+            f"/api/reports/{report_id}/table-data/",
             {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["tables"]["table1"], {"status": "too_small"})
+        result = resp.data["tables"]["table1"]
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["kind"], "data")
+        self.assertTrue(any(row[0] == zone.name for row in result["rows"]))
 
-    def test_table_images_action_flags_no_data_for_an_unresolvable_source(self):
+    def test_table_data_action_returns_hierarchy_kind_with_zone_and_child_rows(self):
+        """A "hierarchy" kind table (zone rows + indented child rows, level
+        0/1) — hierarchy_progress, using real zone/subzone percentages."""
+        from apps.projects.models import Activity, ProjectScope
+
+        self.client.force_authenticate(self.admin)
+        zone = ProjectScope.objects.create(
+            company=self.company, project=self.project, name="Zone A", scope_type=ProjectScope.ScopeType.ZONE)
+        child = ProjectScope.objects.create(
+            company=self.company, project=self.project, name="Sub A1", parent=zone,
+            scope_type=ProjectScope.ScopeType.ZONE)
+        Activity.objects.create(
+            company=self.company, project=self.project, scope=child, name="Task", weight=1, progress_percent=40)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "layout": {"pages": [{
+                "id": "p1", "name": "Page 1", "elements": [
+                    {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                     "props": {"source": "hierarchy_progress"}},
+                ],
+            }]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-data/",
+            {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        result = resp.data["tables"]["table1"]
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["kind"], "hierarchy")
+        levels = {(row["name"], row["level"]) for row in result["rows"]}
+        self.assertIn(("Zone A", 0), levels)
+        self.assertIn(("Sub A1", 1), levels)
+
+    def test_table_data_action_flags_no_data_for_an_unresolvable_source(self):
         """A table source with nothing to show (e.g. no milestones) gets
         the same "no data" status the real PDF's own placeholder uses."""
         self.client.force_authenticate(self.admin)
@@ -1742,7 +2003,7 @@ class ReportsApiTests(TestCase):
             }]},
         }
         resp = self.client.post(
-            f"/api/reports/{report_id}/table-images/",
+            f"/api/reports/{report_id}/table-data/",
             {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["tables"]["table1"], {"status": "no_data"})

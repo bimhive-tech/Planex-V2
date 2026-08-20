@@ -73,6 +73,11 @@ export interface ReportData {
     title: string; number: string; date: string | null;
     period_start: string | null; period_finish: string | null; status: string;
   };
+  // The one global reading direction the real PDF uses for every RTL-aware
+  // element (see pdf_base.resolve_arabic) — not a per-element guess, so a
+  // "toc" element's page-number column sits on the same side for every row
+  // regardless of that row's own name being Arabic or English/mixed.
+  arabic: boolean;
   overall: number;
   planned: number | null;
   previous_overall: number | null;

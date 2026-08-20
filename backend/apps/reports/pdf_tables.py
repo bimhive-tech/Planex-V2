@@ -15,6 +15,63 @@ CELL_H_PADDING = 16  # LEFTPADDING + RIGHTPADDING as set on every table style be
 MIN_COL_WIDTH = 15 * mm
 
 
+TABLE_STYLE_PROP_KEYS = (
+    "zebra", "border", "header_bg", "header_text", "text_color", "border_color", "zebra_color",
+    "header_bold", "font_size", "cell_padding",
+)
+
+
+def table_style_override(cfg: dict, props: dict | None) -> dict:
+    """A table element's own style props (`zebra`/`border`/`header_bg`/
+    `header_text`/`text_color`/`border_color`/`zebra_color`/`header_bold`/
+    `font_size`/`cell_padding` — edited via the Customize tab's Properties
+    panel, same flat-prop convention every other element type already uses)
+    layered over the report's global table defaults, as a patched copy of
+    `cfg` — every table builder below (and `_styles`) reads
+    `cfg["colors"]`/`cfg["table"]`/`cfg["fonts"]` exactly as it always did,
+    so this is the only place that needs to know these prop names; nothing
+    downstream needs a second code path. `props` is the element's *whole*
+    props dict (it also carries `source`/`overrides`/etc, ignored here) —
+    `None` or a table with none of TABLE_STYLE_PROP_KEYS set returns `cfg`
+    completely untouched, which is the overwhelming majority of tables.
+
+    These same props existed before this function did, wired into the
+    Properties panel — but were never actually read by the real PDF
+    (_draw_table_element only ever read `source`), so toggling them changed
+    nothing anyone could see. This is what makes them real.
+
+    Deliberately per-table-element, not per-cell/column: this mirrors the
+    real PDF table builders' own granularity (one shared style per table),
+    not a spreadsheet-style per-cell format model, which none of
+    _info_table/_data_table/_hierarchy_table_flat are built to express."""
+    if not props or not any(k in props for k in TABLE_STYLE_PROP_KEYS):
+        return cfg
+    colors = {**cfg["colors"]}
+    tcfg = {**cfg["table"]}
+    fonts = {**cfg["fonts"]}
+    if props.get("header_bg"):
+        colors["table_header_bg"] = props["header_bg"]
+    if props.get("header_text"):
+        colors["table_header_text"] = props["header_text"]
+    if props.get("text_color"):
+        colors["text"] = props["text_color"]
+    if props.get("border_color"):
+        colors["table_border"] = props["border_color"]
+    if props.get("zebra_color"):
+        colors["table_row_alt"] = props["zebra_color"]
+    if "border" in props:
+        tcfg["border"] = bool(props["border"])
+    if "zebra" in props:
+        tcfg["zebra"] = bool(props["zebra"])
+    if "header_bold" in props:
+        tcfg["header_bold"] = bool(props["header_bold"])
+    if props.get("cell_padding") is not None:
+        tcfg["cell_padding"] = props["cell_padding"]
+    if props.get("font_size"):
+        fonts["base_size"] = props["font_size"]
+    return {**cfg, "colors": colors, "table": tcfg, "fonts": fonts}
+
+
 def _styles(cfg):
     f, c = cfg["fonts"], cfg["colors"]
     lead = float(f.get("line_spacing", 1.5))
@@ -80,6 +137,40 @@ def _pct_or_dash(v):
     return f"{v:.1f}%" if v is not None else "—"
 
 
+def apply_table_overrides(kind, header, rows, overrides):
+    """Substitute cell text with a report's own manual overrides (the
+    "table" element's `overrides` prop, edited via the Customize tab's
+    live table preview) — mutates `header`/`rows` in place *before* either
+    the raw JSON path (views.table_data) or a real _xxx_table builder sees
+    them, so an edit is never just a cosmetic preview trick: the exact same
+    substituted value is what the downloaded PDF draws too.
+
+    Keys: `hc{col}` for a header cell, `r{row}c{col}` for a body cell.
+    "hierarchy" rows are dicts, not lists — `col` there is a fixed
+    0=name/1=actual/2=previous/3=planned mapping, matching the raw JSON
+    shape (see resolve_table's hierarchy_progress branch)."""
+    if not overrides:
+        return
+    if header:
+        for j in range(len(header)):
+            key = f"hc{j}"
+            if key in overrides:
+                header[j] = overrides[key]
+    if kind == "hierarchy":
+        cols = ("name", "actual", "previous", "planned")
+        for i, row in enumerate(rows):
+            for j, col in enumerate(cols):
+                key = f"r{i}c{j}"
+                if key in overrides:
+                    row[col] = overrides[key]
+    else:
+        for i, row in enumerate(rows):
+            for j in range(len(row)):
+                key = f"r{i}c{j}"
+                if key in overrides:
+                    row[j] = overrides[key]
+
+
 def _info_table(cfg, styles, rows, rtl, avail_width=None):
     """Bordered 2-col table: ■ label on the right, value on the left (RTL look).
 
@@ -88,7 +179,7 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None):
     of relying on ReportLab to shrink-then-rewrap the auto ("None") column,
     which is what garbles long Arabic values — see `_wrap_shape`.
     """
-    c = cfg["colors"]
+    c, tcfg = cfg["colors"], cfg["table"]
     label_style = ParagraphStyle("lbl", parent=styles["value"], alignment=TA_RIGHT)
     label_w = 58 * mm
     value_max_width = max(avail_width - label_w - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
@@ -100,14 +191,20 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None):
         val = _aligned(styles["body"], value, force=TA_RIGHT if rtl else TA_LEFT, max_width=value_max_width)
         data.append([val, lbl] if rtl else [lbl, val])
     widths = [None, label_w] if rtl else [label_w, None]
+    pad = float(tcfg.get("cell_padding", 6))
     t = Table(data, colWidths=widths)
-    t.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.7, hexcolor(c["table_border"])),
+    style = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BACKGROUND", (1 if rtl else 0, 0), (1 if rtl else 0, -1), hexcolor(c["table_row_alt"])),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), pad), ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
         ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-    ]))
+    ]
+    # Always bordered historically (no toggle existed) — default stays True
+    # so an untouched template renders exactly as before; now overridable
+    # like every other table kind's border.
+    if tcfg.get("border", True):
+        style.append(("GRID", (0, 0), (-1, -1), 0.7, hexcolor(c["table_border"])))
+    t.setStyle(TableStyle(style))
     return t
 
 
@@ -138,11 +235,12 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
             _aligned(styles["body"], cell, force=TA_CENTER, max_width=(max_widths[i] if max_widths else None))
             for i, cell in enumerate(row)
         ])
+    pad = float(tcfg.get("cell_padding", 6))
     t = Table(data, colWidths=col_widths, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), pad), ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
     ]
     if tcfg.get("border"):
         style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
@@ -195,6 +293,65 @@ def _hierarchy_table(cfg, styles, rows, labels, rtl, avail_width=None):
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for r in zebra_rows:
+        style.append(("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_row_alt"])))
+    if tcfg.get("border"):
+        style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
+    t.setStyle(TableStyle(style))
+    return t
+
+
+def _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=None):
+    """Same visual shape as `_hierarchy_table` (zone rows bold+shaded,
+    child rows indented one level), but built from the already-flattened,
+    already override-applied `rows`/`header` resolve_table's raw=True mode
+    produces — used only by the canvas path (pdf_canvas.py), so a manually
+    overridden cell (see apply_table_overrides) draws here exactly as
+    edited. The legacy flowing renderer (pdf.py) still uses the original
+    `_hierarchy_table` against its own nested `ctx["hierarchy"]` shape,
+    untouched by this — no shared code to keep the two paths in sync since
+    neither one duplicates the other's row-computation logic."""
+    c, tcfg = cfg["colors"], cfg["table"]
+    head = ParagraphStyle("hihf", parent=styles["body"], fontName=BOLD,
+                          textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
+    name_style = ParagraphStyle("hinf", parent=styles["body"], alignment=TA_RIGHT if rtl else TA_LEFT)
+    name_bold = ParagraphStyle("hinbf", parent=name_style, fontName=BOLD)
+    pct_style = ParagraphStyle("hipf", parent=styles["body"], alignment=TA_CENTER)
+    name_max_width = (
+        max(avail_width - 3 * 28 * mm - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
+    )
+
+    def name_para(text, style, *, indent=""):
+        if name_max_width and has_arabic(text):
+            return Paragraph(indent + _wrap_shape(text, style.fontName, style.fontSize, name_max_width), style)
+        return Paragraph(indent + shape(text), style)
+
+    def cell(v):
+        # An override replaces the numeric value with an already-final
+        # display string — draw it verbatim instead of re-formatting.
+        return v if isinstance(v, str) else _pct_or_dash(v)
+
+    data = [[Paragraph(shape(h), head) for h in header]]
+    zebra_rows = []
+    for row in rows:
+        style_ = name_bold if row.get("level", 0) == 0 else name_style
+        indent = "" if row.get("level", 0) == 0 else "    "
+        if row.get("level", 0) == 0:
+            zebra_rows.append(len(data))
+        data.append([
+            name_para(row["name"], style_, indent=indent),
+            Paragraph(cell(row["actual"]), pct_style),
+            Paragraph(cell(row["previous"]), pct_style),
+            Paragraph(cell(row["planned"]), pct_style),
+        ])
+
+    pad = float(tcfg.get("cell_padding", 5))
+    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm], repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), pad), ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
     ]
     for r in zebra_rows:
         style.append(("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_row_alt"])))

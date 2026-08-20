@@ -79,7 +79,9 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "slot", label: "Repeat slot (0, 1, 2…)", kind: "number" },
         { path: "show_caption", label: "Show caption", kind: "toggle" },
         { path: "fit", label: "Fit", kind: "select", options: [
-          { value: "cover", label: "Cover" }, { value: "contain", label: "Contain" }] },
+          { value: "cover", label: "Cover (crop to fill)" }, { value: "contain", label: "Contain (show whole image)" }] },
+        { path: "focal_x", label: "Crop focus — horizontal (0-100%)", kind: "number" },
+        { path: "focal_y", label: "Crop focus — vertical (0-100%)", kind: "number" },
         { path: "border", label: "Border", kind: "toggle" },
         { path: "border_color", label: "Border color", kind: "color" },
         { path: "border_width", label: "Border width (mm)", kind: "number", step: 0.1 },
@@ -114,10 +116,16 @@ function typeFields(type: string, repeating: boolean): PropField[] {
       return [
         { path: "source", label: "Data", kind: "select",
           options: repeating ? [...TABLE_SOURCES, ...ITEM_TABLE_SOURCES] : TABLE_SOURCES },
-        { path: "zebra", label: "Zebra rows", kind: "toggle" },
-        { path: "border", label: "Borders", kind: "toggle" },
         { path: "header_bg", label: "Header fill", kind: "color" },
         { path: "header_text", label: "Header text", kind: "color" },
+        { path: "header_bold", label: "Bold header", kind: "toggle" },
+        { path: "text_color", label: "Cell text color", kind: "color" },
+        { path: "font_size", label: "Font size (pt)", kind: "number" },
+        { path: "cell_padding", label: "Row height — cell padding (pt)", kind: "number", step: 0.5 },
+        { path: "zebra", label: "Zebra rows", kind: "toggle" },
+        { path: "zebra_color", label: "Zebra stripe color", kind: "color" },
+        { path: "border", label: "Borders", kind: "toggle" },
+        { path: "border_color", label: "Border color", kind: "color" },
       ];
     case "chart":
       return [
@@ -150,14 +158,41 @@ interface Props {
    * "Uploaded image" source, since that image belongs to one specific
    * report, not a project-agnostic template. */
   reportId?: string;
+  /** How many elements are currently selected — `el` is only ever set for
+   * exactly one of them, so a multi-selection shows a group summary here
+   * instead of per-type property fields (merging N different elements'
+   * settings into one form isn't worth the complexity this editor needs). */
+  selectedCount?: number;
+  /** Deletes every currently-selected element at once. Only surfaced when
+   * `selectedCount > 1` — a single selection already has Delete on the
+   * canvas's own ⋯ menu and the Delete key. */
+  onDeleteSelection?: () => void;
 }
 
-export function ElementInspector({ el, onChange, repeating = false, reportId }: Props) {
+export function ElementInspector({
+  el, onChange, repeating = false, reportId, selectedCount = 0, onDeleteSelection,
+}: Props) {
   // Hooks must run every render regardless of `el`, so these sit above the
-  // early return below.
+  // early returns below.
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (selectedCount > 1) {
+    return (
+      <aside className={styles.inspector} aria-label="Element properties">
+        <h2 className={styles.panelTitle}>Properties</h2>
+        <p className={styles.panelHint}>
+          {selectedCount} elements selected. Drag any of them to move the group, or a corner handle to resize it.
+        </p>
+        {onDeleteSelection && (
+          <Button variant="secondary" onClick={onDeleteSelection}>
+            Delete {selectedCount} elements
+          </Button>
+        )}
+      </aside>
+    );
+  }
 
   if (!el) {
     return (

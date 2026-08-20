@@ -43,7 +43,7 @@ _UNSET = object()
 # zone/activity/cashflow/etc. the project has) but doesn't depend on layout at
 # all — only on the report's own project/date/scope, none of which change
 # while you're rearranging elements on the Customize tab. Cached briefly and
-# only for chart_svgs/table_images (the Customize tab's live, per-element
+# only for chart_svgs/table_data (the Customize tab's live, per-element
 # previews — see their docstrings): the first one in an editing session pays
 # the cost once, every call after that skips straight to rendering. `pdf`/
 # `data` deliberately stay uncached so anything actually saved or downloaded
@@ -81,17 +81,6 @@ def _render_report_pdf(report, engine, override=_UNSET):
     else:
         data = build_report_pdf(report, ctx, out_pages=pages, cfg=cfg)
     return data, pages
-
-
-def _rasterize_pdf(data: bytes, dpi: int = 144) -> list[str]:
-    """Every page of a rendered PDF, as base64 PNG — used by table_images
-    to rasterize a single table's own tiny standalone PDF."""
-    import base64
-
-    import fitz
-
-    doc = fitz.open(stream=data, filetype="pdf")
-    return [base64.b64encode(page.get_pixmap(dpi=dpi).tobytes("png")).decode("ascii") for page in doc]
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):
@@ -145,8 +134,17 @@ class ReportViewSet(viewsets.ModelViewSet):
     def data(self, request, pk=None):
         """The computed report data (project info + progress tables) so the
         builder can show what's pulled from the chosen project, live."""
+        from .pdf_base import resolve_arabic
+
         report = self.get_object()
         ctx = build_report_context(report)
+        # Single global direction, not a per-element guess — mirrors exactly
+        # what the real PDF's own elements (see pdf_canvas._draw_toc_element)
+        # use, so e.g. the TOC's page-number column sits on the same side
+        # for every row regardless of that row's own page name being Arabic
+        # or English/mixed.
+        cfg = merged_config(report.template.config if report.template else None)
+        ctx["arabic"] = resolve_arabic(cfg, ctx["project"])
         # `images` (the detailed-progress zone grids' inline photos) and
         # _progress (an internal per-activity map, can be tens of thousands
         # of entries) are only ever read at PDF-render time.
@@ -260,32 +258,39 @@ class ReportViewSet(viewsets.ModelViewSet):
                 charts[el["id"]] = {"status": "ok", "svg": renderSVG.drawToString(drawing)}
         return Response({"charts": charts})
 
-    @action(detail=True, methods=["post"], url_path="table-images")
-    def table_images(self, request, pk=None):
-        """Live per-table-element PNGs for the Customize tab canvas.
+    @action(detail=True, methods=["post"], url_path="table-data")
+    def table_data(self, request, pk=None):
+        """Live per-table-element data for the Customize tab canvas.
 
-        Tables don't have a direct vector export the way a chart's Drawing
-        does (draw_table_in_box draws straight onto an open canvas, not a
-        standalone shape tree) — so each table element gets its own tiny
-        single-page PDF, drawn with the exact same draw_table_in_box call
-        the real page uses, then rasterized. Small and fast (one table, not
-        a whole document) — combined with the cached report context, cheap
-        enough to call on every edit, not just an explicit refresh.
+        Returns the exact same header/rows resolve_table computes for the
+        real PDF table (same query, same formatting — see resolve_table's
+        raw=True mode) as plain JSON, not a rendered image of any kind: the
+        canvas builds a real HTML table from this, so it's actual selectable
+        text, not a snapshot. "no_data" mirrors exactly the case the real
+        PDF draws its own placeholder for (see pdf_canvas._draw_table_element)
+        — never fake rows.
 
-        Keyed by element id; "too_small"/"no_data" statuses mirror exactly
-        what the real PDF draws in those same cases (see
-        pdf_canvas._draw_table_element) — never a fake table.
+        Also returns each table's own effective `style`: the real colors/
+        toggles/font size pdf_tables.py's table builders actually draw with
+        (cfg["colors"]/cfg["table"]/cfg["fonts"], patched by this element's
+        own zebra/border/header_bg/etc props if it sets any — see
+        pdf_tables.table_style_override, the same helper resolve_table
+        itself uses for the real PDF, so this can never show a look the PDF
+        doesn't also produce). Per element, not one shared style for the
+        whole report — a table with its own style override needs its own
+        effective colors, not the report's defaults.
+
+        `props.overrides` (the same element's manually-edited cells, see
+        pdf_tables.apply_table_overrides) IS read and applied here — the
+        same overrides the real PDF applies in _draw_table_element, so an
+        edit made in this live preview always matches what gets downloaded.
 
         Same Customize-tab-only scoping as chart_svgs — see its docstring.
         """
-        from io import BytesIO
-
         from reportlab.lib.units import mm as _mm
-        from reportlab.pdfgen import canvas as _canvas
 
-        from .pdf_base import ensure_fonts
         from .pdf_canvas import expand_pages, resolve_table
-        from .pdf_tables import draw_table_in_box
+        from .pdf_tables import table_style_override
 
         report = self.get_object()
         override = request.data.get("layout_override")
@@ -294,7 +299,17 @@ class ReportViewSet(viewsets.ModelViewSet):
         applied = override if override is not None else getattr(report, "layout_override", None)
         cfg = merge_layout_override(cfg, applied)
 
-        ensure_fonts()
+        def effective_style(props):
+            patched = table_style_override(cfg, props)
+            c, tcfg, fonts = patched["colors"], patched["table"], patched["fonts"]
+            return {
+                "header_bg": c["table_header_bg"], "header_text": c["table_header_text"],
+                "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
+                "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
+                "header_bold": bool(tcfg.get("header_bold")),
+                "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
+            }
+
         tables = {}
         for inst in expand_pages(cfg, ctx, report):
             for el in inst.page.get("elements", []):
@@ -302,19 +317,15 @@ class ReportViewSet(viewsets.ModelViewSet):
                     continue
                 props = el.get("props") or {}
                 source = props.get("source", "")
-                w, h = float(el.get("w", 0)) * _mm, float(el.get("h", 0)) * _mm
-                table = resolve_table(source, cfg, ctx, inst.scope, avail_width=w)
-                if table is None:
-                    tables[el["id"]] = {"status": "no_data"}
+                w = float(el.get("w", 0)) * _mm
+                grid = resolve_table(
+                    source, cfg, ctx, inst.scope, avail_width=w, raw=True, overrides=props.get("overrides"),
+                    style=props,
+                )
+                style = effective_style(props)
+                if grid is None:
+                    tables[el["id"]] = {"status": "no_data", "style": style}
                     continue
-                buf = BytesIO()
-                c = _canvas.Canvas(buf, pagesize=(w, h))
-                fits = draw_table_in_box(c, table, 0, 0, w, h)
-                if not fits:
-                    tables[el["id"]] = {"status": "too_small"}
-                    continue
-                c.showPage()
-                c.save()
-                png = _rasterize_pdf(buf.getvalue(), dpi=150)[0]
-                tables[el["id"]] = {"status": "ok", "png": png}
+                tables[el["id"]] = {"status": "ok", "style": style, **grid}
+
         return Response({"tables": tables})

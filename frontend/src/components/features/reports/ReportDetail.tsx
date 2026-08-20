@@ -5,6 +5,7 @@
 // read-only tabs, and a real-time PDF preview (debounced auto-save → re-render).
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -85,11 +86,23 @@ function plainToHtml(text: string): string {
 }
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [form, setForm] = useState<Form | null>(null);
   const [scopeIds, setScopeIds] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectListRow[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("setup");
+  // Which builder tab is open survives a refresh via the URL's own `?tab=`
+  // — reading it back out of state alone would reset to "setup" on reload.
+  const [tab, setTabState] = useState<(typeof TABS)[number]["key"]>(
+    () => TABS.find((t) => t.key === searchParams.get("tab"))?.key ?? "setup",
+  );
+  const setTab = useCallback((next: (typeof TABS)[number]["key"]) => {
+    setTabState(next);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", next);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [router, searchParams]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState<ReportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);

@@ -78,26 +78,141 @@ its own dedicated route handler (`app/reports/[id]/pdf-file/route.ts`) to work a
 it. `page-images` does the same heavy rendering internally but was never given the
 same treatment, so it can 500 on exactly the reports big enough to need this feature.
 Worth fixing as part of this phase, since Phase 2 depends on this exact endpoint
-working reliably.
+working reliably. **Resolved as of commit 2c926a2** — the whole page-snapshot
+mechanism (`page-images` included) was retired rather than patched, so this
+specific failure mode no longer exists.
+
+**Found while testing Phase 2** (2026-08-18): with the live Customize-tab preview
+and the real PDF now rendering from the same data (the point of this phase), a
+side-by-side check of both against the actual PDF surfaced real *content* bugs —
+not preview/rendering mismatches, genuine problems in the report's own data/logic:
+
+- **Critical Path Delays table (`critical_path` / "المسار الحرج للتأخيرات") shows
+  0 days delay on every single row, for every zone** — contradicts the same
+  report's own executive dashboard, which reports 426 days of project delay, and
+  zones visibly behind on progress (some at 54–61% actual vs. 100% planned).
+  Root cause: `services._critical_path_rows` only computes delay as
+  `today − zone.planned_finish`, so a zone can't show slippage until its own
+  deadline has already passed — every zone's `planned_finish` in this project is
+  still months out (Aug–Oct 2026), so the math is technically consistent but the
+  table can never do what its own docstring says it's for ("which buildings are
+  slipping and by how much"). This is exactly the delay-days column Phase 6's
+  الموقف التنفيذي section calls for — worth fixing before that page gets built on
+  top of it. Also worth confirming: those per-zone `planned_finish` dates are
+  *later* than both the project's contractual finish (26 Apr 2025) and its revised
+  finish (26 Jun 2026) — backwards for a baseline date, possibly a P6-import issue
+  (see the `FOR (P6)` sheet TODO above).
+- **The same short zone code (e.g. "Z(A)", "Z(C)") repeats 2–4 times** across the
+  executive dashboard's bar chart and the Critical Path Delays table, for
+  genuinely different zones (confirmed distinct IDs, dates, and progress) — no way
+  for a reader to tell them apart. Relevant to the Phase 4 scope-picker and Phase
+  5's "every chart/table needs a real title" — these zones need a real
+  disambiguating label surfaced into compact chart/table views, not just their
+  short code.
+- **S-curve's "actual" line has a small rendering kink** — a visible dip-and-recover
+  partway through what should be a flat plateau segment, on the executive
+  dashboard. Cosmetic, but real.
+- **Per-zone duration widget doesn't reconcile with the project-level one** — a
+  zone's own donut (e.g. its Area Board page) shows "1846 days duration, 0 delay"
+  against the executive dashboard's "1200 days, 426 delay" for the same project —
+  same root cause as the Critical Path Delays bug above (`_zone_duration` uses the
+  zone's own dates when present, and those dates disagree with the project's).
+- ~~**Zone building-breakdown tables silently truncate to 6 rows**, with a "+27 more
+  rows" caption that's a dead end in a static downloaded PDF — fine in an
+  interactive viewer, not in a PDF a client actually reads.~~ **Fixed** — a table
+  with more rows than fit its box now genuinely continues onto extra pages
+  (`pdf_canvas.py`'s `_expand_table_overflow`/`_split_table_chunks`, backed by
+  `Table.split()` called repeatedly the same way a Platypus Frame pages a
+  flowable, since this renderer draws each page at fixed positions rather than
+  flowing a story through frames) — verified on the real report: 25 → 53 pages,
+  zero "more rows" notes left, every row's real data present, running header
+  still repeats on every continuation page. The live Customize-tab canvas
+  doesn't synthesize matching extra pages into the editor's own page list (a
+  much bigger UI change) — it now **scrolls** the table within its box
+  (`overflow-y: auto`, not a hard clip) so every row stays reachable/editable
+  there too, plus a "continues in the downloaded PDF" note when it's taller
+  than the box.
 
 ---
 
 ## Phase 3 — Editor interaction, Canva-parity
 
-- Multi-select → move/resize several elements together
-- Bottom page strip: scroll through pages, duplicate/reorder, thumbnails (like Canva)
-  — cheaper than it looked once Phase 2 exists, since it can reuse the same real-page
-  rendering instead of needing separate thumbnail generation
-- Better image controls: real crop tool, better resize handles
-- Shift+scroll to zoom, scroll to pan across pages
+- **Multi-select → move/resize several elements together** — built. Found and
+  fixed two real bugs during testing: (1) the group-selection bounding box was
+  intercepting clicks meant for individual members, so Shift-click-to-deselect
+  one element out of a multi-selection silently did nothing (fixed by making
+  the box `pointer-events: none`, keeping only its resize handles clickable);
+  (2) drag-to-select (marquee) also triggered the browser's native text
+  selection over whatever it crossed, painting its own highlight over the
+  marquee rectangle (fixed with `preventDefault()` + `user-select: none`).
+- **Table styling (Canva-style)** — built: a table element's header fill/text,
+  cell text color, bold header, font size, row height (cell padding), zebra
+  stripe + color, and border + color are now real, per-element controls in the
+  Properties panel — the `zebra`/`border`/`header_bg`/`header_text` fields
+  already existed there but were dead (the real PDF never read them, only
+  `source` — see `_draw_table_element`'s old docstring); wired end-to-end now
+  through `pdf_tables.table_style_override`, the same helper both the real PDF
+  table builders and the live Customize-tab preview use, so a styled table
+  can't show a look the download doesn't also produce. Verified against a real
+  rendered PDF (magenta header, gold zebra stripe, blue border, 16pt text, all
+  came through correctly). Column width / per-cell formatting deliberately
+  **not** attempted — a real per-cell spreadsheet model is a much bigger
+  change none of the three table kinds are built to express; this stays at
+  the same one-style-per-table granularity the real PDF builders already have.
+- **Bottom page strip [built]** — a horizontal thumbnail row under the canvas
+  (`PageStrip.tsx`), click to jump pages, plus duplicate/delete/add right
+  there. Turned out *not* cheap to reuse real-page rendering for, the way the
+  original note above assumed — that mechanism (a rasterized snapshot per
+  page) is exactly what got retired in Phase 2, and rendering 25-50+ *live*
+  pages (real chart SVGs, real table data) simultaneously just for small
+  thumbnails would be genuinely slow. Built as lightweight wireframes instead
+  — each element as a flat-colored box sized/positioned from its real x/y/w/h,
+  colored by type, no live data fetched — so it stays instant regardless of
+  page count. The existing left-side page list (rename, move up/down, repeat
+  toggle) is untouched and still there; this is a second, faster way to
+  visually scan and jump, not a replacement.
+- **Image crop tool [built]** — an "image" element's Fit=Cover option existed
+  in the Properties panel but, like the table styling props, was dead — every
+  draw call (frontend CSS *and* the real PDF's `_draw_image`/
+  `_draw_uploaded_image`) only ever did "contain" (letterboxed, never
+  cropped), regardless of `fit`. Built real cover-crop for both sides
+  (`pdf_layout.draw_fitted_image`, clipped `drawImage` scaled to fill; CSS
+  `object-fit`/`object-position` on the frontend — identical math), plus two
+  new `focal_x`/`focal_y` (0-100%) properties so you can choose *which* part
+  of an oversized image survives the crop — same convention as CSS
+  object-position. The crop-positioning math is unit tested directly
+  (`CoverFitGeometryTests`, 7 cases covering both axes and the PDF-vs-CSS
+  y-direction flip) rather than only checked by eye. "Better resize handles"
+  from this same bullet not otherwise addressed — the existing 8-handle
+  resize (shared with every element type) already got the rotation-aware
+  rewrite a few commits back and no specific complaint about it exists to
+  work from; flag a concrete one if there's a real issue with it.
+- **Shift+scroll to zoom, scroll to pan [built]** — zoom is now continuous
+  (any value between 25%-300%, not just the five preset steps) via
+  Shift+scroll on the canvas; a plain scroll still pans natively
+  (`.canvasScroll`'s own `overflow: auto` always did that, nothing to add).
+  The +/- buttons still step through the same preset list, now finding the
+  nearest preset *above/below* the current continuous zoom rather than
+  looking for an exact match (which shift-scrolling to an in-between value
+  would never hit). Verified with real dispatched wheel events: Shift+scroll
+  changed 100%→120% by the exact expected amount; a same-sized plain scroll
+  changed nothing.
 
 ---
 
 ## Phase 4 — New authoring capabilities
 
-- Blank "title-only" divider page pulled from the TOC entry name — this pattern
+- ~~Blank "title-only" divider page pulled from the TOC entry name — this pattern
   already exists in the legacy renderer (`dividers` config), just needs porting into
-  the canvas as a real element type
+  the canvas as a real element type~~ **[built]** — turned out not to need a
+  dedicated page type at all: a new `page.title` field source (alongside the
+  existing `page.number`) resolves to this exact page's own name (the same
+  string `inst.page.get("name")` the TOC already lists it under), so dropping
+  one `field` element with that source on an otherwise-blank page reproduces
+  the legacy `dividers` look — centered, large, bold. Added a ready-made
+  "Divider heading" item to the palette (Setup category) pre-styled that way,
+  plus an end-to-end test confirming the title shows on its own page and
+  nowhere else across a multi-page render.
 - **Scope-resolution code hardened first**, then: bind a table's data to a specific
   zone/stage, same pattern as the report's Scope tab
 - Paste a table from Excel + build/edit a fully custom table (add/remove rows,
@@ -136,6 +251,24 @@ confirming which one to match before building it.
 Project Info table also carries dual-currency values (EGP + USD) and a split between
 original BOQ value and added-items value in the reference — smaller gap, but real if
 Project Info should match exactly too.
+
+**Arabic legend text sometimes rendering backwards [fixed]**: found two real
+instances of the same root-cause gotcha as the description rich-text bug —
+`shape()` (reshape + bidi) called on *part* of a string with plain text
+concatenated on afterward, instead of shaping the whole composed string as
+one logical unit. The SPI gauge's "SPI= 88%" value line (`f"{shape(title)}=
+{v:.0f}%"`) and the Gantt chart's "— Revised finish" slip note (`"— " +
+shape(...)`) both had this; fixed by moving the `shape()` call to wrap the
+whole string. Every `_legend()` call site itself was already correct (it
+shapes its caller's whole label string, not a fragment).
+
+**Chart "cropped from the top" — investigated, not reproduced**: pulled all 9
+real chart SVGs the live report currently serves and measured actual
+rendered bounding boxes in a real browser (`getBBox()`, not just reading
+coordinates) against each one's viewBox — none show content above the top
+edge, at the box's real size or synthetically shrunk down to 15mm tall.
+Whatever's being seen needs a screenshot or the exact report/chart/tab to
+pin down further; didn't want to guess-fix without evidence.
 
 ---
 

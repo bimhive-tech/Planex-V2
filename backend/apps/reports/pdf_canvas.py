@@ -32,8 +32,11 @@ from .pdf_charts import (
     speedometer_chart,
     zone_duration_pie,
 )
-from .pdf_layout import _draw_contained_image, _period_str
-from .pdf_tables import _data_table, _fmt_date, _hierarchy_table, _info_table, _pct_or_dash, _styles, draw_table_in_box
+from .pdf_layout import _draw_contained_image, _period_str, draw_fitted_image
+from .pdf_tables import (
+    _data_table, _fmt_date, _hierarchy_table_flat, _info_table, _pct_or_dash, _styles,
+    apply_table_overrides, draw_table_in_box, table_style_override,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +54,26 @@ MIN_CHART_W_MM, MIN_CHART_H_MM = 45, 45
 @dataclass
 class PageInstance:
     """One physical page to render: a LayoutPage plus the repeat context (if
-    any) it was expanded from — `scope["item"]` is None for a fixed page."""
+    any) it was expanded from — `scope["item"]` is None for a fixed page.
+
+    The last three fields are set only by `_expand_table_overflow` (a table
+    element with more rows than fit its box gets continued onto extra
+    synthetic pages rather than truncated) — every other caller leaves them
+    at their defaults and can ignore them entirely."""
     page: dict
     scope: dict
     number: int
+    # Set on a synthetic continuation page: draw ONLY this one element
+    # (using `continues_chunk`, already split to fit and guaranteed to),
+    # never the rest of the original page's content — that already appeared
+    # on the page(s) before it.
+    continues_element: dict | None = None
+    continues_chunk: object | None = None
+    # Set on the ORIGINAL page of a table that overflows: {element_id: first
+    # chunk}, so _draw_table_element draws the same pre-split piece
+    # _expand_table_overflow already computed instead of resolving and
+    # splitting the table a second time.
+    table_chunk0: dict | None = None
 
 
 def _page_size_mm(design: dict):
@@ -103,10 +122,17 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     c = _canvas.Canvas(buf, pagesize=(page_w_mm * mm, page_h_mm * mm))
 
     instances = expand_pages(cfg, ctx, report)
+    # A table with more rows than fit its box continues onto extra pages
+    # spliced in right after it, rather than getting truncated with a
+    # "+N more rows" note — renumbers everything after it, so this must run
+    # before anything below reads `inst.number`.
+    instances = _expand_table_overflow(instances, cfg, ctx, page_h_mm)
     # Page numbers are fully known before anything is drawn (expand_pages
     # already assigned them), so a "toc" element can resolve real page
     # numbers in a single pass — no two-pass render needed. One row per
-    # distinct page id (a repeat page's many clones collapse to its first).
+    # distinct page id (a repeat page's many clones collapse to its first —
+    # a table's continuation pages share their original page's id too, so
+    # they collapse the same way and never get their own TOC row).
     toc_map, toc_order, seen = {}, [], set()
     for inst in instances:
         pid = inst.page.get("id")
@@ -147,10 +173,20 @@ def _render_page(c, design, master_elements, inst: PageInstance, cfg, ctx, page_
 
     # Master elements always sit behind page content, in their own z-order —
     # unless this page opts out (e.g. a bespoke cover that shouldn't show
-    # the running header/footer).
+    # the running header/footer). A continuation page still gets the running
+    # header/footer like any other page of the report.
     if not inst.page.get("skip_master"):
         for el in sorted(master_elements, key=lambda e: e.get("z", 0)):
             _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
+
+    if inst.continues_element is not None:
+        # A synthetic page holding only the overflow of one table — the
+        # page's other elements (title, other charts...) already drew on
+        # the page(s) before it and shouldn't repeat here.
+        el = inst.continues_element
+        _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
+        return
+
     for el in sorted(inst.page.get("elements") or [], key=lambda e: e.get("z", 0)):
         _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
 
@@ -196,7 +232,7 @@ def _draw_element(c, el: dict, box, inst: PageInstance, cfg, ctx):
         elif t == "image":
             _draw_image(c, props, x, y, w, h, inst, ctx)
         elif t == "table":
-            _draw_table_element(c, props, x, y, w, h, inst, cfg, ctx)
+            _draw_table_element(c, props, x, y, w, h, inst, cfg, ctx, el.get("id"))
         elif t == "chart":
             _draw_chart_element(c, props, x, y, w, h, inst, cfg, ctx)
         elif t == "toc":
@@ -272,7 +308,13 @@ def _draw_text(c, props, x, y, w, h):
 
 
 def _draw_field(c, props, x, y, w, h, inst: PageInstance, ctx):
-    value = resolve_field(props.get("source", ""), ctx, inst.scope, inst.number)
+    # A manual override (edited via the Customize tab's canvas) replaces the
+    # live-computed value outright — `is not None` so an intentionally
+    # blanked-out field stays blank instead of falling back to the real one.
+    override = props.get("value_override")
+    value = override if override is not None else resolve_field(
+        props.get("source", ""), ctx, inst.scope, inst.number, inst.page.get("name") or "",
+    )
     label = props.get("label") if props.get("show_label") else None
     text = f"{label}: {value}" if label else value
     _draw_text(c, {**props, "text": text}, x, y, w, h)
@@ -319,6 +361,18 @@ def _draw_logo(c, props, x, y, w, h, ctx):
 _CAPTION_H = 8 * mm
 
 
+def _draw_fitted_image(c, reader, x, y, w, h, props):
+    """draw_fitted_image, reading its fit/focal_x/focal_y from this element's
+    own props — the "image" element's Properties-panel "Fit" control
+    (cover/contain) plus the focal-point crop offset, only meaningful for
+    cover (see draw_fitted_image's docstring)."""
+    draw_fitted_image(
+        c, reader, x, y, w, h,
+        fit=str(props.get("fit", "contain")),
+        focal_x=float(props.get("focal_x", 50)), focal_y=float(props.get("focal_y", 50)),
+    )
+
+
 def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
     """`repeat.item` binds this box to one photo/attachment in the current
     repeat chunk (props["slot"] indexes inst.scope["items"]) — this is what
@@ -341,7 +395,7 @@ def _draw_image(c, props, x, y, w, h, inst: PageInstance, ctx):
     caption_h = _CAPTION_H if show_caption else 0
     reader = storage_image_reader(item.get("image"))
     if reader:
-        _draw_contained_image(c, reader, x, y + caption_h, w, h - caption_h)
+        _draw_fitted_image(c, reader, x, y + caption_h, w, h - caption_h, props)
     _draw_image_border(c, props, x, y + caption_h, w, h - caption_h)
     if show_caption and item.get("caption"):
         style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
@@ -364,7 +418,7 @@ def _draw_uploaded_image(c, props, x, y, w, h, ctx):
         return
     reader = storage_image_reader(image.image.name if image.image else None)
     if reader:
-        _draw_contained_image(c, reader, x, y, w, h)
+        _draw_fitted_image(c, reader, x, y, w, h, props)
     _draw_image_border(c, props, x, y, w, h)
 
 
@@ -380,13 +434,18 @@ def _draw_toc_element(c, props, x, y, w, h, inst: PageInstance, ctx):
     color = hexcolor(props.get("color", "#1e2430"))
     rtl = bool(ctx.get("arabic"))
 
+    # A manual override (edited via the Customize tab's canvas) replaces
+    # this row's displayed name only — the page's own title elsewhere is
+    # untouched, same as a table cell override doesn't change the project
+    # data it was read from.
+    name_overrides = props.get("name_overrides") or {}
     rows = []
     for pid, name in toc_order:
         if pid == own_id or pid not in toc_map:
             continue
         if exclude_cover and name.strip().lower() in ("cover",):
             continue
-        rows.append((name, toc_map[pid]))
+        rows.append((name_overrides.get(pid, name), toc_map[pid]))
 
     c.setFont(FONT_NAME, size)
     cy = y + h - size
@@ -428,12 +487,32 @@ def _draw_placeholder(c, x, y, w, h, label):
     c.restoreState()
 
 
-def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
+def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_id=None):
+    # A synthetic continuation page (see _expand_table_overflow): the chunk
+    # assigned to THIS page is already split to fit this exact box — drawn
+    # verbatim, nothing left to resolve or re-split.
+    if inst.continues_chunk is not None:
+        _, chunk_h = inst.continues_chunk.wrap(w, h)
+        inst.continues_chunk.drawOn(c, x, y + h - chunk_h)
+        return
+
     source = props.get("source", "")
-    table = resolve_table(source, cfg, ctx, inst.scope, avail_width=w)
+    table = resolve_table(
+        source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
+    )
     if table is None:
         _draw_placeholder(c, x, y, w, h, f"No data: {source}")
         return
+
+    # This table's first chunk was already computed (and its overflow into
+    # continuation pages already spliced in) by _expand_table_overflow —
+    # draw that same piece rather than resolving/splitting it again.
+    chunk0 = (inst.table_chunk0 or {}).get(el_id) if el_id else None
+    if chunk0 is not None:
+        _, chunk_h = chunk0.wrap(w, h)
+        chunk0.drawOn(c, x, y + h - chunk_h)
+        return
+
     if not draw_table_in_box(c, table, x, y, w, h):
         _draw_placeholder(c, x, y, w, h, f"Table too small: {source}")
 
@@ -454,13 +533,24 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
 
 # ── Field binding ────────────────────────────────────────────────────────────
 
-def resolve_field(source: str, ctx: dict, scope: dict, page_no: int) -> str:
+def resolve_field(source: str, ctx: dict, scope: dict, page_no: int, page_title: str = "") -> str:
     """Resolve one of reportElements.ts's FIELD_SOURCES against live ctx data.
-    Covers every non-item source; `item.*` sources are phase 2."""
+    Covers every non-item source; `item.*` sources are phase 2.
+
+    `page_title` (added for "page.title") is this exact page's own
+    `page.name` — the same string the TOC lists it under (build_canvas_pdf's
+    toc_order is built from that identical field) — so a "page.title" field
+    dropped onto an otherwise-blank page reproduces the legacy flowing
+    renderer's `dividers` config (a blank section-divider page, heading
+    centered, pulled from the section name) without a dedicated page type:
+    just this field, centered, in a large size, on a page with nothing else
+    on it."""
     if source.startswith("item."):
         return _resolve_item_field(source, scope)
     if source == "report.period":
         return _period_str(ctx, bool(ctx.get("arabic")))
+    if source == "page.title":
+        return page_title
 
     project, report = ctx.get("project") or {}, ctx.get("report") or {}
     overall, planned = ctx.get("overall"), ctx.get("planned")
@@ -505,7 +595,10 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 
 # ── Table binding ────────────────────────────────────────────────────────────
 
-def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None):
+def resolve_table(
+    source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None, raw: bool = False,
+    overrides: dict | None = None, style: dict | None = None,
+):
     """Build a ready-to-draw Table flowable for one of reportElements.ts's
     TABLE_SOURCES (plus the item-scoped `item.children`, available on a
     repeating page), reusing the exact row-construction logic and labels the
@@ -513,7 +606,32 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
 
     `avail_width` is the actual box width (points) this table will be drawn
     into — passed down so long text in an auto-width column wraps correctly
-    instead of garbling (see pdf_tables._wrap_shape)."""
+    instead of garbling (see pdf_tables._wrap_shape).
+
+    `raw=True` returns the same header/rows every branch below already
+    computes, as plain unshaped strings (a dict — see RAW_KIND per branch),
+    *before* handing off to _info_table/_data_table/_hierarchy_table_flat —
+    used by the Customize tab's live HTML table (see views.table_data) so
+    the canvas renders the exact same values the PDF does without a second,
+    separate query/formatting implementation to keep in sync.
+
+    `overrides` (the "table" element's own `overrides` prop, edited via the
+    Customize tab's live preview — see pdf_tables.apply_table_overrides) is
+    applied to every branch's `header`/`rows` before either the raw or the
+    real-table-builder fork, so a manual edit reaches the downloaded PDF
+    exactly as edited, never just the canvas preview.
+
+    `style` (the element's own whole `props` dict — its zebra/border/
+    header_bg/header_text/text_color/border_color/zebra_color/header_bold/
+    font_size/cell_padding, edited via the same tab's Properties panel)
+    patches `cfg` once up front (see pdf_tables.table_style_override) so
+    every builder below picks it up through the exact same
+    cfg["colors"]/cfg["table"]/cfg["fonts"] reads it already had —
+    real-table-builder branches draw with it directly; the raw JSON
+    branches don't need it themselves (views.table_data derives the
+    *effective* style the same way, from this same helper, and ships it
+    alongside the raw rows for the canvas to render with)."""
+    cfg = table_style_override(cfg, style)
     styles = _styles(cfg)
     labels = cfg["labels"]
     rtl = bool(ctx.get("arabic"))
@@ -526,8 +644,11 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
         rows = [[c["name"],
                  f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
                  f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
-        return _data_table(cfg, styles, [labels["col_zone"], labels["col_actual"], labels["col_planned"]],
-                            rows, col_widths=[None, 30 * mm, 30 * mm], avail_width=avail_width)
+        header = [labels["col_zone"], labels["col_actual"], labels["col_planned"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 30 * mm, 30 * mm], avail_width=avail_width)
     if source.startswith("item."):
         return None  # no other item-scoped table source defined
 
@@ -572,20 +693,41 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
              _fmt_date(p.get("part_forecast_completion")) if p.get("part_forecast_completion") else ""),
             (labels.get("info_part_delay", "(Part) Delay (Calendar Days)"), days(p.get("part_delay_days"))),
         ]
-        rows = [(k, v) for k, v in rows if v and v != "—"]
-        return _info_table(cfg, styles, rows, rtl, avail_width=avail_width) if rows else None
+        rows = [[k, v] for k, v in rows if v and v != "—"]
+        if not rows:
+            return None
+        apply_table_overrides("info", None, rows, overrides)
+        if raw:
+            return {"kind": "info", "header": None, "rows": rows}
+        return _info_table(cfg, styles, rows, rtl, avail_width=avail_width)
 
     if source == "zone_progress":
         zones = ctx.get("zones") or []
         if not zones:
             return None
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
-        return _data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
-                            col_widths=[None, 40 * mm], avail_width=avail_width)
+        header = [labels["col_zone"], labels["col_progress"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 40 * mm], avail_width=avail_width)
 
     if source == "hierarchy_progress":
         hierarchy = ctx.get("hierarchy") or []
-        return _hierarchy_table(cfg, styles, hierarchy, labels, rtl, avail_width=avail_width) if hierarchy else None
+        if not hierarchy:
+            return None
+        header = [labels["col_zone"], labels["col_actual"], labels["col_previous"], labels["col_planned"]]
+        rows = []
+        for zone in hierarchy:
+            rows.append({"name": zone["name"], "actual": zone["actual"], "previous": zone["previous"],
+                         "planned": zone["planned"], "level": 0})
+            for child in zone["children"]:
+                rows.append({"name": child["name"], "actual": child["actual"], "previous": child["previous"],
+                             "planned": child["planned"], "level": 1})
+        apply_table_overrides("hierarchy", header, rows, overrides)
+        if raw:
+            return {"kind": "hierarchy", "header": header, "rows": rows}
+        return _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=avail_width)
 
     if source == "discipline_progress":
         discipline = ctx.get("discipline") or []
@@ -596,6 +738,9 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
         rows = [[r["name"]] + [_pct_or_dash(r.get(d)) for d in
                                ("concrete", "architecture", "electrical", "mechanical", "other")]
                 for r in discipline]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "progress_compare":
@@ -606,17 +751,23 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
                  f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
                  f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
                  f"{z['progress']:.1f}%"] for z in zones]
-        return _data_table(cfg, styles,
-            [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
-            rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm], avail_width=avail_width)
+        header = [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm],
+                            avail_width=avail_width)
 
     if source == "milestones":
         milestones = ctx.get("milestones") or []
         if not milestones:
             return None
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in milestones]
-        return _data_table(cfg, styles, [labels["col_milestone"], labels["col_date"], labels["col_status"]],
-                            rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=avail_width)
+        header = [labels["col_milestone"], labels["col_date"], labels["col_status"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=avail_width)
 
     if source == "invoices":
         invoices = ctx.get("invoices") or []
@@ -624,32 +775,40 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
             return None
         rows = [[i["name"], f"{i['value']:,.2f}", _fmt_date(i["date"]) if i["date"] else "—"] for i in invoices]
         rows.append([labels.get("col_total", "Total"), f"{ctx.get('invoices_total', 0):,.2f}", ""])
-        return _data_table(cfg, styles,
-            [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]],
-            rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=avail_width)
+        header = [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=avail_width)
 
     if source == "submittals":
-        rows = (ctx.get("submittals") or {}).get("rows") or []
-        if not rows:
+        sub_rows = (ctx.get("submittals") or {}).get("rows") or []
+        if not sub_rows:
             return None
-        return _data_table(cfg, styles,
-            [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
-             labels.get("col_discipline", "Discipline"), labels["col_status"]],
-            [[r["title"], r["type"], r["discipline"], r["status"]] for r in rows], avail_width=avail_width)
+        header = [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
+                  labels.get("col_discipline", "Discipline"), labels["col_status"]]
+        rows = [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub_rows]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "delays":
         delays = ctx.get("delays") or []
         if not delays:
             return None
         rows = [[d["title"], str(d["impact_days"]), d["status"].title()] for d in delays]
-        return _data_table(cfg, styles, [labels["col_delay"], labels["col_impact"], labels["col_status"]],
-                            rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=avail_width)
+        header = [labels["col_delay"], labels["col_impact"], labels["col_status"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=avail_width)
 
     if source == "detailed_progress":
-        return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width)
+        return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width, raw=raw, overrides=overrides)
 
     if source == "activity_schedule":
-        return _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=avail_width)
+        return _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=avail_width, raw=raw, overrides=overrides)
 
     if source == "critical_path_delays":
         rows_data = ctx.get("critical_path") or []
@@ -657,14 +816,17 @@ def resolve_table(source: str, cfg: dict, ctx: dict, scope: dict, avail_width: f
             return None
         rows = [[r["name"], _fmt_date(r["planned_finish"]), _fmt_date(r["forecast_finish"]), str(r["delay_days"])]
                 for r in rows_data]
-        return _data_table(cfg, styles,
-            [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]],
-            rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm], avail_width=avail_width)
+        header = [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]]
+        apply_table_overrides("data", header, rows, overrides)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm],
+                            avail_width=avail_width)
 
     return None
 
 
-def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None):
+def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None):
     """Detailed activity grid — v1 scope: only the first zone's grid, only its
     first 8 columns (the legacy `_grid_section` splits wide grids across
     multiple pages/columns; reproducing that needs a 2D repeat, deferred)."""
@@ -684,10 +846,13 @@ def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None):
     labels = cfg["labels"]
     header = [labels.get("col_task", "Task")] + grid["columns"][:8]
     rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
+    apply_table_overrides("data", header, rows, overrides)
+    if raw:
+        return {"kind": "data", "header": header, "rows": rows}
     return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
 
-def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None):
+def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None):
     """Every activity's P6 duration/SPI/schedule-variance columns — computed
     lazily and cached in ctx, the same pattern as the detailed-progress grid
     above, since a real project can carry tens of thousands of activities and
@@ -723,6 +888,9 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None):
          n(r["remaining_duration"]), n(r["schedule_performance_index"], 2), n(r["schedule_variance"])]
         for r in rows_data
     ]
+    apply_table_overrides("data", header, rows, overrides)
+    if raw:
+        return {"kind": "data", "header": header, "rows": rows}
     return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
 
@@ -811,6 +979,92 @@ def expand_pages(cfg, ctx, report) -> list:
                 out.append(PageInstance(page, {"item": item, "items": [item],
                                                "index": pin if pin is not None else i,
                                                "count": len(capped)}, n))
+    return out
+
+
+def _split_table_chunks(table, w, h, *, max_chunks=500) -> list:
+    """Break a Table flowable into successive pieces that each fit height h.
+
+    `Table.split(w, h)` only ever answers "what fits" + "the remainder" for
+    one page — this calls it again on the remainder, and again on ITS
+    remainder, the same way a Platypus Frame pages a flowable across as many
+    frames as it takes to exhaust it. `max_chunks` is a defensive cap, not a
+    real limit — a genuine report table running past 500 pages on its own
+    would mean something else is wrong."""
+    chunks = []
+    remaining = table
+    while remaining is not None and len(chunks) < max_chunks:
+        _, natural_h = remaining.wrap(w, h)
+        if natural_h <= h:
+            chunks.append(remaining)
+            break
+        pieces = remaining.split(w, h)
+        if not pieces:
+            # Can't even fit the header row in this box — nothing more to
+            # split; caller's draw_table_in_box fallback (the "too small"
+            # placeholder) is for exactly this case, not a real table.
+            break
+        chunks.append(pieces[0])
+        remaining = pieces[1] if len(pieces) > 1 else None
+    return chunks
+
+
+def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, page_h_mm: float) -> list:
+    """Splices extra synthetic pages in after any page whose table element
+    has more rows than fit its box — mirrors what a normal Platypus flowing
+    document gets for free from Frame-based pagination, which this canvas
+    renderer doesn't have since it draws each page's elements at fixed
+    positions rather than flowing a story through frames. Without this, an
+    overflowing table either got silently truncated with a "+N more rows"
+    note (draw_table_in_box's fallback — meant for a genuinely tight box,
+    not "there's 20 pages more of this") or, in the live Customize-tab
+    preview, visibly spilled past the page edge.
+
+    Scope: only the FIRST overflowing table element on a page continues —
+    a second overflowing table on the same page still falls back to the old
+    truncation note. Two independently-continuing tables interleaved across
+    the same run of pages would need page-by-page interleaving logic for
+    comparatively rare real-world value; not attempted here."""
+    out = []
+    for inst in instances:
+        table_els = [el for el in (inst.page.get("elements") or []) if el.get("type") == "table"]
+        overflow_el, chunks = None, None
+        for el in table_els:
+            props = el.get("props") or {}
+            source = props.get("source", "")
+            x, y, w, h = el_box(el, page_h_mm)
+            table = resolve_table(
+                source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
+            )
+            if table is None:
+                continue
+            _, natural_h = table.wrap(w, h)
+            if natural_h <= h:
+                continue
+            candidate = _split_table_chunks(table, w, h)
+            if len(candidate) > 1:
+                overflow_el, chunks = el, candidate
+                break
+
+        if overflow_el is None:
+            out.append(inst)
+            continue
+
+        out.append(PageInstance(
+            inst.page, inst.scope, inst.number, table_chunk0={overflow_el["id"]: chunks[0]},
+        ))
+        for chunk in chunks[1:]:
+            out.append(PageInstance(
+                inst.page, inst.scope, inst.number, continues_element=overflow_el, continues_chunk=chunk,
+            ))
+
+    # Splicing in continuation pages breaks the original run of page
+    # numbers expand_pages assigned (one instance per physical page no
+    # longer holds) — renumber the final sequence so it's physically
+    # sequential again before anything (TOC, "page.number" fields, the
+    # running footer) reads `.number`.
+    for i, inst in enumerate(out, start=1):
+        inst.number = i
     return out
 
 

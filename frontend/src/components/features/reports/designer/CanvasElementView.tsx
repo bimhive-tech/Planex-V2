@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
-import type { ChartSvgMap, LayoutElement, TableImageMap, TocEntry } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, TableDataMap, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
@@ -19,20 +19,34 @@ interface Props {
   el: LayoutElement;
   scale: number;
   selected: boolean;
+  /** True unless this element is one of several selected at once — a group
+   * selection shows one shared bounding-box outline with its own handles
+   * (see CanvasPage's GroupSelectionBox) instead of every member drawing
+   * its own resize handles/rotate stem/⋯ menu on top of each other. The
+   * element's own selected-outline still shows either way. */
+  showControls?: boolean;
   /** Master elements are shown behind page content and aren't editable here. */
   ghost?: boolean;
-  onSelect: (id: string) => void;
+  /** `additive` is a shift/ctrl/cmd click — toggle this element's membership
+   * in the current selection instead of replacing it. */
+  onSelect: (id: string, additive: boolean) => void;
   onStartMove: (e: React.PointerEvent, el: LayoutElement) => void;
   onStartResize: (e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) => void;
   onStartRotate?: (e: React.PointerEvent, el: LayoutElement) => void;
   onAction: (action: ElementAction, id: string) => void;
+  /** Commits an inline text edit — see CanvasPage's doc comment. Undefined
+   * for ghost elements (the other tab's background reference isn't
+   * directly editable there). */
+  onElementChange?: (el: LayoutElement) => void;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
   /** Live, real per-chart previews — see useChartSvgs. */
   chartSvgs?: ChartSvgMap;
-  /** Live, real per-table previews — see useTableImages. */
-  tableImages?: TableImageMap;
+  /** Live, real per-table data — see useTableData. */
+  tableData?: TableDataMap;
+  /** False until chartSvgs/tableData's first real response has landed. */
+  previewsReady?: boolean;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
@@ -41,8 +55,8 @@ interface Props {
 }
 
 export function CanvasElementView({
-  el, scale, selected, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction, liveData, pinnedItem,
-  chartSvgs, tableImages, tocEntries, ownPageId,
+  el, scale, selected, showControls = true, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction,
+  onElementChange, liveData, pinnedItem, chartSvgs, tableData, previewsReady, tocEntries, ownPageId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -74,7 +88,8 @@ export function CanvasElementView({
       <div className={`${styles.element} ${ghostClass}`} style={style} aria-hidden="true">
         <ElementPreview
           el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-          chartSvgs={chartSvgs} tableImages={tableImages} tocEntries={tocEntries} ownPageId={ownPageId}
+          chartSvgs={chartSvgs} tableData={tableData} previewsReady={previewsReady}
+          tocEntries={tocEntries} ownPageId={ownPageId}
         />
       </div>
     );
@@ -88,7 +103,19 @@ export function CanvasElementView({
       onPointerDown={(e) => {
         // Left button only — right-click should not start a drag.
         if (e.button !== 0) return;
-        onSelect(el.id);
+        const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+        if (additive) {
+          // Composing a multi-selection — toggle membership only. Starting a
+          // move here too would make a shift-click also drag, which reads
+          // as an accidental nudge rather than a deliberate selection change.
+          onSelect(el.id, true);
+          return;
+        }
+        // Already part of a multi-selection: keep the whole group selected
+        // and drag it as one (grabbing any member moves all of them) — only
+        // a plain click on an element outside the current selection
+        // collapses it down to just that one.
+        if (!selected) onSelect(el.id, false);
         onStartMove(e, el);
       }}
       role="button"
@@ -97,16 +124,17 @@ export function CanvasElementView({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onSelect(el.id);
+          onSelect(el.id, false);
         }
       }}
     >
       <ElementPreview
         el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-        chartSvgs={chartSvgs} tableImages={tableImages} tocEntries={tocEntries} ownPageId={ownPageId}
+        chartSvgs={chartSvgs} tableData={tableData} previewsReady={previewsReady}
+        tocEntries={tocEntries} ownPageId={ownPageId} onElementChange={onElementChange}
       />
 
-      {selected && (
+      {selected && showControls && (
         <>
           {RESIZE_HANDLES.map((h) => (
             <span

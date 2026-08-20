@@ -29,11 +29,25 @@ interface Options {
   scale: number;
   design: PageDesign;
   /** This page's own elements — snap targets for alignment guides (the
-   * dragged element itself is excluded automatically). */
+   * dragged element(s) are excluded automatically). */
   elements: LayoutElement[];
   /** Master elements (header/footer ghosts) also act as snap targets. */
   masterElements?: LayoutElement[];
-  onCommit: (element: LayoutElement) => void;
+  /** Commits one or more moved/resized elements at once — a multi-select
+   * drag moves/resizes its whole group in a single gesture, so it must land
+   * as a single undo step, not one per element. */
+  onCommit: (elements: LayoutElement[]) => void;
+}
+
+/** Axis-aligned bounding box of a set of elements — the anchor a group
+ * resize scales around. Ignores individual rotations (see `resizeGroupBox`'s
+ * docstring) — ok for a first pass at group resize. */
+function groupBoundingBox(els: LayoutElement[]): { x: number; y: number; w: number; h: number } {
+  const x0 = Math.min(...els.map((e) => e.x));
+  const y0 = Math.min(...els.map((e) => e.y));
+  const x1 = Math.max(...els.map((e) => e.x + e.w));
+  const y1 = Math.max(...els.map((e) => e.y + e.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 interface Gesture {
@@ -41,9 +55,15 @@ interface Gesture {
   handle?: ResizeHandle;
   startX: number;
   startY: number;
-  origin: LayoutElement;
+  /** One element for a single-element gesture, several for a group drag —
+   * their state at gesture start, so every pointermove recomputes from the
+   * same baseline rather than compounding per-event drift. */
+  origin: LayoutElement[];
   /** Rotate only: the element's screen-space center, fixed for the gesture. */
   centerScreen?: { x: number; y: number };
+  /** Resize only, group gestures: the selection's bounding box at gesture
+   * start — each member scales in proportion to where it sits inside this. */
+  groupBox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface AlignGuides {
@@ -104,20 +124,20 @@ function computeAlignSnap(
 }
 
 export function useCanvasInteraction({ scale, design, elements, masterElements = [], onCommit }: Options) {
-  const [draft, setDraft] = useState<LayoutElement | null>(null);
+  const [draft, setDraft] = useState<LayoutElement[] | null>(null);
   const [guides, setGuides] = useState<AlignGuides | null>(null);
   // Mirrored in a ref so pointer-up can read the final value directly. Calling
   // the parent's onCommit from inside a setState updater would make that
   // updater impure — React 18 StrictMode double-invokes those, which is
   // exactly what doubled every streamed character in the AI chat.
-  const draftRef = useRef<LayoutElement | null>(null);
+  const draftRef = useRef<LayoutElement[] | null>(null);
   const gesture = useRef<Gesture | null>(null);
   // Kept in a ref so the window listeners (bound once per gesture) always see
   // current values without needing to rebind.
   const latest = useRef({ scale, design, elements, masterElements, onCommit });
   latest.current = { scale, design, elements, masterElements, onCommit };
 
-  const begin = useCallback((event: React.PointerEvent, element: LayoutElement,
+  const begin = useCallback((event: React.PointerEvent, els: LayoutElement[],
                              mode: "move" | "resize" | "rotate", handle?: ResizeHandle) => {
     event.preventDefault();
     event.stopPropagation();
@@ -131,9 +151,10 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
       mode, handle, centerScreen,
       startX: event.clientX,
       startY: event.clientY,
-      origin: { ...element },
+      origin: els.map((e) => ({ ...e })),
+      groupBox: mode === "resize" && els.length > 1 ? groupBoundingBox(els) : undefined,
     };
-    draftRef.current = { ...element };
+    draftRef.current = els.map((e) => ({ ...e }));
     setDraft(draftRef.current);
   }, []);
 
@@ -142,43 +163,15 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
       return fine ? roundMm(value) : Math.round(value / SNAP_MM) * SNAP_MM;
     }
 
-    function apply(next: LayoutElement) {
+    function apply(next: LayoutElement[]) {
       draftRef.current = next;
       setDraft(next);
     }
 
-    function onMove(event: PointerEvent) {
-      const g = gesture.current;
-      if (!g) return;
-      const { scale: s, design: d, elements: els, masterElements: masters } = latest.current;
-      const fine = event.altKey;
-      const o = g.origin;
-
-      if (g.mode === "rotate") {
-        const c = g.centerScreen!;
-        const angle = (Math.atan2(event.clientY - c.y, event.clientX - c.x) * 180) / Math.PI + 90;
-        const normalized = ((angle % 360) + 360) % 360;
-        const rotation = fine ? Math.round(normalized) : Math.round(normalized / ROTATE_SNAP_DEG) * ROTATE_SNAP_DEG;
-        apply({ ...o, rotation: rotation % 360 });
-        setGuides(null);
-        return;
-      }
-
-      const dx = (event.clientX - g.startX) / s;
-      const dy = (event.clientY - g.startY) / s;
-
-      if (g.mode === "move") {
-        const others = [...els, ...masters].filter((e) => e.id !== o.id);
-        const rawX = snap(o.x + dx, fine);
-        const rawY = snap(o.y + dy, fine);
-        const { x, y, guides: g2 } = computeAlignSnap(rawX, rawY, o.w, o.h, others, d, !fine);
-        setGuides(g2.x.length || g2.y.length ? g2 : null);
-        apply(clampToPage({ ...o, x: roundMm(x), y: roundMm(y) }, d));
-        return;
-      }
-
-      setGuides(null);
-      const h = g.handle ?? "se";
+    /** Single-element resize, rotation-aware — exactly the original
+     * per-element math, unchanged. Only path used when exactly one element
+     * is being resized. */
+    function resizeOne(o: LayoutElement, handle: ResizeHandle, dx: number, dy: number, fine: boolean): LayoutElement {
       // The resize handles are drawn on the element's own box, which is
       // visually rotated (CSS transform, around its center) — a raw
       // screen-space pointer delta doesn't line up with the element's own
@@ -195,10 +188,10 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
 
       let w = o.w;
       let hgt = o.h;
-      if (h.includes("e")) w = Math.max(MIN_MM, snap(o.w + ldx, fine));
-      else if (h.includes("w")) w = Math.max(MIN_MM, snap(o.w - ldx, fine));
-      if (h.includes("s")) hgt = Math.max(MIN_MM, snap(o.h + ldy, fine));
-      else if (h.includes("n")) hgt = Math.max(MIN_MM, snap(o.h - ldy, fine));
+      if (handle.includes("e")) w = Math.max(MIN_MM, snap(o.w + ldx, fine));
+      else if (handle.includes("w")) w = Math.max(MIN_MM, snap(o.w - ldx, fine));
+      if (handle.includes("s")) hgt = Math.max(MIN_MM, snap(o.h + ldy, fine));
+      else if (handle.includes("n")) hgt = Math.max(MIN_MM, snap(o.h - ldy, fine));
 
       // CSS rotates the box around its own center (transform-origin default),
       // and that center moves whenever w/h changes — so just keeping the
@@ -210,8 +203,8 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
       // anchor lands back on that exact screen point after rotation. At
       // rotation 0 this reduces to exactly the old "opposite edge stays put"
       // behavior — verified algebraically, not just visually.
-      const fx = h.includes("e") ? 0 : h.includes("w") ? 1 : 0.5;
-      const fy = h.includes("s") ? 0 : h.includes("n") ? 1 : 0.5;
+      const fx = handle.includes("e") ? 0 : handle.includes("w") ? 1 : 0.5;
+      const fy = handle.includes("s") ? 0 : handle.includes("n") ? 1 : 0.5;
       const oldCenterX = o.x + o.w / 2;
       const oldCenterY = o.y + o.h / 2;
       const oldOffX = (fx - 0.5) * o.w;
@@ -222,16 +215,101 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
       const newOffY = (fy - 0.5) * hgt;
       const newCenterX = anchorX - (newOffX * cosR - newOffY * sinR);
       const newCenterY = anchorY - (newOffX * sinR + newOffY * cosR);
-      const x = newCenterX - w / 2;
-      const y = newCenterY - hgt / 2;
 
-      apply(clampToPage({
+      return {
         ...o,
-        x: roundMm(Math.max(0, x)),
-        y: roundMm(Math.max(0, y)),
+        x: roundMm(Math.max(0, newCenterX - w / 2)),
+        y: roundMm(Math.max(0, newCenterY - hgt / 2)),
         w: roundMm(w),
         h: roundMm(hgt),
-      }, d));
+      };
+    }
+
+    /** Group resize: scale the selection's bounding box by the drag (plain,
+     * unrotated box math — the group box itself never carries a rotation of
+     * its own even when members do), then re-place each member at the same
+     * relative position/size it held inside the original box. Individual
+     * rotations are left untouched. */
+    function resizeGroup(gb: { x: number; y: number; w: number; h: number }, o: LayoutElement[],
+                         handle: ResizeHandle, dx: number, dy: number, fine: boolean): LayoutElement[] {
+      let w = gb.w;
+      let h = gb.h;
+      if (handle.includes("e")) w = Math.max(MIN_MM, snap(gb.w + dx, fine));
+      else if (handle.includes("w")) w = Math.max(MIN_MM, snap(gb.w - dx, fine));
+      if (handle.includes("s")) h = Math.max(MIN_MM, snap(gb.h + dy, fine));
+      else if (handle.includes("n")) h = Math.max(MIN_MM, snap(gb.h - dy, fine));
+      const x = handle.includes("w") ? gb.x + gb.w - w : gb.x;
+      const y = handle.includes("n") ? gb.y + gb.h - h : gb.y;
+
+      return o.map((el) => {
+        const relX = gb.w > 0 ? (el.x - gb.x) / gb.w : 0;
+        const relY = gb.h > 0 ? (el.y - gb.y) / gb.h : 0;
+        const relW = gb.w > 0 ? el.w / gb.w : 1;
+        const relH = gb.h > 0 ? el.h / gb.h : 1;
+        return {
+          ...el,
+          x: roundMm(x + relX * w),
+          y: roundMm(y + relY * h),
+          w: roundMm(Math.max(MIN_MM, relW * w)),
+          h: roundMm(Math.max(MIN_MM, relH * h)),
+        };
+      });
+    }
+
+    function onMove(event: PointerEvent) {
+      const g = gesture.current;
+      if (!g) return;
+      const { scale: s, design: d, elements: els, masterElements: masters } = latest.current;
+      const fine = event.altKey;
+      const o = g.origin;
+
+      if (g.mode === "rotate") {
+        const c = g.centerScreen!;
+        const angle = (Math.atan2(event.clientY - c.y, event.clientX - c.x) * 180) / Math.PI + 90;
+        const normalized = ((angle % 360) + 360) % 360;
+        const rotation = fine ? Math.round(normalized) : Math.round(normalized / ROTATE_SNAP_DEG) * ROTATE_SNAP_DEG;
+        apply([{ ...o[0], rotation: rotation % 360 }]);
+        setGuides(null);
+        return;
+      }
+
+      const dx = (event.clientX - g.startX) / s;
+      const dy = (event.clientY - g.startY) / s;
+
+      if (g.mode === "move") {
+        if (o.length === 1) {
+          const primary = o[0];
+          const others = [...els, ...masters].filter((e) => e.id !== primary.id);
+          const rawX = snap(primary.x + dx, fine);
+          const rawY = snap(primary.y + dy, fine);
+          const { x, y, guides: g2 } = computeAlignSnap(rawX, rawY, primary.w, primary.h, others, d, !fine);
+          setGuides(g2.x.length || g2.y.length ? g2 : null);
+          apply([clampToPage({ ...primary, x: roundMm(x), y: roundMm(y) }, d)]);
+          return;
+        }
+        // Group move: no alignment snapping (which target would it snap to
+        // with several boxes moving at once?) — just a plain grid-snapped
+        // translation, applied identically to every member so their
+        // relative layout never drifts.
+        setGuides(null);
+        const primary = o[0];
+        const snappedX = snap(primary.x + dx, fine);
+        const snappedY = snap(primary.y + dy, fine);
+        const appliedDx = snappedX - primary.x;
+        const appliedDy = snappedY - primary.y;
+        apply(o.map((el) => clampToPage(
+          { ...el, x: roundMm(el.x + appliedDx), y: roundMm(el.y + appliedDy) }, d,
+        )));
+        return;
+      }
+
+      setGuides(null);
+      const h = g.handle ?? "se";
+      if (o.length === 1) {
+        apply([clampToPage(resizeOne(o[0], h, dx, dy, fine), d)]);
+        return;
+      }
+      apply(resizeGroup(g.groupBox!, o, h, dx, dy, fine).map((el) => clampToPage(el, d)));
     }
 
     function onUp() {
@@ -254,12 +332,12 @@ export function useCanvasInteraction({ scale, design, elements, masterElements =
     };
   }, []);
 
-  const startMove = useCallback((e: React.PointerEvent, el: LayoutElement) => begin(e, el, "move"), [begin]);
+  const startMove = useCallback((e: React.PointerEvent, els: LayoutElement[]) => begin(e, els, "move"), [begin]);
   const startResize = useCallback(
-    (e: React.PointerEvent, el: LayoutElement, handle: ResizeHandle) => begin(e, el, "resize", handle),
+    (e: React.PointerEvent, els: LayoutElement[], handle: ResizeHandle) => begin(e, els, "resize", handle),
     [begin],
   );
-  const startRotate = useCallback((e: React.PointerEvent, el: LayoutElement) => begin(e, el, "rotate"), [begin]);
+  const startRotate = useCallback((e: React.PointerEvent, el: LayoutElement) => begin(e, [el], "rotate"), [begin]);
 
   return { draft, guides, startMove, startResize, startRotate };
 }

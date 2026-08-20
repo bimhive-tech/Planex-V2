@@ -32,6 +32,7 @@
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 

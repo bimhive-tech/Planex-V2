@@ -152,6 +152,59 @@ def _draw_contained_image(canvas, reader, x, y, width, height):
         pass
 
 
+def cover_fit_geometry(x, y, width, height, iw, ih, focal_x=50.0, focal_y=50.0):
+    """Pure geometry for a "cover" crop — scale an `iw`x`ih` image up just
+    enough to fill a `width`x`height` box in both dimensions, then position
+    it so the (`focal_x`, `focal_y`) point (0-100 each axis, CSS
+    `object-position` convention: 0% keeps that edge, 100% the opposite,
+    50%/50% centers) lands at the matching point of the box. Returns
+    `(dw, dh, ix, iy)` — the drawn image's size and its bottom-left corner,
+    in the same coordinate space as `x`/`y` (PDF: origin bottom-left, y up).
+
+    Split out from `draw_fitted_image` purely so this math (the part worth
+    getting exactly right) can be unit tested directly, without needing a
+    real image reader or canvas."""
+    scale = max(width / iw, height / ih)
+    dw, dh = iw * scale, ih * scale
+    # X needs no flip (0% is "left" in both PDF and CSS space), but Y does:
+    # CSS's 0% ("keep the top visible") means the image's *top* edge should
+    # sit at the box's top edge, which in PDF's y-up space is y + height,
+    # not y.
+    ix = x + (width - dw) * (focal_x / 100)
+    iy = y + (height - dh) * (1 - focal_y / 100)
+    return dw, dh, ix, iy
+
+
+def draw_fitted_image(canvas, reader, x, y, width, height, *, fit="contain", focal_x=50.0, focal_y=50.0):
+    """Draw an image into a box, either letterboxed to fit entirely inside
+    (fit="contain" — same behavior as `_draw_contained_image`) or scaled up
+    to fill the box completely with the excess clipped away (fit="cover",
+    positioned by `focal_x`/`focal_y` — see `cover_fit_geometry`).
+
+    A canvas "image" element's `fit` prop always reached here as `props`, but
+    every draw call before this only ever passed it to `_draw_contained_image`
+    — "cover" was a UI toggle with nothing behind it. This is what makes it
+    real, for both this element type and the matching frontend CSS
+    (ElementPreview's imageFitStyle uses the identical object-position math)."""
+    try:
+        iw, ih = reader.getSize()
+        if fit != "cover":
+            scale = min(width / iw, height / ih)
+            dw, dh = iw * scale, ih * scale
+            canvas.drawImage(reader, x + (width - dw) / 2, y + (height - dh) / 2,
+                             width=dw, height=dh, preserveAspectRatio=True, mask="auto")
+            return
+        dw, dh, ix, iy = cover_fit_geometry(x, y, width, height, iw, ih, focal_x, focal_y)
+        canvas.saveState()
+        clip = canvas.beginPath()
+        clip.rect(x, y, width, height)
+        canvas.clipPath(clip, stroke=0)
+        canvas.drawImage(reader, ix, iy, width=dw, height=dh, mask="auto")
+        canvas.restoreState()
+    except Exception:
+        pass
+
+
 def _right_lines(canvas, text, rx, y, font, size, color, leading, max_lines=3):
     """Draw right-aligned, word-wrapped Arabic text (for the prepared-by org)."""
     from reportlab.pdfbase.pdfmetrics import stringWidth
