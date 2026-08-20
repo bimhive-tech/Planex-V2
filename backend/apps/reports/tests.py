@@ -548,6 +548,32 @@ class ResolveTableTests(SimpleTestCase):
             table = resolve_table(source, cfg, ctx, {"item": None})
             self.assertIsNotNone(table, source)
 
+    def test_scope_zone_id_narrows_zone_progress_to_one_zone(self):
+        # Phase 4's scope-picker — bind this one table element to a single
+        # zone instead of the whole project (the الموقف التنفيذي use case:
+        # a per-zone table/chart pair on an otherwise project-wide page).
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [
+            {"id": "z1", "name": "Zone A", "progress": 90.0},
+            {"id": "z2", "name": "Zone B", "progress": 40.0},
+        ]}
+        grid = resolve_table("zone_progress", cfg, ctx, {"item": None}, raw=True, scope_zone_id="z2")
+        self.assertEqual(grid["rows"], [["Zone B", "40.0%"]])
+
+    def test_scope_zone_id_matching_nothing_returns_none(self):
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [{"id": "z1", "name": "Zone A", "progress": 90.0}]}
+        self.assertIsNone(resolve_table("zone_progress", cfg, ctx, {"item": None}, scope_zone_id="not-a-real-id"))
+
+    def test_scope_zone_id_narrows_hierarchy_progress_too(self):
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "hierarchy": [
+            {"id": "z1", "name": "Zone A", "actual": 90.0, "previous": None, "planned": None, "children": []},
+            {"id": "z2", "name": "Zone B", "actual": 40.0, "previous": None, "planned": None, "children": []},
+        ]}
+        grid = resolve_table("hierarchy_progress", cfg, ctx, {"item": None}, raw=True, scope_zone_id="z1")
+        self.assertEqual([r["name"] for r in grid["rows"]], ["Zone A"])
+
     def test_missing_data_returns_none_not_a_crash(self):
         cfg = default_config()
         ctx = _sample_ctx()  # no hierarchy/discipline/invoices/submittals/delays
@@ -645,6 +671,24 @@ class ResolveChartTests(SimpleTestCase):
 
     def test_item_scoped_source_returns_none_until_phase_2(self):
         self.assertIsNone(resolve_chart("item.units", "bar", default_config(), _full_ctx(), {"item": None}, 100, 70))
+
+    def test_scope_zone_id_matching_nothing_returns_none(self):
+        # Same scope-picker as ResolveTableTests' — filters ctx["zones"] down
+        # to the matching id before handing off to the chart builder, so a
+        # non-matching id leaves nothing to chart.
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [{"id": "z1", "name": "Zone A", "progress": 90.0, "planned": 100.0}]}
+        self.assertIsNone(resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 120, 70,
+                                        scope_zone_id="not-a-real-id"))
+
+    def test_scope_zone_id_matching_a_real_zone_still_draws(self):
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [
+            {"id": "z1", "name": "Zone A", "progress": 90.0, "planned": 100.0},
+            {"id": "z2", "name": "Zone B", "progress": 40.0, "planned": 100.0},
+        ]}
+        drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 120, 70, scope_zone_id="z1")
+        self.assertIsNotNone(drawing)
 
     def test_spi_gauge_returns_none_without_a_value(self):
         from .pdf_charts import speedometer_chart

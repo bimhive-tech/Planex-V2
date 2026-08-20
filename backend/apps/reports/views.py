@@ -251,7 +251,10 @@ class ReportViewSet(viewsets.ModelViewSet):
                 if w < min_w or h < min_h:
                     charts[el["id"]] = {"status": "too_small"}
                     continue
-                drawing = resolve_chart(props.get("source", ""), props.get("chart_type"), cfg, ctx, inst.scope, w, h)
+                drawing = resolve_chart(
+                    props.get("source", ""), props.get("chart_type"), cfg, ctx, inst.scope, w, h,
+                    scope_zone_id=props.get("scope_zone_id"),
+                )
                 if drawing is None:
                     charts[el["id"]] = {"status": "no_data"}
                     continue
@@ -320,7 +323,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 w = float(el.get("w", 0)) * _mm
                 grid = resolve_table(
                     source, cfg, ctx, inst.scope, avail_width=w, raw=True, overrides=props.get("overrides"),
-                    style=props,
+                    style=props, scope_zone_id=props.get("scope_zone_id"),
                 )
                 style = effective_style(props)
                 if grid is None:

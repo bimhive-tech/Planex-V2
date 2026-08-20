@@ -463,6 +463,7 @@ export function LayoutEditor({
         reportId={reportId}
         selectedCount={selectedIds.length}
         onDeleteSelection={deleteSelection}
+        liveData={liveData}
       />
     </div>
   );

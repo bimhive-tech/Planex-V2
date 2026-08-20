@@ -515,6 +515,7 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     source = props.get("source", "")
     table = resolve_table(
         source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
+        scope_zone_id=props.get("scope_zone_id"),
     )
     if table is None:
         _draw_placeholder(c, x, y, w, h, f"No data: {source}")
@@ -539,7 +540,9 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx):
     if w < min_w or h < min_h:
         _draw_placeholder(c, x, y, w, h, f"Chart too small: {source}")
         return
-    drawing = resolve_chart(source, props.get("chart_type"), cfg, ctx, inst.scope, w, h)
+    drawing = resolve_chart(
+        source, props.get("chart_type"), cfg, ctx, inst.scope, w, h, scope_zone_id=props.get("scope_zone_id"),
+    )
     if drawing is None:
         _draw_placeholder(c, x, y, w, h, f"No data: {source}")
         return
@@ -613,7 +616,7 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 
 def resolve_table(
     source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None, raw: bool = False,
-    overrides: dict | None = None, style: dict | None = None,
+    overrides: dict | None = None, style: dict | None = None, scope_zone_id: str | None = None,
 ):
     """Build a ready-to-draw Table flowable for one of reportElements.ts's
     TABLE_SOURCES (plus the item-scoped `item.children`, available on a
@@ -646,7 +649,13 @@ def resolve_table(
     real-table-builder branches draw with it directly; the raw JSON
     branches don't need it themselves (views.table_data derives the
     *effective* style the same way, from this same helper, and ships it
-    alongside the raw rows for the canvas to render with)."""
+    alongside the raw rows for the canvas to render with).
+
+    `scope_zone_id` (Phase 4's scope-picker) narrows `ctx["zones"]`/
+    `ctx["hierarchy"]` to just that one zone — same filter-the-already-
+    computed-context approach as resolve_chart's identical parameter, so
+    "bind this table to Zone A" and "bind this table's matching chart to
+    Zone A" stay trivially consistent (same zone list, same id match)."""
     cfg = table_style_override(cfg, style)
     styles = _styles(cfg)
     labels = cfg["labels"]
@@ -719,6 +728,8 @@ def resolve_table(
 
     if source == "zone_progress":
         zones = ctx.get("zones") or []
+        if scope_zone_id:
+            zones = [z for z in zones if z.get("id") == scope_zone_id]
         if not zones:
             return None
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
@@ -730,6 +741,8 @@ def resolve_table(
 
     if source == "hierarchy_progress":
         hierarchy = ctx.get("hierarchy") or []
+        if scope_zone_id:
+            hierarchy = [z for z in hierarchy if z.get("id") == scope_zone_id]
         if not hierarchy:
             return None
         header = [labels["col_zone"], labels["col_actual"], labels["col_previous"], labels["col_planned"]]
@@ -912,11 +925,19 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=Fal
 
 # ── Chart binding ────────────────────────────────────────────────────────────
 
-def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float):
+def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float,
+                  scope_zone_id: str | None = None):
     """Build a ready-to-draw Drawing for one of reportElements.ts's
     CHART_SOURCES (plus the item-scoped `item.units`/`item.duration`,
     available on a repeating page), at the given box size (points) — or None
-    with nothing to show."""
+    with nothing to show.
+
+    `scope_zone_id` (Phase 4's scope-picker — "bind a table/chart's data to
+    a specific zone/stage") narrows `ctx["zones"]` to just that one zone
+    before handing off to the chart builder, the same "filter the already-
+    computed context, don't re-query" approach `resolve_table` uses below.
+    Only `zone_progress` reads it today — the other chart sources aren't
+    zone-shaped data to begin with."""
     labels = cfg["labels"]
 
     if source == "item.units":
@@ -935,7 +956,10 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     if source == "spi":
         return speedometer_chart(ctx.get("overall"), w, cfg, title=labels.get("spi", "SPI"), height=h)
     if source == "zone_progress":
-        return planned_actual_chart(cfg, ctx, w, labels, height=h)
+        chart_ctx = ctx
+        if scope_zone_id:
+            chart_ctx = {**ctx, "zones": [z for z in (ctx.get("zones") or []) if z.get("id") == scope_zone_id]}
+        return planned_actual_chart(cfg, chart_ctx, w, labels, height=h)
     if source == "area_progress":
         return area_progress_chart(cfg, ctx, w, labels, height=h)
     if source == "scurve":
@@ -1056,6 +1080,7 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
             x, y, w, h = el_box(el, page_h_mm)
             table = resolve_table(
                 source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
+                scope_zone_id=props.get("scope_zone_id"),
             )
             if table is None:
                 continue

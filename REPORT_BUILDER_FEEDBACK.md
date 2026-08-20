@@ -213,8 +213,20 @@ not preview/rendering mismatches, genuine problems in the report's own data/logi
   "Divider heading" item to the palette (Setup category) pre-styled that way,
   plus an end-to-end test confirming the title shows on its own page and
   nowhere else across a multi-page render.
-- **Scope-resolution code hardened first**, then: bind a table's data to a specific
-  zone/stage, same pattern as the report's Scope tab
+- ~~**Scope-resolution code hardened first**, then: bind a table's data to a specific
+  zone/stage, same pattern as the report's Scope tab~~ **[built]** — a new
+  `scope_zone_id` prop on table/chart elements filters the already-computed,
+  already-hardened `ctx["zones"]`/`ctx["hierarchy"]` down to one matching
+  zone before either builds its rows/drawing (`resolve_table`/`resolve_chart`
+  in pdf_canvas.py) — no new DB queries, no second scope-computation path to
+  keep in sync with the report-level Scope tab's own `_scope_context`. A
+  "Scope to one zone" dropdown in the Properties panel (table *and* chart
+  elements, Customize tab only) lists the report's real zones by name.
+  Verified live: picking "Z(A)" narrowed a planned/actual bar chart from all
+  15 zones down to exactly one bar group, immediately, in the real preview
+  — plus 5 backend tests covering both table sources and both chart
+  outcomes (matched vs. non-matching id). This is exactly what الموقف
+  التنفيذي (Phase 6) needs a table/chart pair scoped to one zone for.
 - Paste a table from Excel + build/edit a fully custom table (add/remove rows,
   columns, cells) — biggest, most novel item in this phase; needs its data model
   decided before any UI is built on top of it

@@ -11,7 +11,7 @@ import {
   ITEM_TABLE_SOURCES, TABLE_SOURCES,
 } from "@/lib/reportElements";
 import type { LayoutElement } from "@/lib/reportLayout";
-import type { ReportImage } from "@/types/report";
+import type { ReportData, ReportImage } from "@/types/report";
 import styles from "./designer.module.css";
 
 type PropField =
@@ -167,10 +167,15 @@ interface Props {
    * `selectedCount > 1` — a single selection already has Delete on the
    * canvas's own ⋯ menu and the Delete key. */
   onDeleteSelection?: () => void;
+  /** Present only in the report-level "Customize" tab — the real zone list
+   * for a table/chart element's scope-picker (bind this one element to a
+   * specific zone instead of the whole project — see props.scope_zone_id,
+   * read by apps/reports/pdf_canvas.py's resolve_table/resolve_chart). */
+  liveData?: ReportData | null;
 }
 
 export function ElementInspector({
-  el, onChange, repeating = false, reportId, selectedCount = 0, onDeleteSelection,
+  el, onChange, repeating = false, reportId, selectedCount = 0, onDeleteSelection, liveData,
 }: Props) {
   // Hooks must run every render regardless of `el`, so these sit above the
   // early returns below.
@@ -304,6 +309,28 @@ export function ElementInspector({
               project-agnostic template.
             </p>
           )}
+        </div>
+      )}
+
+      {(el.type === "table" || el.type === "chart") && liveData && (
+        <div className={styles.uploadBlock}>
+          <label className={styles.propField}>
+            <span>Scope to one zone</span>
+            <select
+              value={String(el.props.scope_zone_id ?? "")}
+              onChange={(e) => setProp("scope_zone_id", e.target.value || undefined)}
+            >
+              <option value="">Whole project (default)</option>
+              {liveData.zones.filter((z) => z.id).map((z) => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
+          </label>
+          <p className={styles.panelHint}>
+            Binds this one element's data to a single zone instead of the whole project — e.g. so a "الموقف
+            التنفيذي" table/chart pair can show just one zone&apos;s own numbers. Only affects zone-shaped
+            sources (Progress by zone, Zone / area breakdown); other sources ignore it.
+          </p>
         </div>
       )}
 
