@@ -144,6 +144,19 @@ export function ReportConfigurator({
     onChange((prev) => prev.map((p) => (p.id === id ? { ...p, skip_master: !p.skip_master } : p)));
   }
 
+  /** Cycles a page's orientation override: inherit the template default →
+   * pinned to the opposite orientation → back to inherit. A simple 2-state
+   * toggle (rather than a 3-way portrait/landscape/inherit picker) covers
+   * the actual use case — "this one page needs to be the other way round" —
+   * without an extra control just to pin a page to what it already inherits. */
+  function toggleLandscape(id: string) {
+    onChange((prev) => prev.map((p) => {
+      if (p.id !== id) return p;
+      if (p.orientation) { const next = { ...p }; delete next.orientation; return next; }
+      return { ...p, orientation: design.orientation === "landscape" ? "portrait" : "landscape" };
+    }));
+  }
+
   const pageList = (
     <section className={styles.setupPanel} aria-label="Report pages">
       {onMasterElementsChange && (
@@ -240,6 +253,19 @@ export function ReportConfigurator({
                 </button>
               )}
               <button
+                type="button" onClick={() => toggleLandscape(page.id)}
+                aria-label="Override this page's orientation"
+                title={
+                  page.orientation
+                    ? `This page is pinned to ${page.orientation}, overriding the template default — click to clear`
+                    : `Make this one page ${design.orientation === "landscape" ? "portrait" : "landscape"}, `
+                      + "independent of the rest of the report"
+                }
+                className={page.orientation ? styles.repeatActive : undefined}
+              >
+                <Icon name="landscape" size={12} />
+              </button>
+              <button
                 type="button" onClick={() => duplicatePage(page.id)}
                 aria-label="Duplicate page" title="Duplicate this page"
               >
@@ -299,6 +325,15 @@ export function ReportConfigurator({
 
   const pinnedItem = liveData ? resolvePinnedItem(active, liveData) : null;
   const editingHeader = editMode === "header" && Boolean(onMasterElementsChange);
+  // This page's own orientation override (see pdf_canvas._page_size_mm),
+  // layered onto the template's design purely for rendering/positioning
+  // math — the header/footer surface always uses the template default
+  // (there's no "page" to override there), and this never touches the real
+  // page_design object the Setup tab edits, just a derived copy for canvas
+  // geometry.
+  const effectiveDesign = !editingHeader && active.orientation && active.orientation !== design.orientation
+    ? { ...design, orientation: active.orientation }
+    : design;
 
   return (
     <LayoutEditor
@@ -307,7 +342,7 @@ export function ReportConfigurator({
       // entirely, so it should get its own fresh undo history rather than
       // inheriting the page's.
       key={`${active.id}-${editMode}`}
-      design={design}
+      design={effectiveDesign}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
       onElementsChange={editingHeader ? onMasterElementsChange! : setElements}
       masterElements={editingHeader || active.skip_master ? [] : (masterElements ?? design.master_elements)}

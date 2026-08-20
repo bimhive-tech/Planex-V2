@@ -133,6 +133,12 @@ export interface LayoutPage {
    * this page — for a bespoke page like a cover that shouldn't show the
    * running header. */
   skip_master?: boolean;
+  /** Overrides the template's page_design.orientation for this one page —
+   * e.g. an executive-dashboard page that wants to be landscape while the
+   * rest of the report stays portrait (see pdf_canvas._page_size_mm, which
+   * ReportLab supports natively via a per-page setPageSize). Undefined
+   * inherits the template default. */
+  orientation?: "portrait" | "landscape";
 }
 
 export interface PageDesign {

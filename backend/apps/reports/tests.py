@@ -355,6 +355,31 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertNotIn("Executive Summary", doc[0].get_text())  # not on the Cover page
         self.assertIn("Executive Summary", doc[1].get_text())     # only its own page
 
+    def test_page_orientation_override_renders_that_one_page_landscape(self):
+        """A page's own `orientation` (Phase 4's per-page landscape override)
+        must produce a physically different, wider page in the real PDF —
+        not just a config flag nothing reads. Mirrors how the legacy
+        renderer's one hardcoded dashboard page already does this per-page
+        setPageSize; this makes it a per-page *choice*, not a fixed one."""
+        import fitz
+
+        pages = [
+            {"id": "p1", "name": "Portrait Page", "elements": []},
+            {"id": "p2", "name": "Landscape Page", "orientation": "landscape", "elements": []},
+        ]
+        template = self._template(pages)  # portrait A4 default
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertEqual(doc.page_count, 2)
+        p1, p2 = doc[0].rect, doc[1].rect
+        self.assertLess(p1.width, p1.height)   # portrait: taller than wide
+        self.assertGreater(p2.width, p2.height)  # landscape: wider than tall
+        # Same physical page, just rotated — not a different paper size.
+        self.assertAlmostEqual(p1.width, p2.height, delta=1)
+        self.assertAlmostEqual(p1.height, p2.width, delta=1)
+
 
 class CoverFitGeometryTests(SimpleTestCase):
     """The "image" element's Fit=Cover crop math (see draw_fitted_image) —

@@ -34,6 +34,7 @@ export type IconName =
   | "pageBreak"
   | "spacer"
   | "divider"
+  | "landscape"
   | "undo"
   | "redo"
   | "copy"
@@ -235,6 +236,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M4 14h16M6 21h12" />
     </>
   ),
+  // A page wider than it is tall — the per-page landscape-override toggle.
+  landscape: <rect x="3" y="6" width="18" height="12" rx="2" />,
   spacer: (
     <>
       <path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />

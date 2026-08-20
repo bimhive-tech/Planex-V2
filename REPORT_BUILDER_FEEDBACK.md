@@ -222,8 +222,26 @@ not preview/rendering mismatches, genuine problems in the report's own data/logi
   within the text, not just formatted paragraphs — a different problem from the
   custom-table work above, since this is content mixed into flowing text rather than
   a standalone box on the page
-- Logos: confirm the real cap — may already support more than 3 via the data model
-- Per-page landscape override (today orientation is one setting for the whole template)
+- ~~Logos: confirm the real cap — may already support more than 3 via the data
+  model~~ **Confirmed** — no cap anywhere in the stack. `services.py`'s
+  `proj_many()` returns every logo-type `ProjectImage` unsliced, and a logo
+  element's `slot` is a free number field, not restricted to 0-2; the
+  palette's "Additional logo" hint already says "any number," and that was
+  already true. Nothing to build.
+- ~~Per-page landscape override (today orientation is one setting for the whole
+  template)~~ **[built]** — a page's own `orientation` now overrides the
+  template default (`pdf_canvas._page_size_mm` takes the page, not just the
+  design; ReportLab supports a genuinely variable page size across one
+  Canvas via `setPageSize` before each page — the same mechanism the legacy
+  renderer's one hardcoded-landscape dashboard page already relied on, just
+  made into a per-page *choice* instead of a fixed special case). A new
+  toggle button in the Pages panel (landscape-page icon) flips a page
+  between "inherit the template default" and "pinned to the opposite
+  orientation." Verified live: toggling swapped the canvas's rendered page
+  from 462×653px to 653×462px exactly, and its page-strip thumbnail
+  followed — plus an end-to-end PDF test confirming the two pages come out
+  as genuinely different physical shapes (portrait taller, landscape wider,
+  same paper swapped) not just a config flag nothing reads.
 - Upload a PDF → pick which pages to pull in as images/attachments
 - 4 TOCs (Contents / Tables / Charts / Images), each a clickable link to the right page
 

@@ -41,12 +41,15 @@ interface Props {
 }
 
 export function PageStrip({ pages, design, activeId, onSelect, onDuplicate, onDelete, onAdd }: Props) {
-  const { w, h } = pageDimensions(design);
-  const thumbH = (h / w) * THUMB_W;
-
   return (
     <div className={styles.pageStrip} aria-label="Pages">
-      {pages.map((page, i) => (
+      {pages.map((page, i) => {
+        // This page's own orientation override (see ReportConfigurator's
+        // effectiveDesign) — a landscape-pinned page reads as a wide
+        // thumbnail here too, not silently rendered as if it were portrait.
+        const { w, h } = pageDimensions(page.orientation ? { ...design, orientation: page.orientation } : design);
+        const thumbH = (h / w) * THUMB_W;
+        return (
         <div
           key={page.id}
           className={`${styles.pageStripItem} ${page.id === activeId ? styles.pageStripItemActive : ""}`}
@@ -89,7 +92,8 @@ export function PageStrip({ pages, design, activeId, onSelect, onDuplicate, onDe
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
       <button type="button" className={styles.pageStripAdd} onClick={onAdd} title="Add a new page">
         <Icon name="plus" size={16} />
       </button>

@@ -76,9 +76,17 @@ class PageInstance:
     table_chunk0: dict | None = None
 
 
-def _page_size_mm(design: dict):
+def _page_size_mm(design: dict, page: dict | None = None):
+    """A page's real size — its own `orientation` override (Phase 4's
+    "per-page landscape override": a page's own designer setting, e.g. an
+    executive-dashboard page that wants to be landscape while the rest of
+    the report stays portrait) when it has one, else the template's default.
+    `page=None` (no per-page context, e.g. the outer `build_canvas_pdf` call
+    that seeds the initial Canvas size before any real page is known) always
+    uses the template default."""
     w, h = PAGE_SIZES_MM.get(design.get("size", "A4"), PAGE_SIZES_MM["A4"])
-    if design.get("orientation") == "landscape":
+    orientation = (page or {}).get("orientation") or design.get("orientation")
+    if orientation == "landscape":
         w, h = h, w
     return w, h
 
@@ -126,7 +134,7 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     # spliced in right after it, rather than getting truncated with a
     # "+N more rows" note — renumbers everything after it, so this must run
     # before anything below reads `inst.number`.
-    instances = _expand_table_overflow(instances, cfg, ctx, page_h_mm)
+    instances = _expand_table_overflow(instances, cfg, ctx, design)
     # Page numbers are fully known before anything is drawn (expand_pages
     # already assigned them), so a "toc" element can resolve real page
     # numbers in a single pass — no two-pass render needed. One row per
@@ -144,7 +152,15 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     ctx["_toc_map"], ctx["_toc_order"] = toc_map, toc_order
 
     for inst in instances:
-        _render_page(c, design, master_elements, inst, cfg, ctx, page_w_mm, page_h_mm)
+        # This exact page's own size — its `orientation` override if it has
+        # one, else the template default. ReportLab supports a genuinely
+        # variable page size across one Canvas (setPageSize before that
+        # page's own showPage), the same mechanism the legacy flowing
+        # renderer already uses for its one always-landscape dashboard page
+        # — this just makes it a per-page *choice*, not a hardcoded one page.
+        pw, ph = _page_size_mm(design, inst.page)
+        c.setPageSize((pw * mm, ph * mm))
+        _render_page(c, design, master_elements, inst, cfg, ctx, pw, ph)
         c.showPage()
     c.save()
 
@@ -1009,7 +1025,7 @@ def _split_table_chunks(table, w, h, *, max_chunks=500) -> list:
     return chunks
 
 
-def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, page_h_mm: float) -> list:
+def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) -> list:
     """Splices extra synthetic pages in after any page whose table element
     has more rows than fit its box — mirrors what a normal Platypus flowing
     document gets for free from Frame-based pagination, which this canvas
@@ -1027,6 +1043,11 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, page_h_mm: flo
     comparatively rare real-world value; not attempted here."""
     out = []
     for inst in instances:
+        # This instance's own effective page height (its `orientation`
+        # override if it has one, else the template default) — a landscape
+        # override changes how much vertical room a table's box actually has
+        # to work with, same as the real per-page render loop uses.
+        _, page_h_mm = _page_size_mm(design, inst.page)
         table_els = [el for el in (inst.page.get("elements") or []) if el.get("type") == "table"]
         overflow_el, chunks = None, None
         for el in table_els:
