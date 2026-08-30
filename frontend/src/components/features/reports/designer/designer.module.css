@@ -765,6 +765,21 @@
   text-overflow: ellipsis;
 }
 
+/* Mirrors apps/reports/pdf_canvas.py's _draw_title_text — bold, a touch
+   larger than the caption below, shown above the box by default. */
+.elementTitle {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  text-align: center;
+  padding-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The live, real chart — same Drawing the PDF renders, exported to SVG (see
    useChartSvgs). The SVG's own width/height attributes are in points; these
    rules override them (CSS beats SVG presentation attributes) so it fills
@@ -799,21 +814,23 @@
   background: #fff;
 }
 
-/* Contains a live table to its own element box (see ElementPreview's
-   TableOverflowClip) — a table with more rows than fit used to just grow
-   straight past its box, past the page, off the bottom of the paper.
-   Scrolls vertically rather than hard-clipping: the real PDF now paginates
-   an overflowing table for real (apps/reports/pdf_canvas.py's
-   _expand_table_overflow), but this editor's own page list stays exactly
-   what you authored — no phantom continuation pages appear here to match —
-   so a scrollbar is how you reach and edit every row without the box
-   itself needing to grow past what you sized it to. */
+/* Contains a live table/description to its own element box (see
+   ElementPreview's OverflowClip) — content with more rows/text than fits
+   used to just grow straight past its box, past the page, off the bottom
+   of the paper. Hard-clips at the box edge instead: the real PDF paginates
+   an overflowing table/description for real (apps/reports/pdf_canvas.py's
+   _expand_table_overflow/_expand_description_overflow) rather than
+   scrolling — a PDF page can't scroll — so a scrollbar here showed rows
+   the download would never render at that same visible position, which
+   read as a real editor/PDF mismatch (2026-08-26 client report) rather
+   than the "reach every row to edit it" convenience it was meant to be.
+   Shows exactly what the download's first page of this box actually
+   prints; the sticky note below still says the rest continues there. */
 .tableClip {
   position: relative;
   width: 100%;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 .tableOverflowNote {
@@ -904,6 +921,35 @@
 .tableLiveIndent {
   display: inline-block;
   margin-inline-start: 10px;
+}
+
+/* "×" gutter column that hides a data-bound row from this report's view
+   (see ElementPreview's RowHideButton/commitHideRow) — a real th/td cell so
+   it lines up with the header/body rows around it, narrow enough to stay
+   out of the way of the table's own real columns. */
+.tableLiveRowHandle {
+  width: 16px;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent;
+  text-align: center;
+}
+
+.tableLiveRowHideBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.tableLiveRowHideBtn:hover {
+  color: var(--danger-text);
 }
 
 /* Double-click any live text on the canvas (table cell, TOC row, field
@@ -1076,6 +1122,19 @@
   border-color: var(--primary);
   background: var(--primary-soft);
 }
+/* A real, downloaded-PDF-accurate continuation page (see reportOverflow.ts's
+   buildOverflowPages) — not something you authored, so it reads as a
+   distinct, clearly-not-a-real-page row: dashed border, no icon buttons
+   (nothing to move/duplicate/delete/rename — it's regenerated fresh from
+   live data on every render), name in italic. */
+.pageRowSynthetic {
+  border-style: dashed;
+  background: var(--bg-canvas);
+}
+.pageRowSynthetic .pageName {
+  font-style: italic;
+  color: var(--text-secondary);
+}
 
 .pageRowMain {
   display: flex;
@@ -1199,4 +1258,193 @@
     max-height: calc(100vh - 220px);
     overflow-y: auto;
   }
+}
+
+/* ── Custom table editor (CustomTableEditor.tsx) ────────────────────────── */
+.customTableEditor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--space-2);
+  background: #fff;
+  overflow: auto;
+}
+
+/* The grid itself scrolls horizontally inside the narrow sidebar rather than
+   forcing the whole Properties panel wider — this is a compact editing
+   widget, not a page data table (CLAUDE.md's "never a horizontally-scrolling
+   wall of tiny text" rule is about report data tables shown to end users). */
+.customTableGrid {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.customTableGrid table {
+  border-collapse: collapse;
+}
+
+.customTableGrid td {
+  border: 1px solid var(--border);
+  padding: 2px;
+}
+
+.customTableGrid td[data-header="on"] {
+  background: var(--bg-canvas);
+  position: relative; /* anchors .customTableColRemove's badge to this cell */
+}
+
+.customTableCell {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.customTableCell input {
+  width: 70px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 4px;
+  color: var(--text-primary);
+}
+
+.customTableCell input:focus {
+  outline: 2px solid var(--primary-soft);
+  border-radius: 4px;
+}
+
+.customTableColRemove,
+.customTableRowHandle button {
+  border: none;
+  background: none;
+  color: var(--danger-text);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+/* A clear, always-visible circular badge rather than a plain inline "×" —
+   found (2026-08-26) that the inline version was easy to miss next to the
+   header cell's text input, reading as "there's no way to remove a
+   column." Anchored to the now-relatively-positioned header cell so it
+   doesn't compete with the input for width. */
+.customTableColRemove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--danger-text) !important;
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* No border/fill of its own — a slim gutter the row-delete "×" sits in,
+   not a real data column of the table (client flagged the old bordered/
+   filled version as looking like "an extra column just for the x thing",
+   2026-08-26). The × itself only shows on row hover/focus so an unused
+   table doesn't read as a wall of red ×'s either. */
+.customTableRowHandle {
+  width: 18px;
+  min-width: 18px;
+  text-align: center;
+  border: none !important;
+  padding: 0 !important;
+}
+
+.customTableRowHandle button {
+  opacity: 0;
+}
+
+tr:hover .customTableRowHandle button,
+.customTableRowHandle button:focus-visible {
+  opacity: 1;
+}
+
+/* Sticky at the bottom of the editor's own scroll area — found (2026-08-26)
+   that on a table element placed with a short box height, these buttons
+   could scroll out of view below the grid, reading as "there's no way to
+   add a row or column" when they were only hidden, not missing. */
+.customTableActions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  background: #fff;
+}
+
+/* ── Description element (DescriptionPreview, ElementPreview.tsx) ──────── */
+.descriptionPreview {
+  width: 100%;
+  min-height: 100%;
+  padding: var(--space-2);
+  font-family: "Amiri", "Traditional Arabic", serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.descriptionPreview :is(p, div) {
+  margin: 0 0 6px;
+}
+.descriptionPreview :is(ul, ol) {
+  margin: 0 0 6px;
+  padding-inline-start: 20px;
+}
+
+/* An inline table/chart/image embed only resolves to real content in the
+   downloaded PDF (see richtext._resolve_embed) — its own children are
+   dropped on save (richtext.py's _serialize treats the marker as self-
+   describing, data-spec only), so this box is otherwise empty; the label
+   is generated purely from the data-embed attribute value via CSS, no JS
+   needed — same "honest placeholder over a wrong preview" precedent as an
+   unresolved TOC caption elsewhere in this file. */
+.descriptionPreview :global([data-embed]) {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-align: center;
+}
+.descriptionPreview :global([data-embed])::before {
+  content: attr(data-embed) " — resolved in the downloaded PDF";
+  text-transform: capitalize;
+}
+
+.descriptionClickToEdit {
+  width: 100%;
+  height: 100%;
+  cursor: text;
+}
+
+/* While editing (double-clicked), the real RichTextEditor floats above the
+   canvas anchored to this box's own top-left — a comfortable fixed size
+   regardless of how small/zoomed-out the placed element itself is, since
+   editing rich text inside a literal 40mm box at 50% zoom would be
+   unusable. High z-index: this must draw above every other page element
+   (including ones with a higher z of their own), since only one element
+   is ever mid-edit at a time. */
+.descriptionEditOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  width: max(100%, 360px);
+  box-shadow: var(--shadow-card, 0 8px 24px rgba(16, 24, 40, 0.18));
+  border-radius: var(--radius-md);
+  cursor: default;
 }

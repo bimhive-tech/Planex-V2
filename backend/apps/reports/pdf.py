@@ -31,7 +31,9 @@ from reportlab.platypus.tableofcontents import TableOfContents
 from .constants import merged_config
 from .richtext import html_to_flowables
 from .services import _zone_grids
-from .pdf_base import BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, has_arabic, hexcolor, resolve_arabic, shape
+from .pdf_base import (
+    BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, format_money, has_arabic, hexcolor, resolve_arabic, shape,
+)
 from .pdf_charts import (
     area_units_chart,
     cashflow_chart,
@@ -440,6 +442,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
     if cfg is None:
         cfg = merged_config(report.template.config if report.template else None)
     ctx["arabic"] = resolve_arabic(cfg, ctx["project"])
+    ctx.setdefault("_report", report)  # an inline description image embed needs this (richtext._resolve_embed)
     rtl = ctx["arabic"]
     styles = _styles(cfg)
     labels, sections = cfg["labels"], cfg["sections"]
@@ -521,7 +524,6 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
     if sections.get("project_info"):
         story += major(labels["project_info"], anchor="tab_info")
         dur = ctx.get("duration") or {}
-        money = lambda v: f"{v:,.0f} {p['currency']}" if v else ""  # noqa: E731
         days = lambda v: f"{v} {labels['unit_days']}" if v or v == 0 else ""  # noqa: E731
         rows = [
             (labels.get("info_progress_as_on", "Progress as on"),
@@ -534,11 +536,15 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             (labels.get("info_contractor_consultant", "Contractor's Consultant"), p.get("contractor_consultant")),
             (labels["info_type"], p["type"]),
             (labels["info_location"], p["location"]),
-            (labels["info_budget"], money(p.get("budget"))),
-            (labels.get("info_contract_value", "Contract value"), money(p.get("contract_value"))),
-            (labels.get("info_approved_value", "Approved value"), money(p.get("approved_value"))),
-            (labels.get("info_forecast_cost", "Forecast cost"), money(p.get("forecast_cost"))),
-            (labels.get("info_advance_payment", "Advance Payment"), money(p.get("advance_payment"))),
+            (labels["info_budget"], format_money(p.get("budget"), p.get("budget_currency"))),
+            (labels.get("info_contract_value", "Contract value"),
+             format_money(p.get("contract_value"), p.get("contract_value_currency"))),
+            (labels.get("info_approved_value", "Approved value"),
+             format_money(p.get("approved_value"), p.get("approved_value_currency"))),
+            (labels.get("info_forecast_cost", "Forecast cost"),
+             format_money(p.get("forecast_cost"), p.get("forecast_cost_currency"))),
+            (labels.get("info_advance_payment", "Advance Payment"),
+             format_money(p.get("advance_payment"), p.get("advance_payment_currency"))),
             (labels.get("info_duration", "Duration"), f"{dur['total']} {labels['unit_days']}" if dur.get("total") else ""),
             (labels["info_start"], _fmt_date(p["planned_start"])),
             (labels["info_finish"], _fmt_date(p["planned_finish"])),
@@ -547,7 +553,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             (labels.get("info_forecast", "Forecast finish"), _fmt_date(p.get("forecast_finish")) if p.get("forecast_finish") else ""),
             (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
             (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p["size_sqm"] else ""),
-            (labels.get("info_part_amount", "(Part) Amount"), money(p.get("part_amount"))),
+            (labels.get("info_part_amount", "(Part) Amount"), format_money(p.get("part_amount"), p.get("currency"))),
             (labels.get("info_part_completion_revised", "(Part) Completion Date (Revised Baseline)"),
              _fmt_date(p.get("part_completion_revised")) if p.get("part_completion_revised") else ""),
             (labels.get("info_part_forecast", "(Part) Forecasted Completion Date"),
@@ -562,7 +568,12 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         if p.get("description_html"):
             # Rich text from the builder (per-run bold/italic/underline/color/size,
             # lists, alignment) — overrides the template's uniform formatting.
-            story += html_to_flowables(p["description_html"], cfg, styles)
+            # ctx/scope/avail_width let an inline table/chart/image embed resolve
+            # (see richtext.html_to_flowables) — this document already has a real
+            # Frame/story, so a resolved Table/Drawing/Image just joins the flow
+            # and paginates for free, same as every other flowable here.
+            story += html_to_flowables(p["description_html"], cfg, styles,
+                                       ctx=ctx, scope={"item": None}, avail_width=fw)
         else:
             story += _description_flow(cfg, styles, p["description"], rtl)
 

@@ -10,7 +10,9 @@ import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
-import type { ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocEntry } from "@/lib/reportLayout";
+import type {
+  ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocCaptionsData, TocEntry,
+} from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasPage } from "./CanvasPage";
@@ -73,7 +75,11 @@ interface Props {
   chartSvgs?: ChartSvgMap;
   /** Live, real per-table data — see useTableData. */
   tableData?: TableDataMap;
-  /** False until chartSvgs/tableData's first real response has landed. */
+  /** Live, real "List of tables/figures/images" content — see
+   * useTocEntries. */
+  tocCaptions?: TocCaptionsData;
+  /** False until chartSvgs/tableData/tocCaptions's first real response has
+   * landed. */
   previewsReady?: boolean;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
@@ -84,15 +90,39 @@ interface Props {
    * thumbnail strip (see PageStrip). Undefined in the Page Designer, which
    * has only the one master, page-less surface. */
   bottomPanel?: React.ReactNode;
+  /** Scrolling past the top/bottom edge of the current page moves to the
+   * previous/next one — undefined wherever there's no page list to move
+   * through (the Page Designer's single master surface, or the Report
+   * Configuration tab while editing the shared header/footer). */
+  onNavigatePage?: (delta: -1 | 1) => void;
+  /** This mount was reached by scrolling *backward* onto it — start
+   * scrolled to the bottom instead of the top, so continuing to scroll up
+   * keeps panning through this page before it moves on to the one before
+   * it, the same way it would if you'd scrolled here forward from the top.
+   * The caller (ReportConfigurator) sets this once per scroll-triggered
+   * page change, since a fresh `key` remounts this component from scratch
+   * on every page switch. */
+  initialScrollToBottom?: boolean;
 }
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, reportId, chartSvgs, tableData, previewsReady, tocEntries, ownPageId, bottomPanel,
+  pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries, ownPageId, bottomPanel,
+  onNavigatePage, initialScrollToBottom = false,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Runs once, on this fresh mount (see initialScrollToBottom's docstring —
+  // a page change is a full remount via the parent's `key`, so "on mount"
+  // is exactly "right after navigating to this page").
+  useEffect(() => {
+    if (initialScrollToBottom && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Margin/header/footer guides help while laying out a template, but on a
   // report (liveData present) they're just chrome between you and seeing
   // the page as its final, real self — off by default there, still
@@ -340,24 +370,44 @@ export function LayoutEditor({
 
   // Shift+scroll to zoom (Canva/Figma convention) — a plain scroll still
   // pans the canvas natively, `.canvasScroll`'s own overflow:auto already
-  // does that for free. Needs a real (non-passive) listener via a ref: React
-  // registers onWheel as passive by default, which silently drops
-  // preventDefault and lets the page scroll *and* zoom at once.
+  // does that for free, *until* it hits the top/bottom edge (or the page
+  // doesn't overflow the viewport at all, the common case at 100% zoom) —
+  // scrolling further past that edge moves to the previous/next page, so
+  // scrolling through the canvas feels like paging through the whole
+  // document rather than stopping dead at each page's own boundary. Needs a
+  // real (non-passive) listener via a ref: React registers onWheel as
+  // passive by default, which silently drops preventDefault and lets the
+  // page scroll *and* zoom (or double-navigate) at once.
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
+    // One page change per swipe/scroll gesture — a trackpad fires many tiny
+    // wheel events for one physical swipe, so without a cooldown a single
+    // gesture would flip through several pages instead of just one.
+    let cooldownUntil = 0;
     function onWheel(e: WheelEvent) {
-      if (!e.shiftKey) return;
+      if (e.shiftKey) {
+        e.preventDefault();
+        setZoom((z) => {
+          const raw = z - e.deltaY * 0.001;
+          const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, raw));
+          return Math.round(clamped * 100) / 100; // 2 decimal places — smooth, not jittery
+        });
+        return;
+      }
+      if (!onNavigatePage || e.deltaY === 0) return;
+      const atBottom = node!.scrollTop + node!.clientHeight >= node!.scrollHeight - 1;
+      const atTop = node!.scrollTop <= 0;
+      if (e.deltaY > 0 && !atBottom) return; // still real room to pan down first
+      if (e.deltaY < 0 && !atTop) return; // still real room to pan up first
       e.preventDefault();
-      setZoom((z) => {
-        const raw = z - e.deltaY * 0.001;
-        const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, raw));
-        return Math.round(clamped * 100) / 100; // 2 decimal places — smooth, not jittery
-      });
+      if (Date.now() < cooldownUntil) return;
+      cooldownUntil = Date.now() + 400;
+      onNavigatePage(e.deltaY > 0 ? 1 : -1);
     }
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [onNavigatePage]);
 
   return (
     <div className={styles.editor}>
@@ -440,9 +490,11 @@ export function LayoutEditor({
             onDropSpec={(key, x, y) => addSpec(key, x, y)}
             onElementChange={updateElement}
             liveData={liveData}
+            reportId={reportId}
             pinnedItem={pinnedItem}
             chartSvgs={chartSvgs}
             tableData={tableData}
+            tocCaptions={tocCaptions}
             previewsReady={previewsReady}
             tocEntries={tocEntries}
             ownPageId={ownPageId}

@@ -473,3 +473,89 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
+
+/* PDF page importer (PdfPageImportPicker.tsx) */
+.pdfImport {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.pdfImportPick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary-text-accent);
+  background: var(--primary-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.pdfImportPick:hover {
+  background: var(--primary-soft);
+  filter: brightness(0.97);
+}
+
+.pdfImportBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pdfImportLink {
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.pdfImportGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.pdfImportPage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.pdfImportPage[data-selected="on"] {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.pdfImportPage img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.pdfImportPage input {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+}
+.pdfImportPage span {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}

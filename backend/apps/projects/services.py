@@ -7,6 +7,24 @@ _WEIGHTED = ExpressionWrapper(
 )
 
 
+def latest_schedule_import(project, as_of=None):
+    """The schedule-import batch "current" means for this project right now —
+    the most recent one, or (when `as_of` is given) the most recent one whose
+    own `date` isn't after `as_of`. `None` when the project has never had a
+    schedule import (a hand-built project, or one whose only data is a raw
+    zone-tracker import predating this feature — see ScheduleImport's own
+    docstring). Every function that reads "the project's activities/scopes"
+    for anything current-state-shaped resolves this first and filters to it,
+    so a re-import (which now creates a new batch instead of deleting the
+    old one) can't silently double-count both generations together."""
+    from .models import ScheduleImport
+
+    qs = ScheduleImport.objects.filter(project=project)
+    if as_of is not None:
+        qs = qs.filter(date__lte=as_of)
+    return qs.order_by("-date", "-created_at").first()
+
+
 def resync_revised_finish(project) -> None:
     """Keep the project's revised finish equal to the latest APPROVED schedule
     Variation's (SVO's) new finish. Only approved variations count — a
@@ -38,13 +56,17 @@ def resync_approved_value(project) -> None:
         kind=Variation.Kind.COST, status=Variation.Status.APPROVED,
     ).aggregate(total=Sum("amount"))["total"] or 0
     new_value = project.contract_value + total
-    if project.approved_value != new_value:
+    new_currency = project.contract_value_currency
+    if project.approved_value != new_value or project.approved_value_currency != new_currency:
         project.approved_value = new_value
+        project.approved_value_currency = new_currency
         # A queryset .update(), not project.save() — this runs from inside
         # Project.save() itself (so every code path that touches
         # contract_value stays correct, not just the ones that remember to
         # call this explicitly); .save() here would recurse.
-        type(project).objects.filter(pk=project.pk).update(approved_value=new_value, updated_at=timezone.now())
+        type(project).objects.filter(pk=project.pk).update(
+            approved_value=new_value, approved_value_currency=new_currency, updated_at=timezone.now(),
+        )
 
 
 def activity_progress_as_of(project, as_of) -> dict:
@@ -72,27 +94,39 @@ def activity_progress_as_of(project, as_of) -> dict:
     return result
 
 
-def project_overall_progress(project, progress=None) -> float:
+def project_overall_progress(project, progress=None, schedule_import=None) -> float:
     """Weighted overall progress (0–100): sum(progress*weight)/sum(weight)
     across the project's activities. 0 when there are none. When `progress`
     (an activity_id->% map, e.g. as-of-date) is given, the DB aggregate is
     computed once and then *corrected* only for the few overridden activities —
     never iterate the whole table (projects hold tens of thousands of rows).
 
-    A "current" call (no as-of override) defers to imported_progress_percent
-    when the project has one — a real P6 schedule states its own overall %,
-    and that's a better number than our weighted approximation of it. An
-    as-of/historical call always computes live: the imported figure is a single
-    point in time (import time), not meaningful for an arbitrary past date."""
-    if progress is None and project.imported_progress_percent is not None:
+    `schedule_import` pins which import batch's activities to weight over —
+    resolved to the latest one (`latest_schedule_import`) when not given.
+    Every existing caller's behavior is unchanged from before batches
+    existed; a caller can also pass the latest batch explicitly (e.g. right
+    after creating it during import) without losing the shortcut below.
+
+    A "current" call (no as-of override, batch resolves to the latest one —
+    whether by leaving `schedule_import` unset or by passing it in
+    explicitly) defers to imported_progress_percent when the project has
+    one — a real P6 schedule states its own overall %, and that's a better
+    number than our weighted approximation of it. That field only ever
+    reflects the *latest* import though, so a call explicitly pinned to an
+    OLDER batch always computes live instead."""
+    latest = latest_schedule_import(project)
+    if schedule_import is None:
+        schedule_import = latest
+    if progress is None and schedule_import == latest and project.imported_progress_percent is not None:
         return float(project.imported_progress_percent)
-    agg = project.activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    agg = activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
     wsum = float(agg["wsum"] or 0)
     if not wsum:
         return 0.0
     psum = float(agg["psum"] or 0)
     if progress:
-        for aid, w, cur in project.activities.filter(
+        for aid, w, cur in activities.filter(
             id__in=list(progress.keys())
         ).values_list("id", "weight", "progress_percent"):
             psum += float(w) * (progress[str(aid)] - float(cur))
@@ -175,7 +209,9 @@ def view_progress_map(project, mode, as_of):
         start = activity_progress_as_of(project, day_before)
         end = activity_progress_as_of(project, last)
         out = {}
-        for aid, cur in project.activities.values_list("id", "progress_percent"):
+        schedule_import = latest_schedule_import(project)
+        activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+        for aid, cur in activities.values_list("id", "progress_percent"):
             s = str(aid)
             c = float(cur)
             out[s] = round(end.get(s, c) - start.get(s, c), 2)
@@ -183,11 +219,16 @@ def view_progress_map(project, mode, as_of):
     return None
 
 
-def breakdown_from_map(project, value_map) -> dict:
+def breakdown_from_map(project, value_map, schedule_import=None) -> dict:
     """Activity counts by state (completed/in-progress/not-started) using an
-    override map; activities missing from the map use their current %."""
+    override map; activities missing from the map use their current %.
+    `schedule_import` — see project_overall_progress's own docstring;
+    resolved to latest when not given."""
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     total = completed = not_started = 0
-    for aid, cur in project.activities.values_list("id", "progress_percent"):
+    for aid, cur in activities.values_list("id", "progress_percent"):
         v = value_map.get(str(aid), float(cur))
         total += 1
         if v >= 100:
@@ -198,13 +239,19 @@ def breakdown_from_map(project, value_map) -> dict:
             "in_progress": total - completed - not_started}
 
 
-def scope_progress_map(project, progress=None) -> dict:
+def scope_progress_map(project, progress=None, schedule_import=None) -> dict:
     """Map of scope_id -> weighted progress rolled up over the scope's *whole
     subtree*. Computed on the backend so the tree shows real progress without
     shipping every activity (zone trackers have tens of thousands of cells).
-    `progress` (activity_id->% map) overrides current values when given."""
+    `progress` (activity_id->% map) overrides current values when given.
+    `schedule_import` — see project_overall_progress's own docstring;
+    resolved to latest when not given."""
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     direct_w, direct_pw = {}, {}
-    for aid, sid, w, p in project.activities.values_list("id", "scope_id", "weight", "progress_percent"):
+    for aid, sid, w, p in activities.values_list("id", "scope_id", "weight", "progress_percent"):
         w = float(w)
         p = progress.get(str(aid), float(p)) if progress is not None else float(p)
         direct_w[sid] = direct_w.get(sid, 0.0) + w
@@ -212,7 +259,7 @@ def scope_progress_map(project, progress=None) -> dict:
 
     children, all_ids = {}, []
     roots = []
-    for sid, pid in project.scopes.values_list("id", "parent_id"):
+    for sid, pid in scopes.values_list("id", "parent_id"):
         all_ids.append(sid)
         if pid is None:
             roots.append(sid)

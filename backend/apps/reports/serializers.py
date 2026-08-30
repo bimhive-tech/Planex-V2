@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from .constants import default_config
 from .models import Report, ReportImage, ReportTemplate
-from .richtext import sanitize_html
+from .richtext import sanitize_html, sanitize_layout_html
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
@@ -20,7 +20,7 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
             return default_config()
         if not isinstance(value, dict):
             raise serializers.ValidationError("Config must be an object.")
-        return value
+        return sanitize_layout_html(value)
 
 
 class ReportListSerializer(serializers.ModelSerializer):
@@ -56,7 +56,7 @@ class ReportWriteSerializer(serializers.ModelSerializer):
             return value
         if not isinstance(value, dict):
             raise serializers.ValidationError("layout_override must be an object.")
-        return value
+        return sanitize_layout_html(value)
 
     def validate(self, attrs):
         """Project and template must belong to the caller's company."""

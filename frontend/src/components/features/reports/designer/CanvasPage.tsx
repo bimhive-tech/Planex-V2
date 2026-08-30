@@ -8,9 +8,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
-import type { ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocEntry } from "@/lib/reportLayout";
+import type {
+  ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocCaptionsData, TocEntry,
+} from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
+import { findSpec } from "@/lib/reportElements";
+import { embedHtml } from "@/lib/reportEmbeds";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CanvasElementView } from "./CanvasElementView";
@@ -110,12 +114,19 @@ interface Props {
   onElementChange?: (el: LayoutElement) => void;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  /** This report's id — present only alongside liveData. Lets a description
+   * element's inline image-embed control attach an upload to this report. */
+  reportId?: string;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
   /** Live, real per-chart previews — see useChartSvgs. */
   chartSvgs?: ChartSvgMap;
   /** Live, real per-table data — see useTableData. */
   tableData?: TableDataMap;
-  /** False until chartSvgs/tableData's first real response has landed. */
+  /** Live, real "List of tables/figures/images" content — see
+   * useTocEntries. */
+  tocCaptions?: TocCaptionsData;
+  /** False until chartSvgs/tableData/tocCaptions's first real response has
+   * landed. */
   previewsReady?: boolean;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
@@ -127,8 +138,8 @@ interface Props {
 export function CanvasPage({
   design, elements, masterElements = [], scale, selectedIds, showGuides, alignGuides,
   onSelect, onMarqueeSelect, onStartMove, onStartResize, onStartRotate, onStartGroupResize,
-  onAction, onDropSpec, onElementChange, liveData, pinnedItem,
-  chartSvgs, tableData, previewsReady, tocEntries, ownPageId,
+  onAction, onDropSpec, onElementChange, liveData, reportId, pinnedItem,
+  chartSvgs, tableData, tocCaptions, previewsReady, tocEntries, ownPageId,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -220,6 +231,33 @@ export function CanvasPage({
         e.preventDefault();
         const key = e.dataTransfer.getData("text/planex-element");
         if (!key) return;
+
+        // Dropping a table/chart directly onto an actively-edited
+        // description's rich text (see ElementPreview's DescriptionPreview
+        // — only the one currently being edited is ever a real
+        // contenteditable) inserts it as an inline embed right there,
+        // instead of creating a new floating page element — same drag
+        // gesture as any other palette item, different landing spot.
+        const editableTarget = (e.target as HTMLElement)
+          .closest('[contenteditable="true"]') as HTMLElement | null;
+        if (editableTarget) {
+          const spec = findSpec(key);
+          if (spec && (spec.type === "table" || spec.type === "chart")) {
+            const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+            const sel = window.getSelection();
+            if (range && sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+            editableTarget.focus();
+            document.execCommand(
+              "insertHTML", false, `${embedHtml(spec.type, spec.props ?? {}, spec.label)}<p><br></p>`,
+            );
+            editableTarget.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            return;
+          }
+        }
+
         const rect = e.currentTarget.getBoundingClientRect();
         onDropSpec(key, (e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale);
       }}
@@ -300,6 +338,7 @@ export function CanvasPage({
           pinnedItem={pinnedItem}
           chartSvgs={chartSvgs}
           tableData={tableData}
+          tocCaptions={tocCaptions}
           previewsReady={previewsReady}
           tocEntries={tocEntries}
           ownPageId={ownPageId}
@@ -320,9 +359,11 @@ export function CanvasPage({
           onAction={onAction}
           onElementChange={onElementChange}
           liveData={liveData}
+          reportId={reportId}
           pinnedItem={pinnedItem}
           chartSvgs={chartSvgs}
           tableData={tableData}
+          tocCaptions={tocCaptions}
           previewsReady={previewsReady}
           tocEntries={tocEntries}
           ownPageId={ownPageId}

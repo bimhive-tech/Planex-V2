@@ -18,7 +18,8 @@ export type ElementType =
   | "field"
   | "table"
   | "chart"
-  | "toc";
+  | "toc"
+  | "description";
 
 export interface LayoutElement {
   id: string;
@@ -84,6 +85,49 @@ export type TableDataResult =
   | { status: "no_data"; style: TableStyle };
 export type TableDataMap = Record<string, TableDataResult>;
 
+/** Real continuation-page row data for a table that overflows its own box
+ * — see useTableOverflow and apps/reports/views.py's table_overflow
+ * action, which runs the exact same ReportLab `Table.split()` calls the
+ * real PDF's own overflow pagination (pdf_canvas._expand_table_overflow)
+ * uses, so the row boundaries here can never drift from the download.
+ * Keyed by the ORIGINAL table element's id -> every chunk AFTER what
+ * already shows on that element's own first page, each already shaped
+ * exactly like a normal TableDataResult (`{status:"ok", kind, header,
+ * rows, style}`) so a synthesized continuation page's table element can
+ * reuse TablePreview's existing rendering unmodified — see
+ * buildOverflowPages, which is the only thing that actually creates those
+ * pages. */
+export type TableOverflowMap = Record<string, TableDataResult[]>;
+
+/** Real "List of tables/figures/images" content — see useTocEntries and
+ * apps/reports/views.py's toc_entries action, which runs the exact same
+ * pre-pass (expand_pages -> overflow expansion -> pdf_canvas._collect_
+ * captions) the real PDF runs before it draws anything, so the numbering/
+ * page assignment can never drift from what the download actually lists.
+ * A "toc" element's "tables"/"figures"/"images" variant reads this instead
+ * of the "resolved in the downloaded PDF" placeholder it used to show. */
+export interface TocCaptionRow {
+  text: string;
+  page: number;
+}
+export interface TocCaptionsData {
+  tables: TocCaptionRow[];
+  figures: TocCaptionRow[];
+  images: TocCaptionRow[];
+}
+
+/** A `source: "custom"` table element's own authored data — built by hand or
+ * pasted from Excel in the Properties panel (see CustomTableEditor.tsx),
+ * stored directly on `props.custom_data`. `columns` is the header row;
+ * every row in `rows` has the same length as `columns`. Unlike every other
+ * table source, this one has no backend data behind it — resolve_table
+ * (apps/reports/pdf_canvas.py) reads it straight out of the element's own
+ * props instead of computing it from ctx. */
+export interface CustomTableData {
+  columns: string[];
+  rows: string[][];
+}
+
 /** One row a "toc" element can list — mirrors apps/reports/pdf_canvas.py's
  * build_canvas_pdf toc_map/toc_order exactly: `number` is the page's 1-based
  * position in the real, current page sequence (every page counts, including
@@ -139,6 +183,13 @@ export interface LayoutPage {
    * ReportLab supports natively via a per-page setPageSize). Undefined
    * inherits the template default. */
   orientation?: "portrait" | "landscape";
+  /** True only for a continuation page synthesized client-side from real
+   * table-overflow data (see useTableOverflow/buildOverflowPages) — never
+   * present on anything actually stored. Not a real authored page: has no
+   * backing entry in the saved `pages` array, so it's excluded before any
+   * save and gets no move/duplicate/delete/rename/repeat controls in the
+   * page list — it's a read-only preview of what the download will do. */
+  synthetic?: boolean;
 }
 
 export interface PageDesign {

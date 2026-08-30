@@ -172,11 +172,11 @@ export function ProjectOverview({ project: p, stats, canManage, onViewMilestones
           <section className={styles.card}>
             <CardHead icon="projects" title="Project Details" sub="Key information for this project." />
             <Row label="Client">{p.client_name || "—"}</Row>
-            <Row label="Budget">{formatMoney(p.budget, p.currency)}</Row>
-            <Row label="Contract value">{formatMoney(p.contract_value, p.currency)}</Row>
-            <Row label="Approved value">{formatMoney(p.approved_value, p.currency)}</Row>
-            <Row label="Forecast cost">{formatMoney(p.forecast_cost, p.currency)}</Row>
-            <Row label="Advance payment">{formatMoney(p.advance_payment, p.currency)}</Row>
+            <Row label="Budget">{formatMoney(p.budget, p.budget_currency)}</Row>
+            <Row label="Contract value">{formatMoney(p.contract_value, p.contract_value_currency)}</Row>
+            <Row label="Approved value">{formatMoney(p.approved_value, p.approved_value_currency)}</Row>
+            <Row label="Forecast cost">{formatMoney(p.forecast_cost, p.forecast_cost_currency)}</Row>
+            <Row label="Advance payment">{formatMoney(p.advance_payment, p.advance_payment_currency)}</Row>
             <Row label="Size">{p.size_sqm ? `${Number(p.size_sqm).toLocaleString()} sqm` : "—"}</Row>
             <Row label="Duration">{t ? `${t.months} months` : "—"}</Row>
             <Row label="EOT">{p.eot_days ? `${p.eot_days} days` : "—"}</Row>

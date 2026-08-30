@@ -1,8 +1,10 @@
 "use client";
 
-// Report Builder: page-type sub-tabs (Setup, Cover, Project Info, Description,
-// Progress Report, Progress Images, Attachments), live project data on the
-// read-only tabs, and a real-time PDF preview (debounced auto-save → re-render).
+// Report Builder: page-type sub-tabs (Setup, Cover, Project Info, Progress
+// Report, Progress Images, Attachments), live project data on the read-only
+// tabs, and a real-time PDF preview (debounced auto-save → re-render). The
+// report's narrative ("Description") is edited directly on the Customize
+// tab's canvas, not a tab here — see ElementPreview.tsx's DescriptionPreview.
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -14,7 +16,6 @@ import { Icon } from "@/components/ui/Icon";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { StateView } from "@/components/ui/StateView";
-import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
@@ -43,7 +44,6 @@ const TABS = [
   { key: "scope", label: "Scope" },
   { key: "cover", label: "Cover" },
   { key: "info", label: "Project Info" },
-  { key: "description", label: "Description" },
   { key: "progress", label: "Progress Report" },
   { key: "photos", label: "Progress Images" },
   { key: "attachments", label: "Attachments" },
@@ -51,39 +51,22 @@ const TABS = [
 ] as const;
 
 // Maps a builder tab to the PDF section anchor it scrolls the preview to.
+// No "description" entry — that content now lives entirely as a canvas
+// element (edited in place on the Customize tab), not a report-metadata
+// field with its own tab.
 const TAB_ANCHOR: Record<string, string> = {
   setup: "tab_cover", scope: "tab_cover", cover: "tab_cover",
-  info: "tab_info", description: "tab_description",
+  info: "tab_info",
   progress: "tab_progress", photos: "tab_photos", attachments: "tab_attachments",
 };
 
 type Form = {
   project: string; template: string; title: string; report_number: string;
   report_date: string; period_start: string; period_finish: string; status: string;
-  description: string; description_html: string;
 };
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
-
-// Plain-text mirror of the rich description (fallback + search). Runs client-side.
-function htmlToPlainText(html: string): string {
-  if (!html) return "";
-  const el = document.createElement("div");
-  el.innerHTML = html;
-  return (el.textContent || "").replace(/\s+\n/g, "\n").trim();
-}
-
-// Seed the rich editor from a legacy plain-text description (one block per line)
-// so reports created before rich text aren't shown as an empty editor.
-function plainToHtml(text: string): string {
-  if (!text) return "";
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return text
-    .split(/\r?\n/)
-    .map((line) => (line.trim() ? `<div>${esc(line)}</div>` : "<div><br></div>"))
-    .join("");
-}
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const router = useRouter();
@@ -129,9 +112,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
       period_start: r.period_start ?? "", period_finish: r.period_finish ?? "",
-      status: r.status, description: r.description ?? "",
-      // Fall back to the legacy plain description so the editor isn't blank.
-      description_html: r.description_html || plainToHtml(r.description ?? ""),
+      status: r.status,
     });
     return r;
   }, [reportId]);
@@ -185,8 +166,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     try {
       await api.patch(`/reports/${reportId}/`, {
         ...form,
-        // Keep a plain-text mirror of the rich description for fallback/search.
-        description: htmlToPlainText(form.description_html) || form.description,
         scope_ids: scopeIds,
         template: form.template || null,
         report_date: form.report_date || null,
@@ -327,18 +306,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                         ))}
                       </tbody>
                     </table>
-                  </section>
-                )}
-
-                {tab === "description" && canManage && (
-                  <section className={styles.tabPanel}>
-                    <label className={styles.label}>Description</label>
-                    <RichTextEditor
-                      value={form.description_html}
-                      onChange={(html) => setField("description_html", html)}
-                      placeholder="وصف المشروع — نسّق النص كما تريد…"
-                    />
-                    <span className={styles.hint}>Format the text like Word — size, bold, italic, underline, color, bullet &amp; numbered lists, and alignment all carry through to the PDF. Falls back to the project description when empty.</span>
                   </section>
                 )}
 

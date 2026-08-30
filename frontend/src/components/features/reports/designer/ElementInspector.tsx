@@ -18,7 +18,11 @@ type PropField =
   | { path: string; label: string; kind: "text" }
   | { path: string; label: string; kind: "number"; step?: number }
   | { path: string; label: string; kind: "color" }
-  | { path: string; label: string; kind: "toggle" }
+  // defaultOn: an unset prop reads as ON, not off — for a toggle whose
+  // backend counterpart also defaults to shown when the prop is missing
+  // (see pdf_canvas.py's _table_or_chart_title), so a freshly-placed
+  // element's checkbox state matches what it actually renders.
+  | { path: string; label: string; kind: "toggle"; defaultOn?: boolean }
   | { path: string; label: string; kind: "select"; options: { value: string; label: string }[] };
 
 const ALIGN = [
@@ -136,6 +140,8 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "zebra_color", label: "Zebra stripe color", kind: "color" },
         { path: "border", label: "Borders", kind: "toggle" },
         { path: "border_color", label: "Border color", kind: "color" },
+        { path: "show_title", label: "Show title", kind: "toggle", defaultOn: true },
+        { path: "title_text", label: "Title text (optional — defaults to the data source's name)", kind: "text" },
         { path: "show_caption", label: "Show caption", kind: "toggle" },
         { path: "caption", label: "Caption text (optional — defaults to the data source's name)", kind: "text" },
       ];
@@ -147,6 +153,8 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "legend", label: "Show legend", kind: "toggle" },
         { path: "color_a", label: "Series A", kind: "color" },
         { path: "color_b", label: "Series B", kind: "color" },
+        { path: "show_title", label: "Show title", kind: "toggle", defaultOn: true },
+        { path: "title_text", label: "Title text (optional — defaults to the data source's name)", kind: "text" },
         { path: "show_caption", label: "Show caption", kind: "toggle" },
         { path: "caption", label: "Caption text (optional — defaults to the data source's name)", kind: "text" },
       ];
@@ -327,7 +335,37 @@ export function ElementInspector({
         </div>
       )}
 
-      {(el.type === "table" || el.type === "chart") && liveData && (
+      {el.type === "description" && (
+        <div className={styles.uploadBlock}>
+          <p className={styles.panelHint}>
+            <strong>Double-click this box on the canvas to open its formatting toolbar</strong> — bold,
+            italic, underline, bullet/numbered lists, right/center/left alignment, text size, and text
+            color all live there (this isn&apos;t a plain text box). The same toolbar also has table/chart/
+            image embed buttons, and you can drag a table or chart from the palette straight into the text
+            while editing. Continues onto extra pages if it doesn&apos;t fit this box.
+          </p>
+        </div>
+      )}
+
+      {el.type === "table" && el.props.source === "custom" && (
+        <div className={styles.uploadBlock}>
+          <p className={styles.panelHint}>
+            Edit this table&apos;s cells directly on the canvas — click a cell to type, paste (Ctrl+V) cells
+            copied from Excel, or use the row/column +/− controls right there on the page.
+          </p>
+        </div>
+      )}
+
+      {el.type === "table" && !!el.props.source && el.props.source !== "custom" && (
+        <div className={styles.uploadBlock}>
+          <p className={styles.panelHint}>
+            Click a row&apos;s × on the canvas to hide it from this report, or double-click a cell to
+            override its text — both edit this table directly on the page.
+          </p>
+        </div>
+      )}
+
+      {(el.type === "table" || el.type === "chart") && liveData && el.props.source !== "custom" && (
         <div className={styles.uploadBlock}>
           <label className={styles.propField}>
             <span>Scope to one zone</span>
@@ -357,7 +395,7 @@ export function ElementInspector({
               <label key={f.path} className={styles.propToggle}>
                 <input
                   type="checkbox"
-                  checked={Boolean(value)}
+                  checked={f.defaultOn ? value !== false : Boolean(value)}
                   onChange={(e) => setProp(f.path, e.target.checked)}
                 />
                 <span>{f.label}</span>

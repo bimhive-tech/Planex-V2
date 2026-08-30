@@ -4,7 +4,7 @@ All built from data we already have (actual + derived planned/previous/duration)
 import datetime
 import math
 
-from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.barcharts import HorizontalBarChart, VerticalBarChart
 from reportlab.graphics.charts.legends import Legend
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
@@ -90,6 +90,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
@@ -105,54 +106,81 @@ def zone_progress_chart(cfg, ctx, width, height=None):
 
 
 def planned_actual_chart(cfg, ctx, width, labels, height=None):
-    """Grouped planned-vs-actual bars per zone (reference progress charts)."""
+    """Grouped planned-vs-actual bars per zone (reference progress charts).
+
+    `planned` is a project-wide, time-based figure clamped to 100% once the
+    project is past its *original* contract finish date (see
+    `services._planned_progress`'s own docstring — deliberate, matches the
+    reference). On a badly overdue project every zone's planned bar ends up
+    identical at 100%, which carries zero comparative information and just
+    crowds out the actual bars that *do* vary between zones. When that's the
+    case for every zone shown, draw actual-only instead, with a text note
+    explaining the 100% rather than a wall of duplicate planned bars."""
     zones = [z for z in ctx["zones"] if z.get("planned") is not None][:10]
     if not zones:
         return zone_progress_chart(cfg, ctx, width, height)
+    all_overdue = all(z["planned"] >= 100 for z in zones)
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
     chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
-    chart.data = [
-        [round(z["planned"], 1) for z in zones],
-        [round(z["progress"], 1) for z in zones],
-    ]
+    if all_overdue:
+        chart.data = [[round(z["progress"], 1) for z in zones]]
+    else:
+        chart.data = [
+            [round(z["planned"], 1) for z in zones],
+            [round(z["progress"], 1) for z in zones],
+        ]
     chart.categoryAxis.categoryNames = _thinned_labels([shape(z["name"]) for z in zones], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
     chart.groupSpacing = 8
     chart.barSpacing = 1
-    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    if all_overdue:
+        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+        chart.bars[0].strokeColor = None
+    else:
+        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+        chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+        chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
     chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
     d.add(chart)
-    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+    if all_overdue:
+        note = labels.get("planned_overdue_note", "Planned: 100% (past original finish date)")
+        d.add(String(width / 2, height - 10, shape(note), fontName=FONT_NAME, fontSize=7,
+                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
+        d.add(_legend([(cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 40, height - 22))
+    else:
+        d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
+                       (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
     return d
 
 
 def _unit_bars(cfg, units, width, labels, height=None):
     """Per-unit bars within a zone: grouped planned/actual when a baseline
     exists, else actual-only (most projects carry no per-unit dates yet, so the
-    old version drew nothing — now it still shows where each unit stands)."""
+    old version drew nothing — now it still shows where each unit stands).
+    Same "every unit pinned at 100% planned" collapse as
+    `planned_actual_chart` — see its docstring."""
     has_planned = any(u.get("planned") is not None for u in units)
+    all_overdue = has_planned and all((u.get("planned") or 0) >= 100 for u in units if u.get("planned") is not None)
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
     chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
-    if has_planned:
+    if has_planned and not all_overdue:
         chart.data = [[round(u.get("planned") or 0, 1) for u in units],
                       [round(u["actual"], 1) for u in units]]
     else:
@@ -163,13 +191,14 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
     chart.groupSpacing = 8
     chart.barSpacing = 1
     chart.bars[0].strokeColor = None
-    if has_planned:
+    if has_planned and not all_overdue:
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
         chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
         chart.bars[1].strokeColor = None
@@ -180,9 +209,15 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
     d.add(chart)
-    pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else []) + \
-        [(cfg["colors"]["chart_actual"], labels["actual"])]
-    d.add(_legend(pairs, width / 2 - 95, height - 12))
+    if all_overdue:
+        note = labels.get("planned_overdue_note", "Planned: 100% (past original finish date)")
+        d.add(String(width / 2, height - 10, shape(note), fontName=FONT_NAME, fontSize=7,
+                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
+        d.add(_legend([(cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 40, height - 22))
+    else:
+        pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else []) + \
+            [(cfg["colors"]["chart_actual"], labels["actual"])]
+        d.add(_legend(pairs, width / 2 - 95, height - 12))
     return d
 
 
@@ -285,6 +320,181 @@ def duration_pie(cfg, ctx, width, labels, height=None):
 def zone_duration_pie(cfg, dur, width, labels, height=None):
     """Same pie, for one zone's own duration (the per-area dashboard)."""
     return _duration_pie_for(cfg, dur, width, labels, height)
+
+
+def invoice_status_chart(cfg, ctx, width, labels, height=None):
+    """Invoiced vs remaining, against the project's own contract total —
+    the reference dashboard's "Invoice Status" pie (2026-08-30). The
+    reference splits this by main/sub contractor; `Invoice` here carries no
+    such field, so this is one combined pie over every real invoice rather
+    than a fabricated split. `None` when either side of the comparison is
+    genuinely absent (no contract total to compare against, or literally no
+    invoices yet) rather than drawing a pie against a stand-in value."""
+    proj = ctx.get("project") or {}
+    total = proj.get("contract_value") or proj.get("budget")
+    invoiced = ctx.get("invoices_total")
+    if not total or not invoiced:
+        return None
+    total, invoiced = float(total), float(invoiced)
+    remaining = max(0.0, total - invoiced)
+    height = height or 60 * mm
+    pw = 40 * mm
+    d = Drawing(width, height)
+    pie = Pie()
+    pie.x, pie.y = (width - pw) / 2, 4
+    pie.width = pie.height = pw
+    pie.data = [max(0.01, invoiced), max(0.01, remaining)]
+    pie.labels = ["", ""]
+    pie.simpleLabels = 1
+    pie.slices[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    pie.slices[1].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    pie.slices.strokeColor = hexcolor("#ffffff")
+    d.add(pie)
+    d.add(_legend([
+        (cfg["colors"]["chart_actual"], f'{labels.get("invoice_invoiced", "Invoiced")}: {invoiced:,.0f}'),
+        (cfg["colors"]["chart_planned"], f'{labels.get("invoice_remaining", "Remaining")}: {remaining:,.0f}'),
+    ], 10, height - 6, vertical=True))
+    return d
+
+
+def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
+    """Budget share vs. financial % complete per BOQ phase (reference
+    dashboard's "Financial Progress according to BOQ" grouped bars,
+    2026-08-30) — data assembled in services._boq_financial_progress, see
+    its own docstring for what each of the two bars actually means. Same
+    grouped-VerticalBarChart shape as planned_actual_chart; `None` (not an
+    empty chart) when the project has no P6 cost import at all."""
+    rows = ctx.get("boq_financial_progress") or []
+    if not rows:
+        return None
+    height = height or 78 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 24, 26
+    chart.width, chart.height = width - 48, height - 60
+    chart.data = [
+        [r["budget_share"] for r in rows],
+        [r["financial_percent"] for r in rows],
+    ]
+    chart.categoryAxis.categoryNames = _thinned_labels([shape(r["name"]) for r in rows], chart.width)
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.angle = 30
+    chart.categoryAxis.labels.boxAnchor = "ne"
+    top = max(max(r["budget_share"], r["financial_percent"]) for r in rows) or 1
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax = 0, top * 1.15
+    chart.valueAxis.labelTextFormat = "%d%%"
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
+    chart.groupSpacing = 8
+    chart.barSpacing = 1
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 6
+    chart.barLabelFormat = "%0.0f%%"
+    chart.barLabels.nudge = 6
+    d.add(chart)
+    d.add(_legend([
+        (cfg["colors"]["chart_planned"], labels.get("budget_share", "Budget")),
+        (cfg["colors"]["chart_actual"], labels.get("financial_percent", "Actual")),
+    ], width / 2 - 95, height - 12))
+    return d
+
+
+def progress_comparison_chart(cfg, ctx, width, labels, height=None):
+    """Planned % vs. physical actual % vs. financial (earned value) % —
+    reference dashboard's "Progress Comparison" bars (2026-08-30). The
+    first two are the report's own already-established time-based
+    `planned` and physical `overall` figures (shown everywhere else too,
+    e.g. the S-curve); the third is new: `ctx["financial_percent_complete"]`
+    (services._financial_percent_complete) — the real, non-fabricated,
+    cost-weighted % complete, distinct from physical progress (confirmed
+    they diverge slightly in this project's own real data: 88.0% physical
+    vs ~87.6% financial). Draws 2 bars, not 3, when the project has no P6
+    cost import — the same graceful-degradation shape `planned_actual_chart`
+    already uses for its own optional series."""
+    planned, actual = ctx.get("planned"), ctx.get("overall")
+    if planned is None or actual is None:
+        return None
+    earned = ctx.get("financial_percent_complete")
+    height = height or 60 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 24, 26
+    chart.width, chart.height = width - 48, height - 46
+    series = [("planned", labels.get("planned", "Planned"), round(float(planned), 1), cfg["colors"]["chart_planned"]),
+              ("actual", labels.get("actual", "Actual"), round(float(actual), 1), cfg["colors"]["chart_actual"])]
+    if earned is not None:
+        palette = cfg["colors"].get("chart_palette") or []
+        color = palette[2] if len(palette) > 2 else cfg["colors"]["chart_actual"]
+        series.append(("earned", labels.get("financial_percent", "Earned Value"), round(float(earned), 1), color))
+    # One series, N categories (one bar per category) — NOT N series of one
+    # value each, which reportlab would space out as N *grouped* categories
+    # instead of N adjacent same-group bars. Per-bar color needs the
+    # tuple-indexed override (`bars[(0, i)]`), not `bars[i]` (that indexes
+    # series, and there's only one).
+    chart.data = [[s[2] for s in series]]
+    chart.categoryAxis.categoryNames = [shape(s[1]) for s in series]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 7
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
+    chart.barWidth = 18
+    chart.groupSpacing = 0
+    for i, s in enumerate(series):
+        chart.bars[(0, i)].fillColor = hexcolor(s[3])
+        chart.bars[(0, i)].strokeColor = None
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 7
+    chart.barLabelFormat = "%0.1f%%"
+    chart.barLabels.nudge = 7
+    d.add(chart)
+    return d
+
+
+def budget_total_cost_chart(cfg, ctx, width, labels, height=None):
+    """Contract amount vs. approved cost variations ("new items") vs. the
+    active Part's own budget — the reference dashboard's "Budget Total
+    Cost" pie (2026-08-30). Every slice is a real, already-tracked number
+    (`Variation` kind=cost/status=approved for "new items", `PartScope.
+    amount` for "for part") — a project with no approved variations and no
+    Part budget genuinely renders as a single contract-amount slice rather
+    than three fabricated ones; that's an honest reflection of the data,
+    not a bug. `None` only when there's no contract total to draw at all."""
+    proj = ctx.get("project") or {}
+    contract = proj.get("contract_value") or proj.get("budget")
+    if not contract:
+        return None
+    new_items = float(ctx.get("variations_cost_approved_total") or 0)
+    for_part = float(proj.get("part_amount") or 0)
+    palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
+    slices = [(labels.get("budget_contract", "Contract amount"), float(contract), palette[0])]
+    if new_items:
+        slices.append((labels.get("budget_new_items", "New items"), new_items, palette[1]))
+    if for_part:
+        slices.append((labels.get("budget_for_part", "For part"), for_part, palette[2 % len(palette)]))
+    height = height or 60 * mm
+    pw = 40 * mm
+    d = Drawing(width, height)
+    pie = Pie()
+    pie.x, pie.y = (width - pw) / 2, 4
+    pie.width = pie.height = pw
+    pie.data = [max(0.01, v) for _, v, _ in slices]
+    pie.labels = [""] * len(slices)
+    pie.simpleLabels = 1
+    for i, (_, _, color) in enumerate(slices):
+        pie.slices[i].fillColor = hexcolor(color)
+    pie.slices.strokeColor = hexcolor("#ffffff")
+    d.add(pie)
+    d.add(_legend([(color, f"{name}: {value:,.0f}") for name, value, color in slices],
+                  10, height - 6, vertical=True))
+    return d
 
 
 def overall_donut(cfg, ctx, width, labels, height=None):
@@ -421,6 +631,7 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
@@ -452,6 +663,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin = 0
+    chart.valueAxis.labelTextFormat = lambda v: f"{v:,.0f}"  # thousands separator, not a bare "1000000"
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
@@ -483,6 +695,7 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     chart.valueAxis.valueMin = 0
+    chart.valueAxis.labelTextFormat = lambda v: f"{v:,.0f}"  # thousands separator, not a bare "1000000"
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
@@ -493,6 +706,118 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
                    (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
     return d
+
+
+def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
+    """Horizontal stacked bar: one row per approval status, each bar split by
+    discipline — matches the reference dashboard's MATERIAL SUBMITTALS / SHOP
+    DRAWING panels exactly (status-by-discipline counts, not a single total).
+    `rows` is already filtered to one submittal type (material or shop
+    drawing) by the caller — see resolve_chart's "submittals_material"/
+    "submittals_shop_drawing" branches, which split `ctx["submittals"]["rows"]`
+    by `type_key` before calling this, so the chart function itself doesn't
+    need to know about the type split at all."""
+    if not rows:
+        return None
+    status_order: list[tuple[str, str]] = []
+    seen_status = set()
+    disciplines: list[str] = []
+    for r in rows:
+        if r["status_key"] not in seen_status:
+            seen_status.add(r["status_key"])
+            status_order.append((r["status_key"], r["status"]))
+        if r["discipline"] not in disciplines:
+            disciplines.append(r["discipline"])
+    grid = {disc: {sk: 0 for sk, _ in status_order} for disc in disciplines}
+    for r in rows:
+        grid[r["discipline"]][r["status_key"]] += 1
+
+    height = height or 60 * mm
+    d = Drawing(width, height)
+    chart = HorizontalBarChart()
+    label_font_size = 7
+    status_names = [shape(label) for _, label in status_order]
+    # YCategoryAxis labels grow leftward from the axis — reserve real width
+    # for the longest one instead of a fixed guess, so "Approved with
+    # comments" doesn't clip the way a small fixed margin did.
+    label_w = max(pdfmetrics.stringWidth(n, FONT_NAME, label_font_size) for n in status_names) + 6
+    legend_w = 32 * mm
+    # At a narrow box (e.g. a Summary dashboard panel, ~52mm) `label_w` alone
+    # can eat most of the width, leaving no room for a side legend without it
+    # overlapping the category labels — found placing this chart in a 52mm
+    # Summary panel (2026-08-26): the legend's fixed x position sat directly
+    # on top of "Rejected"/"Under Review" instead of beside the bars. Below
+    # `min_side_legend_w` there's provably not enough width left for a side
+    # legend to read cleanly, so it drops to a wrapped horizontal legend
+    # under the chart instead — same data/colors, just repositioned and
+    # actually measured (not reportlab's Legend flowable, whose fixed
+    # `deltax` column spacing was found to overflow the panel width outright
+    # for a 4-discipline legend at 52mm — same investigation).
+    min_side_legend_w = 25 * mm
+    side_legend = width - label_w - legend_w - 8 >= min_side_legend_w
+    palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
+    swatches = [(palette[i % len(palette)], disciplines[i]) for i in range(len(disciplines))]
+    legend_rows = 0
+    if not side_legend:
+        legend_rows = _wrapped_legend_rows(swatches, width, font_size=6)
+    legend_h = (legend_rows * 8) if not side_legend else 0
+    chart.x, chart.y = label_w, 6 + legend_h
+    chart_legend_w = legend_w if side_legend else 0
+    chart.width = max(10, width - label_w - chart_legend_w - 8)
+    chart.height = height - 12 - legend_h
+    chart.data = [[grid[disc][sk] for sk, _ in status_order] for disc in disciplines]
+    chart.categoryAxis.categoryNames = status_names
+    chart.categoryAxis.style = "stacked"
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 6
+    chart.valueAxis.valueMin = 0
+    _grid(chart.valueAxis, cfg)
+    for i in range(len(disciplines)):
+        chart.bars[i].fillColor = hexcolor(palette[i % len(palette)])
+        chart.bars[i].strokeColor = None
+    chart.barLabelFormat = "%d"
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 6
+    d.add(chart)
+    if side_legend:
+        d.add(_legend(swatches, width - legend_w, height - 8, vertical=True))
+    else:
+        _draw_wrapped_legend(d, swatches, 2, height - 6, width, font_size=6)
+    return d
+
+
+def _wrapped_legend_rows(swatches, max_width, font_size=6, swatch_size=6, gap=3, item_gap=8):
+    """How many rows `_draw_wrapped_legend` will need for this width — called
+    first to reserve the right amount of chart height before anything is
+    drawn (drawing top-down would otherwise need a second pass to fix up
+    `chart.height` after the fact)."""
+    rows, x = 1, 0.0
+    for _, label in swatches:
+        w = swatch_size + gap + pdfmetrics.stringWidth(shape(label), FONT_NAME, font_size) + item_gap
+        if x + w - item_gap > max_width and x > 0:
+            rows += 1
+            x = 0
+        x += w
+    return rows
+
+
+def _draw_wrapped_legend(d, swatches, x0, y_top, max_width, font_size=6, swatch_size=6, gap=3, item_gap=8, row_h=8):
+    """Swatch+label legend that wraps to a new row instead of overflowing
+    the panel — reportlab's own `Legend` flowable only supports a fixed
+    column pitch (`deltax`), which overflows a narrow chart panel's width
+    when there are more than 2-3 items (found 2026-08-26, see
+    submittals_breakdown_chart)."""
+    x, y = x0, y_top
+    for color, label in swatches:
+        text = shape(label)
+        w = swatch_size + gap + pdfmetrics.stringWidth(text, FONT_NAME, font_size) + item_gap
+        if x + w - item_gap > max_width and x > x0:
+            x, y = x0, y - row_h
+        d.add(Rect(x, y - swatch_size, swatch_size, swatch_size, fillColor=hexcolor(color), strokeColor=None))
+        d.add(String(x + swatch_size + gap, y - swatch_size + 1, text, fontName=FONT_NAME, fontSize=font_size))
+        x += w
 
 
 def _add_month(d, months):

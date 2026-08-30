@@ -332,3 +332,161 @@ class ReportViewSet(viewsets.ModelViewSet):
                 tables[el["id"]] = {"status": "ok", "style": style, **grid}
 
         return Response({"tables": tables})
+
+    @action(detail=True, methods=["post"], url_path="table-overflow")
+    def table_overflow(self, request, pk=None):
+        """Real continuation-page row data for the Customize tab canvas.
+
+        A table with more rows than fit its box continues onto extra
+        synthetic pages in the real PDF (pdf_canvas._expand_table_overflow)
+        — until now the editor just clipped the box and said so (see
+        ElementPreview's OverflowClip), which is honest about what won't
+        fit but still didn't let you see or check the rest of it without
+        downloading. This runs that exact same overflow pass and returns,
+        for every table that split, the extra chunks' real row data (same
+        raw=True shape table_data returns) so the frontend can synthesize
+        real continuation pages in its own page list — not by re-splitting
+        anything itself, which could drift from the real PDF's own
+        row-per-page boundaries, but by reading them straight off the same
+        ReportLab `Table.split()` calls that decide them for the download.
+
+        Keyed by the ORIGINAL element's id -> an ordered list of chunks,
+        each chunk being everything AFTER what already shows on that
+        element's own (first) page — chunk[0] here is the box's SECOND
+        page of rows, not its first.
+        """
+        from reportlab.lib.units import mm as _mm
+
+        from .pdf_canvas import (
+            _expand_description_overflow, _expand_table_overflow, _page_size_mm, el_box, expand_pages, resolve_table,
+        )
+        from .pdf_tables import table_style_override
+
+        report = self.get_object()
+        override = request.data.get("layout_override")
+        ctx = _cached_report_context(report)
+        cfg = merged_config(report.template.config if report.template else None)
+        applied = override if override is not None else getattr(report, "layout_override", None)
+        cfg = merge_layout_override(cfg, applied)
+        design = cfg.get("page_design") or {}
+
+        def effective_style(props):
+            patched = table_style_override(cfg, props)
+            c, tcfg, fonts = patched["colors"], patched["table"], patched["fonts"]
+            return {
+                "header_bg": c["table_header_bg"], "header_text": c["table_header_text"],
+                "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
+                "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
+                "header_bold": bool(tcfg.get("header_bold")),
+                "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
+            }
+
+        instances = expand_pages(cfg, ctx, report)
+        instances = _expand_description_overflow(instances, cfg, ctx, design)
+        instances = _expand_table_overflow(instances, cfg, ctx, design)
+
+        continuations = {}
+        i = 0
+        while i < len(instances):
+            inst = instances[i]
+            if not inst.table_chunk0:
+                i += 1
+                continue
+            el_id, chunk0 = next(iter(inst.table_chunk0.items()))
+            el = next((e for e in (inst.page.get("elements") or []) if e.get("id") == el_id), None)
+            j = i + 1
+            chunk_flowables = [chunk0]
+            while j < len(instances) and instances[j].continues_element and instances[j].continues_element.get("id") == el_id:
+                chunk_flowables.append(instances[j].continues_chunk)
+                j += 1
+            if el is not None and len(chunk_flowables) > 1:
+                props = el.get("props") or {}
+                _, page_h_mm = _page_size_mm(design, inst.page)
+                w = el_box(el, page_h_mm)[2]
+                grid = resolve_table(
+                    props.get("source", ""), cfg, ctx, inst.scope, avail_width=w, raw=True,
+                    overrides=props.get("overrides"), style=props, scope_zone_id=props.get("scope_zone_id"),
+                )
+                if grid is not None:
+                    style = effective_style(props)
+                    rows = grid["rows"]
+                    # Only a "data"/"hierarchy" table sets repeatRows=1 (see
+                    # pdf_tables.py's _data_table/_hierarchy_table) — its
+                    # header genuinely repeats as row 0 of every split
+                    # chunk. _info_table (the 2-col key/value kind) doesn't:
+                    # every one of its rows is a distinct real field, there's
+                    # no repeatable "header" to speak of. Assuming every
+                    # chunk always carries a duplicated header row (regardless
+                    # of kind) silently dropped an info table's real last row
+                    # — found live testing this exact endpoint (2026-08-26),
+                    # then confirmed as a genuine bug in the real PDF too
+                    # (that row really was landing on its own orphaned,
+                    # near-blank continuation page there), not just here.
+                    header_rows = 1 if grid["kind"] != "info" else 0
+                    offset = len(chunk0._cellvalues) - header_rows
+                    chunks = []
+                    for flowable in chunk_flowables[1:]:
+                        count = len(flowable._cellvalues) - header_rows
+                        chunks.append({
+                            "status": "ok", "kind": grid["kind"], "header": grid["header"],
+                            "rows": rows[offset:offset + count], "style": style,
+                        })
+                        offset += count
+                    continuations[el_id] = chunks
+            i = j
+
+        return Response({"continuations": continuations})
+
+    @action(detail=True, methods=["post"], url_path="toc-entries")
+    def toc_entries(self, request, pk=None):
+        """Live "List of tables/figures/images" content for the Customize
+        tab canvas.
+
+        The "Contents" TOC variant already renders for real in the editor —
+        it only needs this report's own page list, which the frontend has
+        anyway (see ReportConfigurator's tocEntries). The other three
+        variants ("tables"/"figures"/"images") number every OTHER captioned
+        element in final PDF order, which depends on the whole document
+        (repeat-page expansion, table-overflow pagination pushing later
+        pages' numbers up) — not something the per-page canvas editor can
+        recompute on its own, so until now it just showed a "resolved in the
+        downloaded PDF" placeholder there (see ElementPreview.tsx's
+        TocPreview). Runs the exact same pre-pass build_canvas_pdf runs
+        before it draws anything (expand_pages -> overflow expansion ->
+        pdf_canvas._collect_captions), so this can never drift from what the
+        downloaded PDF actually lists.
+
+        Same Customize-tab-only scoping as chart_svgs/table_data.
+        """
+        from .pdf_canvas import (
+            _collect_captions, _expand_description_overflow, _expand_table_overflow, _expand_toc_overflow,
+            expand_pages,
+        )
+
+        report = self.get_object()
+        override = request.data.get("layout_override")
+        ctx = _cached_report_context(report)
+        cfg = merged_config(report.template.config if report.template else None)
+        applied = override if override is not None else getattr(report, "layout_override", None)
+        cfg = merge_layout_override(cfg, applied)
+
+        design = cfg.get("page_design") or {}
+        instances = expand_pages(cfg, ctx, report)
+        instances = _expand_description_overflow(instances, cfg, ctx, design)
+        instances = _expand_table_overflow(instances, cfg, ctx, design)
+        _collect_captions(instances, cfg, ctx)
+        # A captioned list can itself run past its own box (see
+        # pdf_canvas._expand_toc_overflow) — splicing continuation pages in
+        # shifts numbering for everything after them, so the caption pass
+        # runs again on the final, renumbered instances.
+        instances = _expand_toc_overflow(instances, cfg, ctx, design)
+        _collect_captions(instances, cfg, ctx)
+
+        def rows(key):
+            return [{"text": text, "page": page} for text, page in ctx.get(key) or []]
+
+        return Response({
+            "tables": rows("_table_captions"),
+            "figures": rows("_figure_captions"),
+            "images": rows("_image_captions"),
+        })

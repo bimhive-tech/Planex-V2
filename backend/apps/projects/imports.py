@@ -216,9 +216,21 @@ def parse_workbook_sheets(wb) -> dict:
     return result
 
 
-def _save_snapshot(project, *, date, source):
-    """Capture the project's aggregate progress as a dated snapshot (upsert by date)."""
-    agg = project.activities.aggregate(
+def _save_snapshot(project, *, date, source, schedule_import=None):
+    """Capture the project's aggregate progress as a dated snapshot (upsert by
+    date). `schedule_import` scopes every aggregate to one batch — normally
+    the batch this same import just created, so a re-import's snapshot
+    reflects only its own fresh activities, not every batch ever imported
+    combined (batches are no longer deleted on re-import — see
+    ScheduleImport's own docstring). Falls back to "whatever's current" when
+    not given, matching every pre-existing caller."""
+    from .services import latest_schedule_import
+
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    agg = activities.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(progress_percent__gte=100)),
         not_started=Count("id", filter=Q(progress_percent__lte=0)),
@@ -228,14 +240,15 @@ def _save_snapshot(project, *, date, source):
         "total": total, "completed": agg["completed"], "not_started": agg["not_started"],
         "in_progress": total - agg["completed"] - agg["not_started"],
     }
-    progress = scope_progress_map(project)
+    progress = scope_progress_map(project, schedule_import=schedule_import)
     zones = [
         {"name": z.name, "progress": progress.get(str(z.id), 0.0)}
-        for z in project.scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order")
+        for z in scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order")
     ]
     ProgressSnapshot.objects.update_or_create(
         project=project, date=date,
-        defaults={"company": project.company, "overall_progress": project_overall_progress(project),
+        defaults={"company": project.company,
+                  "overall_progress": project_overall_progress(project, schedule_import=schedule_import),
                   "breakdown": breakdown, "zones": zones, "scopes": progress, "source": source[:200]},
     )
 
@@ -285,7 +298,7 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
         wb.close()
 
     if schedule_roots:
-        return build_from_p6_schedule(project, schedule_roots, replace=replace,
+        return build_from_p6_schedule(project, schedule_roots,
                                       snapshot_date=snapshot_date, source=source,
                                       unwrap_single_root=not is_segmented_id)
 
@@ -299,20 +312,25 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
             pass
         roots = parse_p6_tree(file_obj)
         if roots:
-            return build_from_p6(project, roots, replace=replace,
-                                 snapshot_date=snapshot_date, source=source)
+            return build_from_p6(project, roots, snapshot_date=snapshot_date, source=source)
         return {"zones": 0, "subzones": 0, "activities": 0, "overall_progress": 0.0,
                 "error": "No zone sheets or FOR (P6) sheet recognised."}
 
-    if replace:
-        project.scopes.all().delete()  # cascades subzones + activities
+    # A re-import creates a new, permanently-retained batch instead of
+    # deleting the previous one — see ScheduleImport's own docstring. `date`
+    # is resolved up front (not after building) since every new row is
+    # tagged to this batch as it's constructed.
+    from .models import ScheduleImport
 
+    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
     company = project.company
+    schedule_import = ScheduleImport.objects.create(company=company, project=project, date=snap_date, source=source)
+
     Scope = ProjectScope
     zones, subz, phases, activities = [], [], [], []
     subzone_total = 0
     for z, (zone_name, sheet) in enumerate(parsed.items()):
-        zone = Scope(company=company, project=project,
+        zone = Scope(company=company, project=project, schedule_import=schedule_import,
                      scope_type=Scope.ScopeType.ZONE, name=zone_name, sort_order=z)
         zones.append(zone)
 
@@ -328,12 +346,12 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
             by_phase[ph].append(task)
 
         for c, label in enumerate(sheet["subzones"]):
-            subzone = Scope(company=company, project=project, parent=zone,
+            subzone = Scope(company=company, project=project, parent=zone, schedule_import=schedule_import,
                             scope_type=Scope.ScopeType.AREA, name=label or f"SZ{c + 1}", sort_order=c)
             subz.append(subzone)
             subzone_total += 1
             for pi, ph in enumerate(order):
-                phase = Scope(company=company, project=project, parent=subzone,
+                phase = Scope(company=company, project=project, parent=subzone, schedule_import=schedule_import,
                               scope_type=Scope.ScopeType.PHASE, name=ph, sort_order=pi,
                               discipline=_guess_discipline(ph))
                 phases.append(phase)
@@ -342,7 +360,7 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
                     if val is None:
                         continue
                     activities.append(Activity(
-                        company=company, project=project, scope=phase,
+                        company=company, project=project, scope=phase, schedule_import=schedule_import,
                         name=task["name"], weight=task["weight"], progress_percent=val,
                         phase_name=ph, row_index=task["row_index"],
                         subzone_code=label or f"SZ{c + 1}", subzone_index=c,
@@ -354,17 +372,19 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
     Scope.objects.bulk_create(subz, batch_size=1000)
     Scope.objects.bulk_create(phases, batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
+    schedule_import.activity_count = len(activities)
+    schedule_import.save(update_fields=["activity_count", "updated_at"])
 
-    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
-    _save_snapshot(project, date=snap_date, source=source)
+    _save_snapshot(project, date=snap_date, source=source, schedule_import=schedule_import)
 
     return {
         "zones": len(zones),
         "subzones": subzone_total,
         "phases": len(phases),
         "activities": len(activities),
-        "overall_progress": project_overall_progress(project),
+        "overall_progress": project_overall_progress(project, schedule_import=schedule_import),
         "snapshot_date": snap_date.isoformat(),
+        "schedule_import_id": str(schedule_import.id),
     }
 
 

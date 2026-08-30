@@ -137,7 +137,7 @@ def _pct_or_dash(v):
     return f"{v:.1f}%" if v is not None else "—"
 
 
-def apply_table_overrides(kind, header, rows, overrides):
+def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None):
     """Substitute cell text with a report's own manual overrides (the
     "table" element's `overrides` prop, edited via the Customize tab's
     live table preview) — mutates `header`/`rows` in place *before* either
@@ -148,47 +148,92 @@ def apply_table_overrides(kind, header, rows, overrides):
     Keys: `hc{col}` for a header cell, `r{row}c{col}` for a body cell.
     "hierarchy" rows are dicts, not lists — `col` there is a fixed
     0=name/1=actual/2=previous/3=planned mapping, matching the raw JSON
-    shape (see resolve_table's hierarchy_progress branch)."""
-    if not overrides:
-        return
-    if header:
-        for j in range(len(header)):
-            key = f"hc{j}"
-            if key in overrides:
-                header[j] = overrides[key]
-    if kind == "hierarchy":
-        cols = ("name", "actual", "previous", "planned")
-        for i, row in enumerate(rows):
-            for j, col in enumerate(cols):
-                key = f"r{i}c{j}"
+    shape (see resolve_table's hierarchy_progress branch).
+
+    `hidden_rows` (the element's own `hidden_rows` prop — a data-bound
+    table's rows can't be deleted like a custom table's can, since they're
+    computed from real project data, but a report author can still choose
+    to drop specific ones from this one report's view) is a list/set of
+    *original* row indices to remove entirely — applied last, after cell
+    overrides, so a hidden row's own overrides (if any) are simply
+    discarded with it rather than shifting onto a different row."""
+    if overrides:
+        if header:
+            for j in range(len(header)):
+                key = f"hc{j}"
                 if key in overrides:
-                    row[col] = overrides[key]
-    else:
-        for i, row in enumerate(rows):
-            for j in range(len(row)):
-                key = f"r{i}c{j}"
-                if key in overrides:
-                    row[j] = overrides[key]
+                    header[j] = overrides[key]
+        if kind == "hierarchy":
+            cols = ("name", "actual", "previous", "planned")
+            for i, row in enumerate(rows):
+                for j, col in enumerate(cols):
+                    key = f"r{i}c{j}"
+                    if key in overrides:
+                        row[col] = overrides[key]
+        else:
+            for i, row in enumerate(rows):
+                for j in range(len(row)):
+                    key = f"r{i}c{j}"
+                    if key in overrides:
+                        row[j] = overrides[key]
+    if hidden_rows:
+        hidden = set(hidden_rows)
+        rows[:] = [row for i, row in enumerate(rows) if i not in hidden]
 
 
-def _info_table(cfg, styles, rows, rtl, avail_width=None):
-    """Bordered 2-col table: ■ label on the right, value on the left (RTL look).
+def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None):
+    """Bordered 2-col table: label on the right, value on the left (RTL look).
 
     `avail_width` (the box/frame width this table will actually be drawn
     into, in points) lets the value column wrap long text correctly instead
     of relying on ReportLab to shrink-then-rewrap the auto ("None") column,
     which is what garbles long Arabic values — see `_wrap_shape`.
+
+    `highlight_labels` (a set of already-resolved label strings, e.g.
+    `{labels["info_delay"], labels["info_forecast"]}`) tints a whole row —
+    matches the client's own reference report's own convention of visually
+    flagging its schedule-risk rows (forecast/delay dates) rather than
+    letting them blend into the rest of the table, found comparing our
+    build to that reference directly (2026-08-26). `None`/empty highlights
+    nothing, unchanged from before this parameter existed.
     """
     c, tcfg = cfg["colors"], cfg["table"]
-    label_style = ParagraphStyle("lbl", parent=styles["value"], alignment=TA_RIGHT)
-    label_w = 58 * mm
+    # Dedicated compact leading (1.15x) instead of the shared prose styles'
+    # 1.5x: a spec table's row height is dominated by wrapped-label line
+    # count, not paragraph spacing (spaceAfter has no effect on Table cell
+    # height — reportlab only applies it in frame/story flow). At the
+    # default 1.5x leading, a project with every optional field populated
+    # (contract value, approved value, forecast cost, advance payment, all
+    # 4 (Part) fields — 26 rows total) can't fit even at font_size=7; at
+    # 1.15x + a narrower 50mm label column it fits with margin at
+    # font_size=8, matching the reference's own denser convention. Confirmed
+    # empirically 2026-08-26.
+    size = cfg["fonts"]["base_size"]
+    lead = size * 1.15
+    label_style = ParagraphStyle("lbl", fontName=BOLD, fontSize=size, textColor=hexcolor(c["text"]),
+                                  leading=lead, alignment=TA_RIGHT)
+    body_style = ParagraphStyle("bodyc", fontName=styles["body"].fontName, fontSize=size,
+                                 textColor=hexcolor(c["text"]), leading=lead)
+    label_highlight_style = ParagraphStyle("lblh", parent=label_style, fontName=BOLD)
+    body_highlight_style = ParagraphStyle("bodyh", parent=body_style, fontName=BOLD)
+    label_w = 50 * mm
     value_max_width = max(avail_width - label_w - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
+    highlight_labels = highlight_labels or set()
     data = []
+    highlight_rows = []
     for label, value in rows:
-        # A bullet, not a black square (■) — Amiri has no glyph for ■ and
-        # renders it as a visible tofu box next to every label.
-        lbl = Paragraph(f"{shape(label)} •", label_style)
-        val = _aligned(styles["body"], value, force=TA_RIGHT if rtl else TA_LEFT, max_width=value_max_width)
+        is_highlighted = label in highlight_labels
+        if is_highlighted:
+            highlight_rows.append(len(data))
+        # No bullet/marker before the label — matches the reference report's
+        # own plain "LABEL: value" convention exactly (found 2026-08-26; an
+        # earlier session used a bullet here since Amiri has no glyph for a
+        # real ■, but the reference doesn't use any marker at all).
+        lbl = Paragraph(shape(label), label_highlight_style if is_highlighted else label_style)
+        val = _aligned(
+            body_highlight_style if is_highlighted else body_style, value,
+            force=TA_RIGHT if rtl else TA_LEFT, max_width=value_max_width,
+        )
         data.append([val, lbl] if rtl else [lbl, val])
     widths = [None, label_w] if rtl else [label_w, None]
     pad = float(tcfg.get("cell_padding", 6))
@@ -199,6 +244,8 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None):
         ("TOPPADDING", (0, 0), (-1, -1), pad), ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
         ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]
+    for r in highlight_rows:
+        style.append(("BACKGROUND", (0, r), (-1, r), hexcolor(c["table_highlight"])))
     # Always bordered historically (no toggle existed) — default stays True
     # so an untouched template renders exactly as before; now overridable
     # like every other table kind's border.

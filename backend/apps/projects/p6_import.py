@@ -114,19 +114,22 @@ def _entry_nodes(roots):
     return (zones or roots), False
 
 
-def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""):
+def build_from_p6(project, roots, *, snapshot_date=None, source=""):
     """Create scopes + activities from a parsed P6 tree and snapshot progress.
     Stages (or zones, if there are no stages) become the top-level scopes; below
     a zone a node holding activities is a Phase and anything in between is an Area."""
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
+    from .models import ScheduleImport
     from .services import project_overall_progress
 
     Scope = ProjectScope
     company = project.company
-    if replace:
-        project.scopes.all().delete()
+    # A re-import creates a new, permanently-retained batch instead of
+    # deleting the previous one — see ScheduleImport's own docstring.
+    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
+    schedule_import = ScheduleImport.objects.create(company=company, project=project, date=snap_date, source=source)
 
     entries, roots_are_stages = _entry_nodes(roots)
     scopes_by_depth = defaultdict(list)
@@ -146,14 +149,14 @@ def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""
     def walk(node, parent, depth, forced):
         stype = type_of(node, forced)
         counts[stype] += 1
-        scope = Scope(company=company, project=project, parent=parent, scope_type=stype,
+        scope = Scope(company=company, project=project, parent=parent, scope_type=stype, schedule_import=schedule_import,
                       name=node["name"], sort_order=len(scopes_by_depth[depth]),
                       discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
         scopes_by_depth[depth].append(scope)
         for task in node["activities"]:
             row_counter[0] += 1
             activities.append(Activity(
-                company=company, project=project, scope=scope,
+                company=company, project=project, scope=scope, schedule_import=schedule_import,
                 name=task["name"], code=task["code"], weight=1,
                 progress_percent=task["pct"], phase_name=node["name"],
                 row_index=row_counter[0], progress_type=Activity.ProgressType.PERCENTAGE,
@@ -170,9 +173,10 @@ def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""
     for depth in sorted(scopes_by_depth):
         Scope.objects.bulk_create(scopes_by_depth[depth], batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
+    schedule_import.activity_count = len(activities)
+    schedule_import.save(update_fields=["activity_count", "updated_at"])
 
-    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
-    _save_snapshot(project, date=snap_date, source=source)
+    _save_snapshot(project, date=snap_date, source=source, schedule_import=schedule_import)
 
     return {
         "stages": counts.get(Scope.ScopeType.STAGE, 0),
@@ -180,7 +184,8 @@ def build_from_p6(project, roots, *, replace=True, snapshot_date=None, source=""
         "subzones": counts.get(Scope.ScopeType.AREA, 0),
         "phases": counts.get(Scope.ScopeType.PHASE, 0),
         "activities": len(activities),
-        "overall_progress": project_overall_progress(project),
+        "overall_progress": project_overall_progress(project, schedule_import=schedule_import),
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6",
+        "schedule_import_id": str(schedule_import.id),
     }

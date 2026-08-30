@@ -88,6 +88,96 @@ class RichTextTests(SimpleTestCase):
             '<ul><li>أولا</li><li><b>ثانيا</b></li></ul><div>Plain</div>', cfg, {})
         self.assertEqual(len(flow), 3)  # two list items + one paragraph
 
+    def test_sanitize_keeps_an_embed_marker_and_drops_its_children(self):
+        from .richtext import sanitize_html
+
+        spec = '{"kind": "table", "props": {"source": "zone_progress"}}'
+        out = sanitize_html(
+            f'<p>Before</p><div data-embed="table" data-spec=\'{spec}\'>'
+            f'<span onclick="x()">📊 chip</span></div><p>After</p>')
+        self.assertIn('data-embed="table"', out)
+        self.assertIn("zone_progress", out)  # the spec JSON survived, escaped into the attribute
+        self.assertNotIn("chip", out)        # the editor's own display children are never stored
+        self.assertNotIn("onclick", out)
+        self.assertIn("Before", out)
+        self.assertIn("After", out)
+
+    def test_sanitize_ignores_an_unrecognized_embed_kind(self):
+        from .richtext import sanitize_html
+
+        out = sanitize_html('<div data-embed="script" data-spec="{}">x</div>')
+        # Not one of table/chart/image -> falls through to the generic div
+        # handling (unwrapped like any other unknown-attribute div), not
+        # kept as a marker.
+        self.assertNotIn("data-embed", out)
+
+    def test_html_to_flowables_resolves_a_table_embed_inline(self):
+        from .richtext import html_to_flowables
+
+        cfg = default_config()
+        spec = '{"kind": "table", "props": {"source": "zone_progress"}}'
+        html = f'<p>Intro</p><div data-embed="table" data-spec=\'{spec}\'></div><p>Outro</p>'
+        flow = html_to_flowables(html, cfg, {}, ctx=_full_ctx(), scope={"item": None}, avail_width=400)
+        self.assertEqual(len(flow), 3)  # paragraph, real Table, paragraph
+        from reportlab.platypus import Table
+        self.assertIsInstance(flow[1], Table)
+
+    def test_html_to_flowables_drops_an_embed_without_ctx(self):
+        from .richtext import html_to_flowables
+
+        cfg = default_config()
+        spec = '{"kind": "table", "props": {"source": "zone_progress"}}'
+        html = f'<p>Intro</p><div data-embed="table" data-spec=\'{spec}\'></div>'
+        flow = html_to_flowables(html, cfg, {})  # no ctx passed
+        self.assertEqual(len(flow), 1)  # only the paragraph — embed silently skipped
+
+    def test_html_to_flowables_drops_an_embed_with_unresolvable_source(self):
+        from .richtext import html_to_flowables
+
+        cfg = default_config()
+        spec = '{"kind": "table", "props": {"source": "not_a_real_source"}}'
+        html = f'<div data-embed="table" data-spec=\'{spec}\'></div>'
+        flow = html_to_flowables(html, cfg, {}, ctx=_full_ctx(), scope={"item": None}, avail_width=400)
+        self.assertEqual(flow, [])
+
+    def test_html_to_flowables_drops_an_embed_with_malformed_spec(self):
+        from .richtext import html_to_flowables
+
+        cfg = default_config()
+        html = '<div data-embed="table" data-spec="not json"></div>'
+        flow = html_to_flowables(html, cfg, {}, ctx=_full_ctx(), scope={"item": None}, avail_width=400)
+        self.assertEqual(flow, [])
+
+    def test_sanitize_layout_html_cleans_a_description_elements_html_prop(self):
+        """A description element's rich text is authored per-element now
+        (props.html), not one shared report-wide field — it still has to go
+        through the exact same whitelist sanitize_html always applied,
+        wherever a template config or a report layout_override is saved
+        (see serializers.py's validate_config/validate_layout_override)."""
+        from .richtext import sanitize_layout_html
+
+        layout = {
+            "page_design": {"master_elements": [
+                {"id": "m1", "type": "description",
+                 "props": {"html": '<p>Header</p><script>alert(1)</script>'}},
+            ]},
+            "layout": {"pages": [
+                {"id": "p1", "elements": [
+                    {"id": "e1", "type": "description", "props": {"html": "<b onclick=\"x()\">Bold</b>"}},
+                    {"id": "e2", "type": "table", "props": {"source": "zone_progress"}},  # untouched, no .html
+                ]},
+            ]},
+        }
+        out = sanitize_layout_html(layout)
+        master_html = out["page_design"]["master_elements"][0]["props"]["html"]
+        self.assertNotIn("script", master_html)
+        self.assertIn("Header", master_html)
+        page_html = out["layout"]["pages"][0]["elements"][0]["props"]["html"]
+        self.assertNotIn("onclick", page_html)
+        self.assertIn("<b>Bold</b>", page_html)
+        # A non-description element (or one with no .html prop) is left alone.
+        self.assertEqual(out["layout"]["pages"][0]["elements"][1]["props"], {"source": "zone_progress"})
+
 
 class PdfTests(SimpleTestCase):
     def test_arabic_detection_and_shaping(self):
@@ -119,6 +209,27 @@ class PdfTests(SimpleTestCase):
         data = build_report_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
         self.assertGreater(len(data), 1000)
+
+    def test_description_inline_table_embed_resolves_in_the_legacy_renderer(self):
+        """The legacy flowing renderer's own description section (pdf.py)
+        gets the same inline-embed support as the canvas renderer's
+        "description" element — resolved through the identical
+        resolve_table, just handed off to a real Frame/story instead of a
+        hand-built box, so pagination is automatic there."""
+        spec = '{"kind": "table", "props": {"source": "zone_progress"}}'
+        html = f'<p>Intro</p><div data-embed="table" data-spec=\'{spec}\'></div>'
+        ctx = _sample_ctx()
+        ctx["project"]["description_html"] = html
+        template = ReportTemplate(name="T", config=default_config())
+        report = SimpleNamespace(title="T", template=template)
+        data = build_report_pdf(report, ctx)
+        self.assertTrue(data.startswith(b"%PDF"))
+
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertIn("Zone B", full_text)
+        self.assertIn("75.0%", full_text)
 
     def test_respects_section_toggles(self):
         cfg = default_config()
@@ -383,12 +494,14 @@ class CanvasPdfTests(SimpleTestCase):
     def test_captioned_table_and_chart_get_sequential_numbers(self):
         """Phase 4's "every table/chart carries a sequential number with a
         caption printed under it" ask — a table's "show_caption" prop draws
-        "جدول N: name" beneath its box, a chart's draws "شكل N: name",
-        numbered in the order they're drawn (across pages, not per-page).
-        The caption's Arabic prefix reorders the whole line to RTL visual
-        order (see shape()'s docstring/the divider-heading tests elsewhere
-        in this file for the same effect) — so the English name/number this
-        test controls ends up FIRST in extracted text, not last."""
+        "جدول N - name" beneath its box, a chart's draws "رسم توضيحي N - name"
+        (matches the client's own real reference report's caption wording
+        and dash-not-colon punctuation exactly, 2026-08-26), numbered in the
+        order they're drawn (across pages, not per-page). The caption's
+        Arabic prefix reorders the whole line to RTL visual order (see
+        shape()'s docstring/the divider-heading tests elsewhere in this file
+        for the same effect) — so the English name/number this test controls
+        ends up FIRST in extracted text, not last."""
         import fitz
 
         pages = [
@@ -410,9 +523,9 @@ class CanvasPdfTests(SimpleTestCase):
 
         doc = fitz.open(stream=data, filetype="pdf")
         full_text = "".join(page.get_text() for page in doc)
-        self.assertIn("Zone Table :1", full_text)
-        self.assertIn("Progress Chart :1", full_text)  # its own, separate figure counter
-        self.assertIn("Second Table :2", full_text)    # second table, not reset per page
+        self.assertIn("Zone Table - 1", full_text)
+        self.assertIn("Progress Chart - 1", full_text)  # its own, separate figure counter
+        self.assertIn("Second Table - 2", full_text)    # second table, not reset per page
 
     def test_table_continuation_pages_do_not_repeat_the_caption(self):
         """Only the table's first page gets a caption/number — a synthetic
@@ -458,8 +571,76 @@ class CanvasPdfTests(SimpleTestCase):
 
         doc = fitz.open(stream=data, filetype="pdf")
         toc_text = doc[0].get_text()
-        self.assertIn("Zone Table :1", toc_text)
+        self.assertIn("Zone Table - 1", toc_text)
         self.assertIn("2", toc_text)  # the table's real page number (page 2)
+
+    def test_description_element_renders_rich_text_and_an_inline_table_embed(self):
+        """A "description" element draws its own `props.html` (authored
+        directly on the canvas, per element — not one shared report-wide
+        field) via richtext.html_to_flowables — including a table embed
+        dropped inline in the flowing text, resolved through the exact same
+        resolve_table every standalone table element uses (see
+        richtext._resolve_embed)."""
+        import fitz
+
+        spec = '{"kind": "table", "props": {"source": "zone_progress"}}'
+        html = (f'<p><b>Bold intro</b></p>'
+                f'<div data-embed="table" data-spec=\'{spec}\'></div>'
+                f'<p>Outro paragraph</p>')
+        ctx = _sample_ctx()
+        pages = [{"id": "p1", "name": "Description", "elements": [
+            {"id": "desc", "type": "description", "x": 10, "y": 10, "w": 190, "h": 250, "z": 0,
+             "props": {"html": html}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, ctx)
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertEqual(doc.page_count, 1)  # comfortably fits one page
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertIn("Bold intro", full_text)
+        self.assertIn("Outro paragraph", full_text)
+        self.assertIn("Zone B", full_text)  # a real row from the resolved table embed
+        self.assertIn("75.0%", full_text)
+
+    def test_description_element_without_html_renders_nothing_not_crash(self):
+        pages = [{"id": "p1", "name": "Description", "elements": [
+            {"id": "desc", "type": "description", "x": 10, "y": 10, "w": 190, "h": 250, "z": 0, "props": {}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, _sample_ctx())
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_description_overflow_continues_onto_extra_pages_not_truncated(self):
+        """Long description text that doesn't fit its box used to just spill
+        past it (the generic field-binding's old behavior) — a "description"
+        element must now continue onto as many extra pages as it takes,
+        exactly like an overflowing table does, with every paragraph's real
+        text present somewhere in the document."""
+        import fitz
+
+        paragraphs = "".join(f"<p>Paragraph number {i} of the narrative.</p>" for i in range(60))
+        ctx = _sample_ctx()
+        pages = [{"id": "p1", "name": "Description", "elements": [
+            {"id": "title", "type": "text", "x": 10, "y": 5, "w": 100, "h": 8, "z": 0,
+             "props": {"text": "Description Page"}},
+            {"id": "desc", "type": "description", "x": 10, "y": 20, "w": 190, "h": 60, "z": 1,
+             "props": {"html": paragraphs}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        data = build_canvas_pdf(report, ctx)
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertGreater(doc.page_count, 1, "60 short paragraphs in a 60mm box must overflow")
+        full_text = "".join(page.get_text() for page in doc)
+        self.assertIn("Paragraph number 0 of the narrative.", full_text)
+        self.assertIn("Paragraph number 59 of the narrative.", full_text)  # the very last one made it in
+        # The page's own non-description content (its heading) drew once,
+        # on the first page — continuation pages hold only the overflow.
+        self.assertEqual(full_text.count("Description Page"), 1)
 
 
 class CoverFitGeometryTests(SimpleTestCase):
@@ -721,9 +902,104 @@ class ResolveTableTests(SimpleTestCase):
     def test_item_scoped_source_returns_none_until_phase_2(self):
         self.assertIsNone(resolve_table("item.children", default_config(), _full_ctx(), {"item": None}))
 
+    def test_custom_source_reads_columns_and_rows_from_props(self):
+        # "custom" (paste-from-Excel / build-your-own table, CustomTableEditor.tsx)
+        # has no backend data source — it reads header/rows straight out of the
+        # element's own props.custom_data via the `style` param, not ctx.
+        style = {"custom_data": {"columns": ["A", "B"], "rows": [["1", "2"], ["3", "4"]]}}
+        grid = resolve_table("custom", default_config(), _full_ctx(), {"item": None}, raw=True, style=style)
+        self.assertEqual(grid, {"kind": "data", "header": ["A", "B"], "rows": [["1", "2"], ["3", "4"]]})
+
+    def test_custom_source_builds_a_real_pdf_table(self):
+        style = {"custom_data": {"columns": ["A", "B"], "rows": [["1", "2"]]}}
+        table = resolve_table("custom", default_config(), _full_ctx(), {"item": None}, style=style)
+        self.assertIsNotNone(table)
+        self.assertEqual(self._cell_text(table, 0, 0), "A")
+        self.assertEqual(self._cell_text(table, 1, 1), "2")
+
+    def test_custom_source_without_custom_data_returns_none(self):
+        self.assertIsNone(resolve_table("custom", default_config(), _full_ctx(), {"item": None}, style={}))
+        self.assertIsNone(resolve_table("custom", default_config(), _full_ctx(), {"item": None}, style=None))
+
+    def test_custom_source_without_columns_returns_none(self):
+        # Rows with no header at all is nothing to show — same "genuinely
+        # nothing to display" contract every other source's None already has.
+        style = {"custom_data": {"rows": [["1", "2"]]}}
+        self.assertIsNone(resolve_table("custom", default_config(), _full_ctx(), {"item": None}, style=style))
+
+    def test_custom_source_override_reaches_the_real_pdf_table(self):
+        style = {"custom_data": {"columns": ["A", "B"], "rows": [["1", "2"]]}}
+        table = resolve_table("custom", default_config(), _full_ctx(), {"item": None}, style=style,
+                               overrides={"r0c0": "Edited"})
+        self.assertEqual(self._cell_text(table, 1, 0), "Edited")  # row 0 = header, row 1 = the data row
+        self.assertEqual(self._cell_text(table, 1, 1), "2")  # untouched cell in the same row
+
+    def test_delays_status_is_translated_not_a_bare_english_title(self):
+        """Delay.Status's own choices (apps/projects/models.py) only carry an
+        English display label — `.title()`ing the raw value doesn't
+        translate it, so an otherwise fully-Arabic report showed a bare
+        "Open"/"Resolved" in this one column (found 2026-08-25)."""
+        ctx = {**_full_ctx(), "delays": [
+            {"title": "Late materials", "impact_days": 5, "status": "open"},
+            {"title": "Weather", "impact_days": 3, "status": "resolved"},
+        ]}
+        grid = resolve_table("delays", default_config(), ctx, {"item": None}, raw=True)
+        self.assertEqual([r[2] for r in grid["rows"]], ["قائم", "تم الحل"])
+
+    def test_delays_status_falls_back_to_title_case_for_an_unknown_value(self):
+        ctx = {**_full_ctx(), "delays": [
+            {"title": "Something new", "impact_days": 1, "status": "escalated"},
+        ]}
+        grid = resolve_table("delays", default_config(), ctx, {"item": None}, raw=True)
+        self.assertEqual(grid["rows"][0][2], "Escalated")
+
+    def test_hidden_rows_drops_that_row_from_the_table(self):
+        # A row clicked on the canvas to hide it (TablePreview's
+        # commitHideRow) writes into the element's own `hidden_rows` prop —
+        # original, pre-filter row indices, applied after overrides so it
+        # reaches the downloaded PDF exactly as it looks on the canvas, not
+        # just this raw preview.
+        grid = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
+                              raw=True, style={"hidden_rows": [0]})
+        self.assertEqual(grid["rows"], [["Zone B", "75.0%"]])  # zone 0 (المنطقة الأولى) is gone
+
+    def test_hidden_rows_and_overrides_share_the_same_original_index_space(self):
+        # Hiding row 0 and overriding row 1's cell — the override must still
+        # land on the surviving row by its *original* index, not silently
+        # shift onto a different row once the visible list is shorter.
+        grid = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
+                              raw=True, style={"hidden_rows": [0]}, overrides={"r1c0": "Renamed Zone"})
+        self.assertEqual(grid["rows"], [["Renamed Zone", "75.0%"]])
+
+    def test_hidden_rows_reaches_the_real_pdf_table(self):
+        table = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
+                               style={"hidden_rows": [0]})
+        self.assertEqual(len(table._cellvalues), 2)  # header + the one surviving zone
+        self.assertEqual(self._cell_text(table, 1, 0), "Zone B")
+
+    def test_hidden_rows_works_for_info_and_hierarchy_kinds_too(self):
+        info_grid = resolve_table("project_info", default_config(), _full_ctx(), {"item": None},
+                                   raw=True, style={"hidden_rows": [0]})
+        full_info_grid = resolve_table("project_info", default_config(), _full_ctx(), {"item": None}, raw=True)
+        self.assertEqual(len(info_grid["rows"]), len(full_info_grid["rows"]) - 1)
+
+        hierarchy_grid = resolve_table("hierarchy_progress", default_config(), _full_ctx(), {"item": None},
+                                        raw=True, style={"hidden_rows": [1]})  # the child row
+        self.assertEqual(len(hierarchy_grid["rows"]), 1)
+        self.assertEqual(hierarchy_grid["rows"][0]["level"], 0)
+
 
 class ResolveChartTests(SimpleTestCase):
     """`resolve_chart` for every CHART_SOURCES entry (reportElements.ts)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        # submittals_breakdown_chart measures label width (stringWidth) at
+        # build time, unlike every other chart here — needs Amiri registered
+        # before that runs, same as ResolveTableTests' own setUpClass.
+        ensure_fonts()
 
     SOURCES_WITH_DATA = [
         "zone_progress", "area_progress", "scurve", "breakdown", "duration",
@@ -771,6 +1047,56 @@ class ResolveChartTests(SimpleTestCase):
         drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 120, 70, scope_zone_id="z1")
         self.assertIsNotNone(drawing)
 
+    def test_planned_actual_chart_draws_two_series_when_planned_varies(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [
+            {"id": "z1", "name": "Zone A", "progress": 90.0, "planned": 88.0},
+            {"id": "z2", "name": "Zone B", "progress": 40.0, "planned": 70.0},
+        ]}
+        drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 246, 325)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(len(chart.data), 2)  # planned + actual, as before
+
+    def test_planned_actual_chart_collapses_to_one_series_when_every_zone_is_pinned_at_100(self):
+        """A badly overdue project clamps every zone's time-based planned% to
+        100% (see services._planned_progress) — ~20 near-identical planned
+        bars carry no information and just crowd the chart, so this collapses
+        to actual-only with a note instead (the "cropped-looking" chart from
+        2026-08-25's investigation)."""
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+        from reportlab.graphics.shapes import String
+
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [
+            {"id": "z1", "name": "Zone A", "progress": 97.0, "planned": 100.0},
+            {"id": "z2", "name": "Zone B", "progress": 69.0, "planned": 100.0},
+        ]}
+        drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 246, 325)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(len(chart.data), 1)  # actual only, no duplicate 100% bars
+        self.assertEqual(chart.data[0], [97.0, 69.0])
+        # The note's Arabic text is bidi-reshaped for RTL display (see
+        # pdf_base.shape) — "100%" visually reorders to "%100" — so check
+        # for the digits alone rather than the exact pre-shaped substring.
+        note_texts = [el.text for el in drawing.contents if isinstance(el, String)]
+        self.assertTrue(any("100" in t for t in note_texts))
+
+    def test_planned_actual_chart_keeps_both_series_when_only_some_zones_are_pinned(self):
+        """A mix of overdue and on-schedule zones is still informative as a
+        real comparison — only collapse when *every* zone shown is pinned."""
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        cfg = default_config()
+        ctx = {**_sample_ctx(), "zones": [
+            {"id": "z1", "name": "Zone A", "progress": 97.0, "planned": 100.0},
+            {"id": "z2", "name": "Zone B", "progress": 40.0, "planned": 65.0},
+        ]}
+        drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 246, 325)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(len(chart.data), 2)
+
     def test_spi_gauge_returns_none_without_a_value(self):
         from .pdf_charts import speedometer_chart
 
@@ -800,6 +1126,138 @@ class ResolveChartTests(SimpleTestCase):
         wedges = [el for el in drawing.contents if isinstance(el, Wedge)]
         self.assertEqual([w.fillColor for w in wedges],
                           [hexcolor("#111111"), hexcolor("#222222"), hexcolor("#333333"), hexcolor("#444444")])
+
+    def _submittals_ctx(self):
+        # type_key/status_key are the raw Submittal.Type/Status DB values
+        # (see apps/projects/models.py) — services.py puts these on every
+        # row alongside the translated display label.
+        return {**_full_ctx(), "submittals": {"rows": [
+            {"discipline": "Architecture", "status_key": "approved", "status": "Approved", "type_key": "material"},
+            {"discipline": "Architecture", "status_key": "pending", "status": "Pending", "type_key": "material"},
+            {"discipline": "Electrical", "status_key": "approved", "status": "Approved", "type_key": "material"},
+            {"discipline": "Concrete", "status_key": "approved", "status": "Approved", "type_key": "shop_drawing"},
+            {"discipline": "Concrete", "status_key": "rejected", "status": "Rejected", "type_key": "shop_drawing"},
+        ], "summary": []}}
+
+    def test_submittals_material_chart_only_counts_material_rows(self):
+        from reportlab.graphics.charts.barcharts import HorizontalBarChart
+
+        drawing = resolve_chart("submittals_material", None, default_config(), self._submittals_ctx(),
+                                {"item": None}, 150, 60)
+        self.assertIsNotNone(drawing)
+        chart = next(el for el in drawing.contents if isinstance(el, HorizontalBarChart))
+        # 2 disciplines appear in the material rows (Architecture, Electrical),
+        # each a series stacked across however many statuses appear.
+        self.assertEqual(len(chart.data), 2)
+        total_counted = sum(sum(series) for series in chart.data)
+        self.assertEqual(total_counted, 3)  # the 3 material rows, not the 2 shop_drawing ones
+
+    def test_submittals_shop_drawing_chart_only_counts_shop_drawing_rows(self):
+        drawing = resolve_chart("submittals_shop_drawing", None, default_config(), self._submittals_ctx(),
+                                {"item": None}, 150, 60)
+        self.assertIsNotNone(drawing)
+
+    def test_submittals_chart_with_no_matching_rows_returns_none(self):
+        ctx = {**_full_ctx(), "submittals": {"rows": [], "summary": []}}
+        self.assertIsNone(resolve_chart("submittals_material", None, default_config(), ctx, {"item": None}, 150, 60))
+
+
+class InvoiceStatusAndBudgetTotalCostChartTests(SimpleTestCase):
+    """The two "financial pies" added to موقف المستخلصات (2026-08-30) — the
+    client pointed at the reference dashboard's "Invoice Status" and "Budget
+    Total Cost" panels as still missing after they'd been marked
+    not-buildable in an earlier pass. They *are* buildable: Invoice.value
+    already sums to a real total (no approval-status field needed, since the
+    reference pie is really TOTAL vs INVOICED vs REMAINING, not a workflow
+    breakdown), and budget_total_cost_chart's "new items"/"for part" slices
+    reuse the already-tracked Variation/PartScope amounts."""
+
+    def _ctx(self, *, contract_value=None, budget=None, invoices_total=None,
+             variations_cost_approved_total=0, part_amount=None):
+        ctx = _full_ctx()
+        ctx["project"] = {**ctx["project"], "contract_value": contract_value, "budget": budget,
+                          "part_amount": part_amount}
+        ctx["invoices_total"] = invoices_total
+        ctx["variations_cost_approved_total"] = variations_cost_approved_total
+        return ctx
+
+    def test_invoice_status_none_without_a_contract_total(self):
+        ctx = self._ctx(invoices_total=3_125_000_000)
+        self.assertIsNone(resolve_chart("invoice_status", "pie", default_config(), ctx, {"item": None}, 120, 90))
+
+    def test_invoice_status_none_without_any_invoices(self):
+        ctx = self._ctx(budget=5_632_000_000, invoices_total=0)
+        self.assertIsNone(resolve_chart("invoice_status", "pie", default_config(), ctx, {"item": None}, 120, 90))
+
+    def test_invoice_status_splits_invoiced_vs_remaining(self):
+        from reportlab.graphics.charts.piecharts import Pie
+
+        ctx = self._ctx(budget=5_632_000_000, invoices_total=3_125_000_000)
+        drawing = resolve_chart("invoice_status", "pie", default_config(), ctx, {"item": None}, 120, 90)
+        self.assertIsNotNone(drawing)
+        pie = next(el for el in drawing.contents if isinstance(el, Pie))
+        self.assertEqual(list(pie.data), [3_125_000_000.0, 2_507_000_000.0])  # invoiced, remaining
+
+    def test_invoice_status_falls_back_to_budget_when_no_contract_value(self):
+        ctx = self._ctx(contract_value=None, budget=5_632_000_000, invoices_total=1_000)
+        self.assertIsNotNone(resolve_chart("invoice_status", "pie", default_config(), ctx, {"item": None}, 120, 90))
+
+    def test_budget_total_cost_none_without_a_contract_total(self):
+        ctx = self._ctx()
+        self.assertIsNone(resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90))
+
+    def test_budget_total_cost_is_a_single_real_slice_with_no_variations_or_part(self):
+        """A project with no approved CVOs and no active Part budget renders
+        as one contract-amount slice, not three fabricated ones — the
+        function's own explicit design, not a bug to fix."""
+        from reportlab.graphics.charts.piecharts import Pie
+
+        ctx = self._ctx(budget=5_632_000_000)
+        drawing = resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90)
+        pie = next(el for el in drawing.contents if isinstance(el, Pie))
+        self.assertEqual(list(pie.data), [5_632_000_000.0])
+
+    def test_budget_total_cost_adds_a_slice_per_real_extra_amount(self):
+        from reportlab.graphics.charts.piecharts import Pie
+
+        ctx = self._ctx(budget=5_632_000_000, variations_cost_approved_total=500_000, part_amount=200_000)
+        drawing = resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90)
+        pie = next(el for el in drawing.contents if isinstance(el, Pie))
+        self.assertEqual(list(pie.data), [5_632_000_000.0, 500_000.0, 200_000.0])
+
+    def test_boq_financial_progress_none_without_a_p6_cost_import(self):
+        ctx = {**_full_ctx(), "boq_financial_progress": []}
+        self.assertIsNone(resolve_chart("boq_financial_progress", "bar", default_config(), ctx, {"item": None}, 200, 100))
+
+    def test_progress_comparison_draws_three_bars_with_real_earned_value(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        ctx = {**_full_ctx(), "planned": 100.0, "overall": 88.0, "financial_percent_complete": 87.6}
+        drawing = resolve_chart("progress_comparison", "bar", default_config(), ctx, {"item": None}, 180, 60)
+        self.assertIsNotNone(drawing)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(chart.data, [[100.0, 88.0, 87.6]])
+
+    def test_progress_comparison_drops_to_two_bars_without_cost_data(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        ctx = {**_full_ctx(), "planned": 100.0, "overall": 88.0, "financial_percent_complete": None}
+        drawing = resolve_chart("progress_comparison", "bar", default_config(), ctx, {"item": None}, 180, 60)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(chart.data, [[100.0, 88.0]])
+
+    def test_boq_financial_progress_draws_budget_and_financial_series(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        ctx = {**_full_ctx(), "boq_financial_progress": [
+            {"name": "Electrical", "budget_share": 50.0, "financial_percent": 60.0},
+            {"name": "Concrete", "budget_share": 50.0, "financial_percent": 50.0},
+        ]}
+        drawing = resolve_chart("boq_financial_progress", "bar", default_config(), ctx, {"item": None}, 200, 100)
+        self.assertIsNotNone(drawing)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(list(chart.data[0]), [50.0, 50.0])   # budget_share
+        self.assertEqual(list(chart.data[1]), [60.0, 50.0])   # financial_percent
 
 
 class TocTests(SimpleTestCase):
@@ -1132,6 +1590,34 @@ class ScopeContextStalenessTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["name"], "Zone A")
 
+    def test_zone_rows_disambiguates_a_name_shared_across_stages(self):
+        """A P6 import can genuinely have several zones all called "Z(A)"
+        under different stages/buildings — a bare "Z(A)" alone can't tell a
+        reader which is which in a compact chart/table view (see
+        _disambiguated_names). This project's own "Zone A" is unique, so it
+        stays exactly as-is; only the two colliding "Z(A)" scopes below get
+        a parent prefix."""
+        from apps.projects.models import Activity, ProjectScope
+        from .services import _zone_rows
+
+        stage1 = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="stage", name="Stage 1")
+        stage2 = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="stage", name="Stage 2")
+        z1 = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Z(A)", parent=stage1)
+        z2 = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone", name="Z(A)", parent=stage2)
+        Activity.objects.create(company=self.company, project=self.project, scope=z1,
+                                 name="Task", weight=1, progress_percent=50)
+        Activity.objects.create(company=self.company, project=self.project, scope=z2,
+                                 name="Task", weight=1, progress_percent=50)
+
+        rows = {r["id"]: r["name"] for r in _zone_rows(self.project)}
+        self.assertEqual(rows[str(z1.id)], "Stage 1 - Z(A)")
+        self.assertEqual(rows[str(z2.id)], "Stage 2 - Z(A)")
+        self.assertEqual(rows[str(self.zone.id)], "Zone A")  # unique name, untouched
+
 
 class PlannedProgressOverrideTests(TestCase):
     """A real P6 export states its own Schedule % Complete (planned, time-based)
@@ -1344,6 +1830,37 @@ class CriticalPathRowsTests(TestCase):
         self.assertEqual(rows["Zone A"]["delay_days"], 0)
         self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 1))
 
+    def test_zone_behind_pace_reports_estimated_delay_before_its_deadline_passes(self):
+        """The actual bug this replaced: a zone running well behind schedule
+        showed 0 delay for its entire run because its own deadline hadn't
+        technically arrived yet. Zone A: 1-Jan-2026 -> 1-Jun-2026 (151 days),
+        50% actual progress — as-of a date where time-based planned% is much
+        higher than 50%, the gap should translate into real estimated days,
+        not a flat 0 just because 1-Jun hasn't arrived yet."""
+        from .services import _critical_path_rows, _hierarchy_rows
+
+        as_of = datetime.date(2026, 5, 1)  # 4 months in, planned ~79.5%, actual 50%
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
+        self.assertGreater(rows["Zone A"]["delay_days"], 0)  # not the old flat 0
+        self.assertEqual(
+            rows["Zone A"]["forecast_finish"],
+            datetime.date(2026, 6, 1) + datetime.timedelta(days=rows["Zone A"]["delay_days"]),
+        )
+
+    def test_explicit_revised_finish_wins_over_the_pace_estimate(self):
+        """An explicit EOT is a human-recorded decision — it must win over
+        the heuristic pace estimate, never get silently overridden by it."""
+        from .services import _critical_path_rows, _hierarchy_rows
+
+        self.zone.revised_finish = datetime.date(2026, 6, 20)
+        self.zone.save(update_fields=["revised_finish"])
+        as_of = datetime.date(2026, 5, 1)  # same date as the pace-estimate test above
+        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
+        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
+        self.assertEqual(rows["Zone A"]["delay_days"], 19)  # the recorded EOT, not ~45 from pace
+        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 20))
+
 
 class GanttRowsTests(TestCase):
     """`_gantt_rows` builds zone+child Gantt bars from each scope's OWN dates
@@ -1437,6 +1954,98 @@ class FinanceReportTests(TestCase):
         data = build_report_pdf(rep, ctx)
         self.assertTrue(data.startswith(b"%PDF"))
 
+    def test_variations_cost_approved_total_only_counts_approved_cost_vos(self):
+        """Backs the Summary/Invoices pages' "Budget Total Cost" pie's "new
+        items" slice (2026-08-30) — a pending or rejected CVO hasn't actually
+        changed the contract value yet (Variation's own docstring), and a
+        SCHEDULE-kind variation isn't a cost figure at all, so neither may
+        leak into the sum."""
+        from apps.projects.models import Variation
+
+        from .services import build_report_context
+
+        Variation.objects.create(company=self.company, project=self.project, kind="cost",
+                                 status="approved", title="Extra scope", amount=500)
+        Variation.objects.create(company=self.company, project=self.project, kind="cost",
+                                 status="pending", title="Not yet decided", amount=9999)
+        Variation.objects.create(company=self.company, project=self.project, kind="cost",
+                                 status="rejected", title="Declined", amount=9999)
+        Variation.objects.create(company=self.company, project=self.project, kind="schedule",
+                                 status="approved", title="EOT", amount=0)
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        self.assertEqual(ctx["variations_cost_approved_total"], 500.0)
+
+    def test_boq_financial_progress_groups_by_phase_with_real_cost_data(self):
+        """Activity IS the BOQ line-item model (see its own docstring) — a
+        real P6 import fills budgeted_cost/earned_value_cost per activity;
+        this aggregates those into the two independently-real percentages
+        _boq_financial_progress's own docstring describes."""
+        from apps.projects.models import Activity, ProjectScope
+
+        from .services import build_report_context
+
+        scope = ProjectScope.objects.create(company=self.company, project=self.project,
+                                            scope_type="zone", name="Zone A")
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A1", phase_name="Electrical", budgeted_cost=800, earned_value_cost=400)
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A2", phase_name="Electrical", budgeted_cost=200, earned_value_cost=200)
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A3", phase_name="Concrete", budgeted_cost=1000, earned_value_cost=500)
+        # No cost data (a zone-tracker activity) — must not count as a zero-cost phase.
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A4", phase_name="Untracked")
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        rows = {r["name"]: r for r in ctx["boq_financial_progress"]}
+        self.assertEqual(set(rows), {"Electrical", "Concrete"})
+        # Electrical: budget 1000/2000 total = 50% share; earned 600/1000 = 60% financial.
+        self.assertEqual(rows["Electrical"]["budget_share"], 50.0)
+        self.assertEqual(rows["Electrical"]["financial_percent"], 60.0)
+        # Concrete: budget 1000/2000 = 50% share; earned 500/1000 = 50% financial.
+        self.assertEqual(rows["Concrete"]["budget_share"], 50.0)
+        self.assertEqual(rows["Concrete"]["financial_percent"], 50.0)
+
+    def test_boq_financial_progress_empty_without_any_cost_import(self):
+        from .services import build_report_context
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        self.assertEqual(ctx["boq_financial_progress"], [])
+
+    def test_financial_percent_complete_from_real_activity_cost_data(self):
+        """Backs the "Progress Comparison" chart's real 3rd bar (2026-08-30)
+        — project-wide earned_value_cost/budgeted_cost, distinct from
+        physical progress_percent (an activity can be 100% physically done
+        while earning slightly under/over its own budget, a real EVM
+        quirk — not derivable from progress_percent at all)."""
+        from apps.projects.models import Activity, ProjectScope
+
+        from .services import build_report_context
+
+        scope = ProjectScope.objects.create(company=self.company, project=self.project,
+                                            scope_type="zone", name="Zone A")
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A1", budgeted_cost=800, earned_value_cost=600)
+        Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                name="A2", budgeted_cost=200, earned_value_cost=150)
+        # No cost data — must not count as budget=0.
+        Activity.objects.create(company=self.company, project=self.project, scope=scope, name="A3")
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        self.assertEqual(ctx["financial_percent_complete"], 75.0)  # (600+150)/(800+200)
+
+    def test_financial_percent_complete_none_without_any_cost_import(self):
+        from .services import build_report_context
+
+        rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
+        ctx = build_report_context(rep)
+        self.assertIsNone(ctx["financial_percent_complete"])
+
 
 class ProjectInfoCostAndDateFieldsTests(TestCase):
     """contract_value/approved_value/forecast_cost and the now-distinct
@@ -1487,6 +2096,31 @@ class ProjectInfoCostAndDateFieldsTests(TestCase):
         }
         full_table = resolve_table("project_info", cfg, full_ctx, {"item": None})
         self.assertEqual(len(full_table._cellvalues), empty_rows + 5)
+
+    def test_project_info_money_values_use_each_fields_own_currency(self):
+        """Each contract-KPI field carries its own currency (Project.
+        budget_currency etc) — a real project can have its budget in EGP and
+        an advance payment in USD, so there's no shared project-wide
+        conversion, just per-field formatting."""
+        from .pdf_base import ensure_fonts, format_money
+        from .pdf_canvas import resolve_table
+
+        ensure_fonts()
+        self.assertEqual(format_money(1_000_000, "EGP"), "1,000,000 EGP")
+        self.assertEqual(format_money(None, "EGP"), "")  # no value -> no row, not "0 EGP"
+
+        cfg = default_config()
+        ctx = {
+            "project": {"name": "Tower", "currency": "EGP",
+                       "contract_value": 1_000_000, "contract_value_currency": "USD",
+                       "advance_payment": 500_000, "advance_payment_currency": "EGP"},
+            "arabic": False, "duration": {},
+        }
+        table = resolve_table("project_info", cfg, ctx, {"item": None})
+        # Value cells are Paragraphs — .text is the raw markup passed in.
+        texts = [c.text for row in table._cellvalues for c in row if hasattr(c, "text")]
+        self.assertIn("1,000,000 USD", texts)   # contract_value in its own currency
+        self.assertIn("500,000 EGP", texts)     # advance_payment in ITS own currency, independently
 
 
 class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
@@ -2017,8 +2651,8 @@ class ReportsApiTests(TestCase):
         # The real colors pdf_tables.py's builders draw with — never a
         # frontend-invented palette (see table_data's docstring on why
         # per-element props aren't the source of truth here).
-        self.assertEqual(resp.data["style"]["header_bg"], "#1F4E79")
-        self.assertTrue(resp.data["style"]["border"])
+        self.assertEqual(result["style"]["header_bg"], "#1F4E79")
+        self.assertTrue(result["style"]["border"])
 
     def test_table_data_action_applies_a_manual_cell_override(self):
         """A table element's own `overrides` prop (edited via the Customize
@@ -2060,6 +2694,36 @@ class ReportsApiTests(TestCase):
         untouched = [r for i, r in enumerate(rows) if i != name_row]
         untouched_before = [r for i, r in enumerate(rows_before) if i != name_row]
         self.assertEqual(untouched, untouched_before)
+
+    def test_table_data_action_applies_hidden_rows(self):
+        """A row clicked on the canvas to hide it (TablePreview's
+        commitHideRow) writes into the element's own `hidden_rows` prop —
+        the live table-data endpoint (what the Customize tab canvas actually
+        calls) drops it from the response the same way the real PDF would,
+        so what's shown here is what gets downloaded."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        table_el = {"id": "table1", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                    "props": {"source": "project_info"}}
+        page = {"id": "p1", "name": "Page 1", "elements": [table_el]}
+
+        before = self.client.post(
+            f"/api/reports/{report_id}/table-data/",
+            {"layout_override": {"layout": {"pages": [page]}}}, format="json")
+        rows_before = before.data["tables"]["table1"]["rows"]
+
+        table_el["props"]["hidden_rows"] = [0]
+        resp = self.client.post(
+            f"/api/reports/{report_id}/table-data/",
+            {"layout_override": {"layout": {"pages": [page]}}}, format="json")
+        rows_after = resp.data["tables"]["table1"]["rows"]
+        self.assertEqual(len(rows_after), len(rows_before) - 1)
+        self.assertEqual(rows_after, rows_before[1:])
 
     def test_table_data_action_returns_data_kind_with_real_zone_rows(self):
         """A "data" kind table (header + flat rows) — zone_progress, using
@@ -2156,7 +2820,12 @@ class ReportsApiTests(TestCase):
             f"/api/reports/{report_id}/table-data/",
             {"layout_override": draft_override}, format="json")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["tables"]["table1"], {"status": "no_data"})
+        result = resp.data["tables"]["table1"]
+        self.assertEqual(result["status"], "no_data")
+        # Still carries the table's effective style even with no rows to show
+        # — the canvas needs it to render a correctly-colored "no data" box,
+        # not just a bare placeholder (see table_data's docstring).
+        self.assertIn("style", result)
 
     def test_data_action_trims_repeat_sources_to_light_metadata(self):
         """photos/attachments/logos only need a caption and an authed
@@ -2370,9 +3039,14 @@ class ArabicWrapTests(SimpleTestCase):
         rendered = [cell.text for row in table._cellvalues for cell in row if hasattr(cell, "text")]
         self.assertFalse(any("<br/>" in t for t in rendered))
 
-    def test_bullet_marker_not_a_missing_glyph_black_square(self):
-        """■ (U+25A0) has no glyph in the Amiri font and renders as a visible
-        tofu box next to every label — swapped for a plain bullet."""
+    def test_info_table_label_has_no_marker(self):
+        """An info-table label used to get "label •" appended — a bullet
+        substitute for ■ (U+25A0), which has no glyph in the Amiri font and
+        renders as a visible tofu box. Removed entirely (2026-08-26, not
+        just swapped for something else): the client's own reference report
+        uses a plain "LABEL: value" row with no marker of any kind, and
+        matching that is what actually matters — the ■/• swap was only ever
+        a workaround for a problem this fully sidesteps."""
         from .constants import default_config
         from .pdf_tables import _info_table, _styles
 
@@ -2381,7 +3055,106 @@ class ArabicWrapTests(SimpleTestCase):
         table = _info_table(cfg, styles, [("Name", "Test")], True)
         label_cell = table._cellvalues[0][1]
         self.assertNotIn("■", label_cell.text)
-        self.assertIn("•", label_cell.text)
+        self.assertNotIn("•", label_cell.text)
+
+    def test_info_table_fits_every_optional_row_in_the_summary_box(self):
+        """A project with *every* optional info field populated (contract
+        value, approved value, forecast cost, advance payment, all four
+        (Part) fields — 26 rows, vs. the 14 a typical project fills) must
+        still fit the Summary page's 95x154mm info box, or its last rows
+        silently land on an orphaned continuation page — which is exactly
+        what happened for real, in a real downloaded PDF, before this
+        (2026-08-26).
+
+        The row height driver turned out to be the *leading* (line height)
+        on wrapped Arabic labels, not paragraph spacing — reportlab ignores
+        spaceAfter inside a Table cell entirely — so _info_table builds its
+        own compact 1.15x styles rather than inheriting the shared 1.5x
+        prose ones. At the old leading this did not fit even at font_size=7.
+        """
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+        from .pdf_tables import _info_table, _styles
+
+        cfg = default_config()
+        cfg["table"]["cell_padding"] = 3
+        cfg["fonts"]["base_size"] = 8
+        labels = cfg["labels"]
+        keys = [
+            "info_progress_as_on", "info_name", "info_code", "info_client", "info_consultant",
+            "info_contractor", "info_contractor_consultant", "info_type", "info_location",
+            "info_budget", "info_contract_value", "info_approved_value", "info_forecast_cost",
+            "info_advance_payment", "info_duration", "info_start", "info_finish", "info_eot",
+            "info_revised", "info_forecast", "info_delay", "info_size", "info_part_amount",
+            "info_part_completion_revised", "info_part_forecast", "info_part_delay",
+        ]
+        # A realistically long value — a short one would wrap less and make the
+        # test pass for the wrong reason.
+        rows = [(labels.get(k, k), "مشروع المنصورة 6 - أعمال التشطيبات") for k in keys]
+        self.assertEqual(len(rows), 26)
+
+        box_w, box_h = 95 * mm, 154 * mm
+        avail_w = box_w - 8  # element box minus its own inner padding
+        content_h = box_h - 8 * mm  # minus the caption band the Summary panel reserves
+        table = _info_table(cfg, _styles(cfg), rows, True, avail_width=avail_w)
+        _, natural_h = table.wrap(avail_w, 10_000)
+        self.assertLessEqual(natural_h, content_h)
+
+
+class SubmittalsChartLegendTests(SimpleTestCase):
+    """The submittals breakdown chart is drawn both full-width (its own
+    موقف الرسومات والمواد page, ~129mm) and as a narrow Summary dashboard
+    panel (~52mm). At the narrow width its side legend used to be drawn at
+    a fixed x that landed on top of the category labels, and reportlab's own
+    Legend flowable (fixed `deltax` column pitch) overflowed the panel
+    outright for a 4-discipline legend — so the chart measures the legend
+    and moves it under the bars, wrapping it, when the width is too tight."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        # This chart measures its own label widths (stringWidth) at build
+        # time — needs Amiri registered first, same as ChartTests above.
+        ensure_fonts()
+
+    def _rows(self, disciplines):
+        return [
+            {"status_key": "approved", "status": "Approved", "discipline": d}
+            for d in disciplines
+        ]
+
+    def test_wide_chart_keeps_the_side_legend(self):
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+        from .pdf_charts import submittals_breakdown_chart
+
+        cfg = default_config()
+        width = 129 * mm
+        d = submittals_breakdown_chart(cfg, self._rows(["Concrete", "Architecture"]), width, cfg["labels"])
+        chart = d.contents[0]
+        # Side legend reserves width beside the bars, not height under them.
+        self.assertLess(chart.width, width - chart.x - 8)
+
+    def test_narrow_chart_moves_the_legend_below_and_keeps_it_inside(self):
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+        from .pdf_charts import submittals_breakdown_chart
+
+        cfg = default_config()
+        width, height = 52 * mm, 67 * mm
+        disciplines = ["Concrete", "Architecture", "Electrical", "Mechanical"]
+        d = submittals_breakdown_chart(cfg, self._rows(disciplines), width, cfg["labels"], height=height)
+        chart = d.contents[0]
+        # Legend is below the bars: the chart's baseline is pushed up off 6pt.
+        self.assertGreater(chart.y, 6)
+        # ...and every legend swatch/label stays inside the panel's width.
+        for shape_ in d.contents[1:]:
+            self.assertGreaterEqual(shape_.x, 0)
+            self.assertLessEqual(shape_.x, width)
 
 
 class UploadedImageElementTests(TestCase):

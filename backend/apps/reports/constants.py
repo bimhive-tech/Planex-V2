@@ -25,11 +25,18 @@ DEFAULT_CONFIG = {
         "table_header_text": "#ffffff",
         "table_border": "#000000",
         "table_row_alt": "#eef3f8",
+        "table_highlight": "#FFF2CC",    # info-table rows worth flagging (forecast/delay dates) — see _info_table
         "cover_bg": "#ffffff",
         "cover_accent": "#963634",       # maroon bar + project title on the cover
         "chart_planned": "#4F81BD",      # sampled from the reference dashboard's own
         "chart_actual": "#C0504D",       # bar/pie/line charts — its dominant blue/red pair
         "chart_grid": "#D9D9D9",         # faint horizontal gridlines behind bars/lines
+        # Cycled by index for a chart with more than 2 data series (the
+        # submittals/shop-drawing stacked-by-discipline bars, the 4-line
+        # progress curve) — the same Office 2007 Accent1-6 theme
+        # chart_planned/chart_actual (Accent1/2) already sample from, so an
+        # N-series chart stays visually consistent with the 2-series ones.
+        "chart_palette": ["#4F81BD", "#C0504D", "#9BBB59", "#8064A2", "#4BACC6", "#F79646"],
         "gauge_bad": "#B40000",          # SPI/completion gauge bands — 4 zones,
         "gauge_warn": "#FFC000",         # colors sampled from the reference dashboard's
         "gauge_good": "#FFFF00",         # own speedometer chart (Poor/Average/Good/Excellent)
@@ -116,6 +123,16 @@ DEFAULT_CONFIG = {
         "progress_chart": "Planned vs Actual",
         "area_progress_chart": "Planned vs Actual by Area",
         "zone_progress": "Progress by Zone",
+        "area_progress": "الإنجاز حسب المنطقة",
+        "duration": "المدة الزمنية",
+        "item.children": "المناطق الفرعية",
+        "item.duration": "المدة الزمنية",
+        "item.units": "الإنجاز حسب الوحدة",
+        "breakdown": "توزيع الإنجاز",
+        "custom": "جدول مخصص",
+        "gantt": "الجدول الزمني",
+        "submittals_material": "موقف المواد حسب التخصص",
+        "submittals_shop_drawing": "موقف الرسومات التنفيذية حسب التخصص",
         "hierarchy_progress": "تفصيل نسب الإنجاز",
         "discipline_progress": "الإنجاز حسب التخصص",
         "area_dashboards": "لوحات معلومات المناطق",
@@ -125,6 +142,17 @@ DEFAULT_CONFIG = {
         "cashflow_monthly": "التدفق النقدي الشهري",
         "cashflow_cumulative": "التدفق النقدي التراكمي",
         "invoices": "المستخلصات",
+        "invoice_status": "موقف المستخلصات",
+        "invoice_invoiced": "المصروف",
+        "invoice_remaining": "المتبقي",
+        "budget_total_cost": "التكلفة الإجمالية للميزانية",
+        "budget_contract": "قيمة العقد",
+        "budget_new_items": "أعمال إضافية",
+        "budget_for_part": "قيمة الجزء",
+        "boq_financial_progress": "التقدم المالي حسب جدول الكميات",
+        "progress_comparison": "مقارنة نسب الإنجاز",
+        "budget_share": "نسبة الميزانية",
+        "financial_percent": "نسبة الإنجاز المالي",
         "submittals": "موقف الرسومات والمواد",
         "submittal_summary": "ملخص الحالة",
         "col_invoice": "البيان",
@@ -158,6 +186,7 @@ DEFAULT_CONFIG = {
         "activities": "activities",
         "planned": "Planned",
         "actual": "Actual",
+        "planned_overdue_note": "الخطة: 100% (تجاوز الموعد التعاقدي الأصلي)",
         "dashboard": "Executive Dashboard",
         "progress_report": "Project Progress Report",
         "duration_section": "Duration & Delay",
@@ -175,7 +204,9 @@ DEFAULT_CONFIG = {
         "gauge_good": "Good",
         "gauge_excellent": "Excellent",
         "progress_compare": "Progress vs Plan",
-        "figure": "شكل",
+        # "illustration", not "figure" — matches the client's own real
+        # reference report's caption wording exactly ("رسم توضيحي1- ...").
+        "figure": "رسم توضيحي",
         "table_caption": "جدول",
         "image_caption": "صورة",
         "col_previous": "Previous %",
@@ -184,8 +215,8 @@ DEFAULT_CONFIG = {
         "divider": "Section",
         "detailed_progress": "Detailed Progress",
         "col_task": "Task",
-        "critical_path_delays": "Critical Path Delays",
-        "col_forecast_finish": "Forecast Finish",
+        "critical_path_delays": "المسار الحرج للتأخيرات",
+        "col_forecast_finish": "النهاية المتوقعة",
         "activity_schedule": "Activity Schedule Detail",
         "col_bl_duration": "BL Duration",
         "col_original_duration": "Original Duration",
@@ -196,6 +227,8 @@ DEFAULT_CONFIG = {
         "delays": "Obstacles & Delays",
         "col_delay": "Obstacle / Delay",
         "col_impact": "Impact (days)",
+        "status_open": "قائم",
+        "status_resolved": "تم الحل",
         # Project-info row labels.
         "info_name": "Project name",
         "info_client": "Owner / Client",

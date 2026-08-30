@@ -59,6 +59,22 @@ def shape(text) -> str:
     return get_display(arabic_reshaper.reshape(text))
 
 
+def format_money(value, currency: str | None) -> str:
+    """A money value with its own currency code, e.g. "2,433,242,562.77 EGP".
+
+    Each contract-KPI field (budget/advance payment/contract/approved/
+    forecast) carries its OWN currency on Project — a real project can
+    genuinely have its budget quoted in EGP and an advance payment paid in
+    USD, so this never converts between currencies or assumes one shared
+    project-wide currency; it just formats whatever amount+currency pair
+    it's given. Both renderers' project_info row list (pdf.py and
+    pdf_canvas.py's resolve_table — see Phase 2's "two separate
+    implementations" note) call this the same way so the two can't drift."""
+    if not value:
+        return ""
+    return f"{value:,.0f} {currency or ''}".strip()
+
+
 def hexcolor(value, fallback="#000000"):
     try:
         return colors.HexColor(value)

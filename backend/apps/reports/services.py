@@ -5,8 +5,10 @@ Planned %, previous %, duration and delay are *derived* from data we already
 hold (project dates + dated snapshots) — no extra manual entry needed."""
 import datetime
 
-from apps.projects.models import ProjectImage, ProjectScope, Submittal
-from apps.projects.services import activity_progress_as_of, project_overall_progress
+from django.db.models import Sum
+
+from apps.projects.models import ProjectImage, ProjectScope, Submittal, Variation
+from apps.projects.services import activity_progress_as_of, latest_schedule_import, project_overall_progress
 
 from .models import ReportImage
 
@@ -30,9 +32,21 @@ def _planned_progress(project, as_of, use_imported=False):
     return round(max(0.0, min(1.0, frac)) * 100, 1)
 
 
-def _duration_for(s, f, revised_finish, as_of):
+def _duration_for(s, f, revised_finish, as_of, planned_pct=None, actual_pct=None):
     """Duration / elapsed / remaining / delay in calendar days for any
-    start+finish pair — shared by the project-level and per-zone duration."""
+    start+finish pair — shared by the project-level and per-zone duration.
+
+    Delay, in priority order: (1) an explicit `revised_finish` — a
+    human-recorded EOT, trusted outright; (2) `as_of` already past `f` —
+    genuinely, officially overdue; (3) `planned_pct`/`actual_pct`, when
+    given — a pace-based estimate (the gap between them, translated into
+    days via `total`) for a scope that hasn't formally missed its deadline
+    yet but is already running behind. Without (3), a scope reports exactly
+    0 delay for its *entire* run right up until its own deadline arrives, no
+    matter how far behind pace it's actually running — the bug this
+    replaced (found 2026-08-25 via the Critical Path Delays table always
+    showing 0, then also found reproducing on the per-zone duration widget,
+    the same root cause `_zone_duration` docstring already flagged)."""
     if not (s and f and f > s):
         return None
     total = (f - s).days
@@ -42,6 +56,8 @@ def _duration_for(s, f, revised_finish, as_of):
         delay = (revised_finish - f).days
     elif as_of and as_of > f:
         delay = (as_of - f).days
+    elif planned_pct is not None and actual_pct is not None and planned_pct > actual_pct:
+        delay = round((planned_pct - actual_pct) / 100 * total)
     else:
         delay = 0
     return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
@@ -52,22 +68,29 @@ def _duration(project, as_of):
     return _duration_for(project.planned_start, project.planned_finish, project.revised_finish, as_of)
 
 
-def _zone_duration(zone, project, as_of):
+def _zone_duration(zone, project, as_of, planned_pct=None, actual_pct=None):
     """Same as `_duration`, but using the zone's own dates when it carries
-    them — falls back to the project's otherwise (most zones don't, yet)."""
+    them — falls back to the project's otherwise (most zones don't, yet).
+    `planned_pct`/`actual_pct` (the same time-based-planned vs. real-actual
+    percentages `_hierarchy_rows` already computes for this zone) feed
+    `_duration_for`'s pace-based delay estimate — pass them whenever the
+    caller already has them (see `_area_dashboards`/`_critical_path_rows`)."""
     s = zone.planned_start or project.planned_start
     f = zone.planned_finish or project.planned_finish
     revised = zone.revised_finish or project.revised_finish
-    return _duration_for(s, f, revised, as_of)
+    return _duration_for(s, f, revised, as_of, planned_pct, actual_pct)
 
 
-def _breakdown(project, progress=None):
+def _breakdown(project, progress=None, schedule_import=None):
     """Count activities by progress bucket via a DB aggregate, then — for an as-of
     `progress` map — correct only the handful of overridden activities. Never
-    iterate the whole table (these hold tens of thousands of rows)."""
+    iterate the whole table (these hold tens of thousands of rows).
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it; every caller here passes the same one."""
     from django.db.models import Count, Q
 
-    agg = project.activities.aggregate(
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    agg = activities.aggregate(
         total=Count("id"),
         completed=Count("id", filter=Q(progress_percent__gte=100)),
         not_started=Count("id", filter=Q(progress_percent__lte=0)),
@@ -80,7 +103,7 @@ def _breakdown(project, progress=None):
         def bucket(v):
             return "c" if v >= 100 else ("n" if v <= 0 else "i")
 
-        for aid, cur in project.activities.filter(
+        for aid, cur in activities.filter(
             id__in=list(progress.keys())
         ).values_list("id", "progress_percent"):
             cb, nb = bucket(float(cur)), bucket(progress[str(aid)])
@@ -103,7 +126,7 @@ def _breakdown(project, progress=None):
     }
 
 
-def _scope_context(project, scope_ids):
+def _scope_context(project, scope_ids, schedule_import=None):
     """Resolve the report's scope selection into (predicate, scope_to_zone).
 
     `predicate(scope_id, activity_id)` is True when an activity is in the export:
@@ -116,8 +139,12 @@ def _scope_context(project, scope_ids):
     roll everything up to the Stage id instead, which `_zone_rows`'s
     `scope_type=ZONE` query never matches — every zone-scoped section
     (progress-by-zone, hierarchy, discipline, gantt, the detailed grid) would
-    render silently empty for any project using that hierarchy shape."""
-    rows = list(project.scopes.values_list("id", "parent_id", "scope_type"))
+    render silently empty for any project using that hierarchy shape.
+
+    `schedule_import` pins the batch these scopes/activities are read from —
+    see build_report_context's own resolution of it."""
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    rows = list(scopes.values_list("id", "parent_id", "scope_type"))
     parent = {str(sid): (str(pid) if pid else None) for sid, pid, _st in rows}
     scope_type = {str(sid): st for sid, _pid, st in rows}
 
@@ -147,15 +174,17 @@ def _scope_context(project, scope_ids):
     remaining = sel - selected_scopes
     # Whatever's left of the selection is assumed to be individual activity
     # ids (the scope picker allows selecting down to a single task) — but a
-    # *stale* scope_ids list (every id left over from before the project's
-    # schedule was last re-imported, which replaces every ProjectScope and
-    # Activity with fresh UUIDs) would otherwise match nothing here either,
+    # *stale* scope_ids list (every id left over from a schedule_import batch
+    # that's no longer current — every import creates fresh ProjectScope/
+    # Activity UUIDs rather than reusing the previous batch's, see
+    # ScheduleImport's own docstring) would otherwise match nothing here either,
     # silently excluding every real scope and rendering the whole report's
     # zone-scoped data empty with no error. Only trust `remaining` as real
     # task ids once at least one of them is confirmed to still exist.
     selected_tasks = set()
     if remaining:
-        real_tasks = {str(a) for a in project.activities.filter(id__in=remaining).values_list("id", flat=True)}
+        activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+        real_tasks = {str(a) for a in activities.filter(id__in=remaining).values_list("id", flat=True)}
         selected_tasks = remaining & real_tasks
 
     if not selected_scopes and not selected_tasks:
@@ -177,26 +206,52 @@ def _scope_context(project, scope_ids):
     return predicate, scope_to_zone
 
 
-def _zone_rows(project, scope_ids=None, progress=None):
+def _disambiguated_names(scopes):
+    """`scopes`: an iterable of (id, name, parent_id). Returns {str(id): name} —
+    a name shared by more than one scope in the set (a P6 import can genuinely
+    have several zones all called "Z(A)" under different stages/buildings —
+    see this function's callers) gets prefixed with its own parent's name
+    ("Stage 1 - Z(A)") so a reader can tell them apart in a compact chart/table
+    view; a name that's already unique on its own is left exactly as-is, so
+    the common case (no collision) never grows a label unnecessarily."""
+    from collections import Counter
+    scopes = list(scopes)
+    counts = Counter(name for _, name, _ in scopes)
+    parent_ids = {pid for _, _, pid in scopes if pid}
+    parent_names = (
+        dict(ProjectScope.objects.filter(id__in=parent_ids).values_list("id", "name"))
+        if parent_ids else {}
+    )
+    result = {}
+    for sid, name, pid in scopes:
+        parent_name = parent_names.get(pid) if pid else None
+        result[str(sid)] = f"{parent_name} - {name}" if counts[name] > 1 and parent_name else name
+    return result
+
+
+def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
     """Zones with progress rolled up over the *selected* tasks (a zone is shown
     only when it has included tasks). No selection = the whole project.
     `progress` (activity_id->% map) overrides current values for as-of reports.
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it.
 
     Matches every ZONE-typed scope regardless of parent — NOT just top-level
     ones: a P6 import can nest Zone under Stage (see `_scope_context`), so a
     `parent__isnull=True` filter here would exclude every real zone in that
     shape even though `scope_to_zone` correctly resolves activities to them."""
-    predicate, scope_to_zone = _scope_context(project, scope_ids)
+    predicate, scope_to_zone = _scope_context(project, scope_ids, schedule_import)
     zones = list(
         ProjectScope.objects.filter(
-            project=project, scope_type=ProjectScope.ScopeType.ZONE
-        ).order_by("sort_order", "name").values_list("id", "name")
+            project=project, scope_type=ProjectScope.ScopeType.ZONE, schedule_import=schedule_import
+        ).order_by("sort_order", "name").values_list("id", "name", "parent_id")
     )
-    order = {str(z): i for i, (z, _) in enumerate(zones)}
-    zone_name = {str(z): name for z, name in zones}
+    order = {str(z): i for i, (z, _, _) in enumerate(zones)}
+    zone_name = _disambiguated_names(zones)
 
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     sw, spw = {}, {}
-    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+    for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         if not predicate(sid, aid):
             continue
         zone = scope_to_zone.get(str(sid))
@@ -224,17 +279,19 @@ def _scope_planned_progress(scope, project, as_of):
     return round(max(0.0, min(1.0, frac)) * 100, 1)
 
 
-def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=None):
+def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=None, schedule_import=None):
     """Project -> Zone -> Subzone progress rollup (actual / previous / planned %)
     for the report's nested breakdown table. One level deeper than `_zone_rows`,
     using each scope's own planned dates when set. `prev_scopes` is the previous
     snapshot's full scope_id->% map (blank on snapshots taken before that existed,
-    so deeper "previous" values may legitimately be missing)."""
-    predicate, _ = _scope_context(project, scope_ids)
+    so deeper "previous" values may legitimately be missing). `schedule_import`
+    pins the batch — see build_report_context's own resolution of it."""
+    predicate, _ = _scope_context(project, scope_ids, schedule_import)
     prev_scopes = prev_scopes or {}
 
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     direct_w, direct_pw = {}, {}
-    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+    for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         if not predicate(sid, aid):
             continue
         sid = str(sid)
@@ -243,7 +300,8 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         direct_w[sid] = direct_w.get(sid, 0.0) + w
         direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
 
-    scopes = {str(s.id): s for s in project.scopes.all()}
+    scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    scopes = {str(s.id): s for s in scopes_qs}
     children = {}
     for s in scopes.values():
         if s.parent_id:
@@ -270,6 +328,9 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.ZONE),
         key=lambda s: (s.sort_order, s.name),
     )
+    # See _disambiguated_names's docstring — the same "Z(A)" repeated under
+    # different stages/buildings gets a disambiguating parent prefix here too.
+    zone_display_name = _disambiguated_names((z.id, z.name, z.parent_id) for z in zones)
 
     rows = []
     for zone in zones:
@@ -287,32 +348,99 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
                 "planned": _scope_planned_progress(child, project, as_of),
             })
         rows.append({
-            "id": zid, "name": zone.name, "actual": pct(zid), "previous": prev_scopes.get(zid),
+            "id": zid, "name": zone_display_name[zid], "actual": pct(zid), "previous": prev_scopes.get(zid),
             "planned": _scope_planned_progress(zone, project, as_of),
             "children": sub_rows,
         })
     return rows
 
 
-def _discipline_rows(project, scope_ids=None, progress=None):
+def _financial_percent_complete(project, schedule_import=None):
+    """Project-wide financial % complete — sum(earned_value_cost) /
+    sum(budgeted_cost) across every real P6-imported Activity (2026-08-30,
+    backs the "Progress Comparison" bars' real "Earned Value %" figure,
+    alongside the already-existing time-based `planned` % and physical
+    `overall` % actual). `None`, not 0, when the project has no cost
+    import at all — same "absence stays absence" rule as
+    _boq_financial_progress right below. `schedule_import` pins the batch —
+    see build_report_context's own resolution of it."""
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    agg = activities.exclude(budgeted_cost=None).aggregate(b=Sum("budgeted_cost"), e=Sum("earned_value_cost"))
+    budget = float(agg["b"] or 0)
+    if not budget:
+        return None
+    return round(float(agg["e"] or 0) / budget * 100, 1)
+
+
+def _boq_financial_progress(project, limit=12, schedule_import=None):
+    """Per-BOQ-phase financial progress — the reference dashboard's
+    "Financial Progress according to BOQ" bars (2026-08-30). Uses each
+    Activity's own real P6-imported `budgeted_cost`/`earned_value_cost`
+    (Activity IS the BOQ item model — see its own docstring; those fields
+    are null, not zero, for a zone-tracker project with no such import, so
+    this quietly returns nothing rather than fabricating figures for a
+    project that never had cost data).
+
+    Two independently-real percentages per phase, not one fabricated
+    "progress":
+    - `budget_share`: this phase's share of the project's *total* budgeted
+      cost (how much of the whole budget this trade represents).
+    - `financial_percent`: this phase's own earned_value_cost /
+      budgeted_cost (how much of ITS OWN budget has been earned so far —
+      P6's own EVM figure, not derived from progress_percent: even a
+      100%-physically-complete activity can earn slightly under or over
+      its own budgeted_cost).
+
+    Sorted by budget share descending, capped at `limit` phases so a P6
+    export with dozens of phases doesn't produce an unreadable chart.
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it."""
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    total_budget = float(
+        activities.exclude(phase_name="").exclude(budgeted_cost=None)
+        .aggregate(t=Sum("budgeted_cost"))["t"] or 0
+    )
+    if not total_budget:
+        return []
+    rows = (
+        activities.exclude(phase_name="").exclude(budgeted_cost=None)
+        .values("phase_name").annotate(budget=Sum("budgeted_cost"), earned=Sum("earned_value_cost"))
+        .order_by("-budget")[:limit]
+    )
+    out = []
+    for r in rows:
+        budget = float(r["budget"] or 0)
+        earned = float(r["earned"] or 0)
+        out.append({
+            "name": r["phase_name"],
+            "budget_share": round(budget / total_budget * 100, 1),
+            "financial_percent": round(earned / budget * 100, 1) if budget else 0.0,
+        })
+    return out
+
+
+def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=None):
     """Per-unit (subzone/building) progress split by trade — Concrete /
     Architecture / Electrical / Mechanical — using each activity's *phase*
     discipline tag (a zone-tracker phase is usually one trade's work package,
     and a phase's direct parent is the unit, so no deep tree walk is needed).
     Units with no tagged phases are omitted; untagged work is simply left out
-    of the trade columns rather than guessed at."""
-    predicate, _ = _scope_context(project, scope_ids)
+    of the trade columns rather than guessed at. `schedule_import` pins the
+    batch — see build_report_context's own resolution of it."""
+    predicate, _ = _scope_context(project, scope_ids, schedule_import)
     disciplines = [d for d in ProjectScope.Discipline.values]
 
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     phases = {
-        str(s.id): s for s in project.scopes.filter(
+        str(s.id): s for s in scopes.filter(
             scope_type=ProjectScope.ScopeType.PHASE).exclude(discipline="")
     }
     if not phases:
         return []
 
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     unit_w, unit_pw = {}, {}
-    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+    for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         sid = str(sid)
         phase = phases.get(sid)
         if not phase or phase.parent_id is None or not predicate(sid, aid):
@@ -325,7 +453,7 @@ def _discipline_rows(project, scope_ids=None, progress=None):
         unit_w[unit_id][phase.discipline] += w
         unit_pw[unit_id][phase.discipline] += w * prog
 
-    units = {str(s.id): s for s in project.scopes.filter(id__in=unit_w.keys())}
+    units = {str(s.id): s for s in scopes.filter(id__in=unit_w.keys())}
     rows = []
     for uid, by_disc in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
         row = {"name": units[uid].name}
@@ -336,10 +464,13 @@ def _discipline_rows(project, scope_ids=None, progress=None):
     return rows
 
 
-def _subtree_ids(project, root_id):
-    """All scope ids in the subtree rooted at root_id (inclusive)."""
+def _subtree_ids(project, root_id, schedule_import=None):
+    """All scope ids in the subtree rooted at root_id (inclusive).
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it."""
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     children = {}
-    for sid, pid in project.scopes.values_list("id", "parent_id"):
+    for sid, pid in scopes.values_list("id", "parent_id"):
         if pid:
             children.setdefault(str(pid), []).append(str(sid))
     out, stack = [], [str(root_id)]
@@ -350,18 +481,20 @@ def _subtree_ids(project, root_id):
     return out
 
 
-def _gantt_rows(project, scope_ids=None, progress=None):
+def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
     """Zone + direct-child bars for a simple Gantt-style schedule printout.
     Each row's baseline span is its OWN planned_start/planned_finish (set via
     manual entry or the schedule import) — we don't fall back to the project's
     dates the way `_zone_duration` does, since every row would then render an
     identical full-project bar. Rows without both dates are simply omitted.
     No predecessor/float/critical-path computation: the fill just shows the
-    row's own rolled-up actual % complete."""
-    predicate, _ = _scope_context(project, scope_ids)
+    row's own rolled-up actual % complete. `schedule_import` pins the batch —
+    see build_report_context's own resolution of it."""
+    predicate, _ = _scope_context(project, scope_ids, schedule_import)
 
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     direct_w, direct_pw = {}, {}
-    for sid, weight, prog, aid in project.activities.values_list("scope_id", "weight", "progress_percent", "id"):
+    for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         if not predicate(sid, aid):
             continue
         sid = str(sid)
@@ -370,7 +503,8 @@ def _gantt_rows(project, scope_ids=None, progress=None):
         direct_w[sid] = direct_w.get(sid, 0.0) + w
         direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
 
-    scopes = {str(s.id): s for s in project.scopes.all()}
+    scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    scopes = {str(s.id): s for s in scopes_qs}
     children = {}
     for s in scopes.values():
         if s.parent_id:
@@ -435,22 +569,26 @@ def _selected_progress_photos(report, project):
              "url": f"/api/projects/{project.id}/progress-images/{p['id']}/file/"} for p in ordered]
 
 
-def _area_dashboards(project, hierarchy, as_of):
+def _area_dashboards(project, hierarchy, as_of, schedule_import=None):
     """Per-zone dashboard data: its own duration/time-performance (falls back
     to the project's when it has none of its own) and a handful of recent
     progress photos from its subtree. The planned-vs-actual bar chart is drawn
-    straight from `hierarchy`'s children, so this only adds what that doesn't."""
+    straight from `hierarchy`'s children, so this only adds what that doesn't.
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it. `hierarchy`'s own zone ids are already scoped to it, so
+    this mainly matters for the `_subtree_ids` lookup below."""
     from apps.projects.models import ProgressImage
 
     zone_ids = [z["id"] for z in hierarchy]
-    zones_by_id = {str(s.id): s for s in project.scopes.filter(id__in=zone_ids)}
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    zones_by_id = {str(s.id): s for s in scopes.filter(id__in=zone_ids)}
 
     out = []
     for z in hierarchy:
         zone = zones_by_id.get(z["id"])
         if not zone:
             continue
-        subtree = _subtree_ids(project, z["id"])
+        subtree = _subtree_ids(project, z["id"], schedule_import)
         photos = list(
             ProgressImage.objects.filter(entry__project=project, entry__activity__scope_id__in=subtree)
             .order_by("-entry__date", "-created_at")
@@ -463,38 +601,49 @@ def _area_dashboards(project, hierarchy, as_of):
         out.append({
             "name": z["name"], "actual": z["actual"], "planned": z["planned"],
             "children": z["children"],
-            "duration": _zone_duration(zone, project, as_of) if own_schedule else None,
+            "duration": _zone_duration(zone, project, as_of, planned_pct=z["planned"], actual_pct=z["actual"])
+            if own_schedule else None,
             "photos": photos,
         })
     return out
 
 
-def _critical_path_rows(project, hierarchy, as_of):
+def _critical_path_rows(project, hierarchy, as_of, schedule_import=None):
     """Per-zone baseline finish vs current forecast, for zones carrying their
     own P6-imported schedule (planned_start/finish) — the "which buildings
-    are slipping and by how much" table. `forecast_finish` reuses
-    `_zone_duration`'s existing delay math (revised_finish if the zone has
-    one, else however far the as-of date has run past the baseline) rather
-    than a fresh calculation, so it stays consistent with the duration pie
-    shown elsewhere for the same zone."""
+    are slipping and by how much" table. `schedule_import` pins the batch —
+    see build_report_context's own resolution of it.
+
+    Delay/forecast come straight from `_zone_duration` (see its own and
+    `_duration_for`'s docstrings for the 3-signal priority: explicit
+    revised_finish, then officially-overdue, then a pace-based estimate) —
+    passing this zone's real planned/actual % is what makes signal 3 available
+    here, the fix for a real bug (found 2026-08-25): every zone in a real,
+    badly slipping project showed exactly 0 days delay simply because none of
+    their individual deadlines had technically arrived yet, even though the
+    project-level dashboard (a different, already-correct calculation)
+    reported months of real slippage for the same project."""
     zone_ids = [z["id"] for z in hierarchy]
-    zones_by_id = {str(s.id): s for s in project.scopes.filter(id__in=zone_ids)}
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    zones_by_id = {str(s.id): s for s in scopes.filter(id__in=zone_ids)}
     rows = []
     for z in hierarchy:
         zone = zones_by_id.get(z["id"])
         if not zone or not (zone.planned_start and zone.planned_finish):
             continue
-        dur = _zone_duration(zone, project, as_of)
+        dur = _zone_duration(zone, project, as_of, planned_pct=z.get("planned"), actual_pct=z.get("actual"))
         if not dur:
             continue
-        forecast = zone.revised_finish or (
-            zone.planned_finish + datetime.timedelta(days=dur["delay"]) if dur["delay"] else zone.planned_finish
-        )
+        delay = dur["delay"]
+        if zone.revised_finish and zone.revised_finish > zone.planned_finish:
+            forecast = zone.revised_finish
+        else:
+            forecast = zone.planned_finish + datetime.timedelta(days=delay) if delay else zone.planned_finish
         rows.append({
             "name": z["name"],
             "planned_finish": zone.planned_finish,
             "forecast_finish": forecast,
-            "delay_days": dur["delay"],
+            "delay_days": delay,
         })
     return rows
 
@@ -551,6 +700,19 @@ def build_report_context(report):
     """Assemble the full data dict the PDF generator consumes."""
     project = report.project
     as_of = report.report_date or report.period_finish or datetime.date.today()
+    # Which schedule-import batch "current" means for this report — reusing
+    # `as_of` (already "the report's as-of date", used for the progress-entry
+    # lookup right below) for schedule-import resolution too: they're the
+    # same underlying question ("what date is this report as of"), so a
+    # report left at its default (as_of = today) always floats to the
+    # latest import, and one explicitly dated in the past pins to whatever
+    # was current as of that date — exactly the "auto-latest unless
+    # overridden" behavior asked for (2026-08-30), with no separate field.
+    # See ScheduleImport's own docstring for why this matters: a re-import
+    # no longer deletes the previous batch, so without this every report
+    # would silently start double-counting activities from every batch ever
+    # imported combined, the moment a project gets re-imported a second time.
+    schedule_import = latest_schedule_import(project, as_of=as_of)
     # Part Scope is a log (see PartScope's docstring) — the report shows
     # whichever entry is most recent, ordered by the model's own Meta.
     latest_part = project.part_scopes.first()
@@ -559,8 +721,8 @@ def build_report_context(report):
     # or before the report date. Empty (no entries anywhere) → fast current path.
     progress = activity_progress_as_of(project, as_of) or None
 
-    overall = project_overall_progress(project, progress)
-    breakdown = _breakdown(project, progress)
+    overall = project_overall_progress(project, progress, schedule_import)
+    breakdown = _breakdown(project, progress, schedule_import)
 
     planned = _planned_progress(project, as_of, use_imported=(progress is None))
     duration = _duration(project, as_of)
@@ -582,21 +744,23 @@ def build_report_context(report):
 
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
     # the selected tasks (empty selection = whole project).
-    zones = _zone_rows(project, report.scope_ids, progress)
+    zones = _zone_rows(project, report.scope_ids, progress, schedule_import)
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
 
     # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
-    hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of)
+    hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
     # Flat list of areas (the subzones under every zone) for the optional
     # area-level planned/actual bar chart.
     areas = [{"name": c["name"], "planned": c["planned"], "actual": c["actual"]}
              for z in hierarchy for c in z["children"]]
-    discipline = _discipline_rows(project, report.scope_ids, progress)
-    area_dashboards = _area_dashboards(project, hierarchy, as_of)
-    critical_path = _critical_path_rows(project, hierarchy, as_of)
-    gantt = _gantt_rows(project, report.scope_ids, progress)
+    discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
+    boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
+    financial_percent_complete = _financial_percent_complete(project, schedule_import)
+    area_dashboards = _area_dashboards(project, hierarchy, as_of, schedule_import)
+    critical_path = _critical_path_rows(project, hierarchy, as_of, schedule_import)
+    gantt = _gantt_rows(project, report.scope_ids, progress, schedule_import)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
     # only when the detailed-progress section is enabled.
@@ -624,6 +788,15 @@ def build_report_context(report):
     ]
     invoices_total = sum(i["value"] for i in invoices)
 
+    # Approved Cost Variation Orders — the "new items" (added/omitted work)
+    # slice of a Budget Total Cost breakdown. Only APPROVED ones count: a
+    # pending/rejected VO hasn't actually changed the contract value yet
+    # (matches Variation.__doc__'s own "effect only applies once APPROVED").
+    variations_cost_approved_total = float(
+        project.variations.filter(kind=Variation.Kind.COST, status=Variation.Status.APPROVED)
+        .aggregate(s=Sum("amount"))["s"] or 0
+    )
+
     # Submittals — table rows plus a status summary (counts per approval status).
     status_labels = dict(Submittal.Status.choices)
     type_labels = dict(Submittal.Type.choices)
@@ -635,6 +808,7 @@ def build_report_context(report):
         status_counts[s["status"]] = status_counts.get(s["status"], 0) + 1
     submittals = {
         "rows": [{"title": s["title"], "type": type_labels.get(s["submittal_type"], ""),
+                  "type_key": s["submittal_type"],
                   "discipline": disc_labels.get(s["discipline"], ""),
                   "status": status_labels.get(s["status"], ""), "status_key": s["status"],
                   "reference": s["reference"], "date": s["date"]} for s in sub_rows],
@@ -712,11 +886,16 @@ def build_report_context(report):
             "forecast_finish": project.forecast_finish,
             "size_sqm": project.size_sqm,
             "budget": project.budget,
+            "budget_currency": project.budget_currency,
             "advance_payment": project.advance_payment,
+            "advance_payment_currency": project.advance_payment_currency,
             "eot_days": project.eot_days,
             "contract_value": project.contract_value,
+            "contract_value_currency": project.contract_value_currency,
             "approved_value": project.approved_value,
+            "approved_value_currency": project.approved_value_currency,
             "forecast_cost": project.forecast_cost,
+            "forecast_cost_currency": project.forecast_cost_currency,
             "part_amount": latest_part.amount if latest_part else None,
             "part_completion_revised": latest_part.completion_revised if latest_part else None,
             "part_forecast_completion": latest_part.forecast_completion if latest_part else None,
@@ -733,6 +912,8 @@ def build_report_context(report):
         "areas": areas,
         "hierarchy": hierarchy,
         "discipline": discipline,
+        "boq_financial_progress": boq_financial_progress,
+        "financial_percent_complete": financial_percent_complete,
         "area_dashboards": area_dashboards,
         "critical_path": critical_path,
         "gantt": gantt,
@@ -744,6 +925,7 @@ def build_report_context(report):
         "cashflow_totals": cashflow_totals,
         "invoices": invoices,
         "invoices_total": invoices_total,
+        "variations_cost_approved_total": variations_cost_approved_total,
         "submittals": submittals,
         "delays": delays,
         "scurve": scurve,

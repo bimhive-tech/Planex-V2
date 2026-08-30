@@ -54,8 +54,21 @@
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+/* Amount + its own currency picker, side by side — each of the 5 contract-KPI
+   money fields carries its own currency (a project can have its budget in
+   EGP and an advance payment in USD), so amount and currency are edited as
+   one paired unit, not two independent form rows. */
+.moneyRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
 @media (min-width: 768px) {
   .row2 {
     grid-template-columns: 1fr 1fr;
+  }
+  .moneyRow {
+    grid-template-columns: 2fr 1fr;
   }
 }

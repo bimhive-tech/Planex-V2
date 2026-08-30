@@ -126,11 +126,20 @@ export interface ReportData {
   snapshots: { date: string | null; overall_progress: number; source: string }[];
   project: {
     name: string; code?: string; type: string; location: string; description?: string;
+    // The report's own rich-text narrative (falls back to the plain project
+    // description when the report hasn't written one) — see the canvas
+    // "description" element (ElementPreview.tsx's DescriptionPreview) and
+    // apps/reports/richtext.py, which is the only thing that actually
+    // resolves an inline table/chart/image embed inside it into real data.
+    description_html?: string;
     client: string; consultant: string; contractor: string;
     planned_start: string | null; planned_finish: string | null;
     revised_finish?: string | null; forecast_finish?: string | null;
-    size_sqm: string | null; budget: string | null;
-    contract_value?: string | null; approved_value?: string | null; forecast_cost?: string | null;
+    size_sqm: string | null; budget: string | null; budget_currency?: string;
+    contract_value?: string | null; contract_value_currency?: string;
+    approved_value?: string | null; approved_value_currency?: string;
+    forecast_cost?: string | null; forecast_cost_currency?: string;
+    advance_payment?: string | null; advance_payment_currency?: string;
     currency: string;
   };
 }

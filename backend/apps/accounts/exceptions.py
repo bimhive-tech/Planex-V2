@@ -2,9 +2,14 @@
 
 Shape: {"error": {"code", "message", "details"}} with the correct HTTP status.
 """
+import logging
+
 from rest_framework import status
 from rest_framework.exceptions import APIException
+from rest_framework.response import Response
 from rest_framework.views import exception_handler
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidCredentials(APIException):
@@ -41,7 +46,19 @@ def _first_message(data):
 def api_exception_handler(exc, context):
     response = exception_handler(exc, context)
     if response is None:
-        return None  # let Django produce a 500 (logged); never leak internals
+        # DRF only builds a Response for Http404/PermissionDenied/APIException —
+        # anything else (a storage/network error, a third-party library
+        # exception, a bug) would otherwise propagate to Django's default handler,
+        # which renders an HTML page. The frontend always expects JSON, so that
+        # HTML gets swallowed by a failed `res.json()` parse and surfaces as a
+        # blank "Upload failed."/"Something went wrong." with no real reason.
+        # Log the real exception here (with the view for context) and still
+        # return the same JSON envelope so callers always get a clear message.
+        logger.exception("Unhandled exception in %s", context.get("view"), exc_info=exc)
+        return Response(
+            {"error": {"code": "server_error", "message": "Something went wrong. Please try again.", "details": None}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     data = response.data
     code = getattr(exc, "default_code", "error")

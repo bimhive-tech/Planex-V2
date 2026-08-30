@@ -4,7 +4,7 @@
 // toolbar). Emits HTML; the backend sanitizes it and renders it faithfully into
 // the report PDF. styleWithCSS is forced off so the browser emits tags
 // (<b>/<i>/<u>/<font>) the PDF renderer understands rather than inline styles.
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
 
 import { Icon, type IconName } from "@/components/ui/Icon";
 import styles from "./RichTextEditor.module.css";
@@ -13,6 +13,18 @@ interface Props {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  /** Extra buttons rendered at the end of the toolbar — e.g. the Report
+   * Detail page's "Insert table/chart/image" embed picker, which is report-
+   * specific and so doesn't belong inside this generic primitive itself
+   * (see RichTextEditorHandle.insertHtml, which is how it actually inserts
+   * content). */
+  extraToolbar?: ReactNode;
+}
+
+export interface RichTextEditorHandle {
+  /** Inserts raw HTML at the current cursor position (falls back to the end
+   * of the content if the editor isn't focused) and re-emits `onChange`. */
+  insertHtml: (html: string) => void;
 }
 
 const SIZES = [
@@ -23,7 +35,9 @@ const SIZES = [
   { label: "Huge", value: "7" },
 ];
 
-export function RichTextEditor({ value, onChange, placeholder }: Props) {
+export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor(
+  { value, onChange, placeholder, extraToolbar }, handleRef,
+) {
   const ref = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
 
@@ -48,6 +62,31 @@ export function RichTextEditor({ value, onChange, placeholder }: Props) {
     ref.current?.focus();
     emit();
   }
+
+  useImperativeHandle(handleRef, () => ({
+    insertHtml(html: string) {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      const insideEditor = !!sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).commonAncestorContainer);
+      if (!insideEditor) {
+        // The caller is an external control (e.g. an "Insert table/chart"
+        // toolbar) that just stole focus/selection — collapse a fresh
+        // selection to the end so the content still lands somewhere
+        // predictable instead of execCommand silently doing nothing.
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      // A trailing empty paragraph keeps typing flowing normally right
+      // after the inserted block instead of landing back inside it.
+      document.execCommand("insertHTML", false, `${html}<p><br></p>`);
+      emit();
+    },
+  }), []);
 
   // Alignment is applied directly as a style on the affected block(s) rather than
   // via execCommand("justify…"): the browser otherwise puts text-align on the
@@ -109,6 +148,8 @@ export function RichTextEditor({ value, onChange, placeholder }: Props) {
           <Icon name="text" size={15} />
           <input type="color" onChange={(e) => exec("foreColor", e.target.value)} aria-label="Text color" />
         </label>
+        {extraToolbar && <span className={styles.sep} />}
+        {extraToolbar}
       </div>
 
       <div
@@ -123,7 +164,7 @@ export function RichTextEditor({ value, onChange, placeholder }: Props) {
       />
     </div>
   );
-}
+});
 
 function ToolButton({ icon, title, onClick, label, bold, italic, underline }: {
   icon?: IconName; title: string; onClick: () => void; label?: string;

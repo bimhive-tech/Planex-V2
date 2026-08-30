@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import type { Activity, ProjectStructure, Scope } from "@/types/project";
+import type { Activity, ProjectStructure, ScheduleImportSummary, Scope } from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
 import { ZoneGridView } from "./ZoneGridView";
@@ -38,15 +38,28 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   // of a month; "month" = only the progress that moved during that month.
   const [viewMode, setViewMode] = useState<"current" | "asof" | "month">("current");
   const [viewMonth, setViewMonth] = useState(""); // "YYYY-MM"
+  // Which past schedule import to view — "" means the latest one, always
+  // (re-importing no longer deletes old data; every import is its own
+  // permanent batch, browsed via this picker). An independent axis from
+  // viewMode/viewMonth above: that's dated progress-entry readings against
+  // whichever import is selected here, not a choice between imports itself.
+  const [importId, setImportId] = useState("");
   const viewQuery = useMemo(() => {
-    if (viewMode === "current" || !viewMonth) return "";
-    const [y, m] = viewMonth.split("-").map(Number);
-    if (viewMode === "asof") {
-      const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); // last day of the month
-      return `?mode=asof&as_of=${end}`;
+    const params = new URLSearchParams();
+    if (importId) params.set("import_id", importId);
+    if (viewMode !== "current" && viewMonth) {
+      const [y, m] = viewMonth.split("-").map(Number);
+      if (viewMode === "asof") {
+        params.set("mode", "asof");
+        params.set("as_of", new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)); // last day of the month
+      } else {
+        params.set("mode", "month");
+        params.set("as_of", `${viewMonth}-01`);
+      }
     }
-    return `?mode=month&as_of=${viewMonth}-01`;
-  }, [viewMode, viewMonth]);
+    const qs = params.toString();
+    return qs ? `?${qs}` : "";
+  }, [viewMode, viewMonth, importId]);
 
   function pickMode(mode: "current" | "asof" | "month") {
     setViewMode(mode);
@@ -56,6 +69,13 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const { data, loading, error, reload } = useFetch(
     () => api.get<ProjectStructure>(`/projects/${projectId}/structure/${viewQuery}`),
     [projectId, viewQuery],
+  );
+
+  // Import history — the picker's data source. Reloaded whenever the
+  // structure reloads (a fresh import adds a new entry to the list too).
+  const { data: scheduleImports, reload: reloadImports } = useFetch(
+    () => api.get<ScheduleImportSummary[]>(`/projects/${projectId}/schedule-imports/`),
+    [projectId],
   );
 
   // Bubble live stats up to the Overview — only in the current view; the as-of /
@@ -72,6 +92,9 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  // The date THIS schedule's data is as of — not necessarily today. Blank
+  // lets the backend infer one from the filename, falling back to today.
+  const [importDate, setImportDate] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [zoneFilter, setZoneFilter] = useState("");
@@ -84,18 +107,18 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file
     if (!file) return;
-    if (data && data.scopes.length > 0 &&
-        !window.confirm("Importing replaces the current structure. Continue?")) return;
     setImporting(true);
     setActionError(null);
     setImportMsg(null);
     try {
       const r = await api.upload<{ zones: number; subzones: number; activities: number; overall_progress: number; snapshot_date: string; source_kind?: string }>(
-        `/upload/import/${projectId}`, file);
+        `/upload/import/${projectId}`, file, "file", importDate ? { date: importDate } : undefined);
       setImportMsg(r.source_kind === "p6"
-        ? `Imported the Primavera (P6) WBS: ${r.activities} activities (${r.overall_progress}% overall) — snapshot dated ${r.snapshot_date}. Note: P6 has no weights, so every activity is equal-weighted.`
-        : `Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall) — snapshot dated ${r.snapshot_date}. Expand a subzone for its phases/tasks, or open the zone grid.`);
+        ? `Imported the Primavera (P6) WBS: ${r.activities} activities (${r.overall_progress}% overall) as of ${r.snapshot_date} — kept alongside every earlier import. Note: P6 has no weights, so every activity is equal-weighted.`
+        : `Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall) as of ${r.snapshot_date} — kept alongside every earlier import. Expand a subzone for its phases/tasks, or open the zone grid.`);
+      setImportId(""); // the new import is now latest — show it, not whatever was picked before
       reload();
+      reloadImports();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Import failed.");
     } finally {
@@ -200,6 +223,8 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   );
 
   const thisMonth = new Date().toISOString().slice(0, 7);
+  const isHistorical = importId !== "" &&
+    !scheduleImports?.find((si) => si.id === importId)?.is_current;
   const viewControls = (
     <div className={styles.viewBar}>
       <div className={styles.segmented}>
@@ -221,6 +246,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
             : "Only the progress recorded during this month (read-only)."}
         </span>
       )}
+      {isHistorical && (
+        <span className={styles.viewNote}>
+          Viewing schedule import from {data?.schedule_import_date} (read-only) — the latest import is
+          always used for new reports unless one is deliberately pinned to this date.
+        </span>
+      )}
     </div>
   );
 
@@ -238,7 +269,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
           phaseName={phaseFilter}
           taskName={taskFilter}
           viewQuery={viewQuery}
-          readOnly={viewMode !== "current"}
+          readOnly={viewMode !== "current" || isHistorical}
           onBack={() => setGridZone(null)}
           onChanged={reload}
         />
@@ -253,6 +284,20 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
           {data ? `${data.scopes.length} scopes · ${data.activity_count} tasks · ${data.overall_progress}% overall` : "Structure"}
         </span>
         <div className={styles.toolbarActions}>
+          {scheduleImports && scheduleImports.length > 1 && (
+            <select
+              className={styles.importPicker}
+              value={importId}
+              onChange={(e) => setImportId(e.target.value)}
+              aria-label="Viewing schedule import"
+            >
+              {scheduleImports.map((si) => (
+                <option key={si.id} value={si.is_current ? "" : si.id}>
+                  {si.is_current ? `${si.date} (latest)` : si.date}
+                </option>
+              ))}
+            </select>
+          )}
           {/* Reading the tree isn't a managing action, so these stay available to everyone. */}
           <Button size="sm" variant="secondary" disabled={visibleRoots.length === 0}
             onClick={() => toggleAll(true)}>
@@ -265,11 +310,19 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
           {canManage && (
             <>
               <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
+              <input
+                type="date"
+                className={styles.importDate}
+                value={importDate}
+                onChange={(e) => setImportDate(e.target.value)}
+                title="Data as of (defaults to the filename's date, or today)"
+                aria-label="Import as-of date"
+              />
               <Button size="sm" variant="secondary" disabled={importing}
                 onClick={() => fileRef.current?.click()}>
                 {importing ? "Importing…" : "Import Excel"}
               </Button>
-              <Button size="sm" leadingIcon={<Icon name="plus" size={16} />}
+              <Button size="sm" leadingIcon={<Icon name="plus" size={16} />} disabled={isHistorical}
                 onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
                 Add phase
               </Button>

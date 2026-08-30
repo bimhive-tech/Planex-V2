@@ -81,9 +81,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 // Note: `path` is origin-relative as given (NOT prefixed with API_BASE), because
 // large uploads go through a Next route handler at /upload/... not the /api proxy.
-async function upload<T>(path: string, file: File, field = "file"): Promise<T> {
+async function upload<T>(path: string, file: File, field = "file", extra?: Record<string, string>): Promise<T> {
   const body = new FormData();
   body.append(field, file);
+  for (const [k, v] of Object.entries(extra ?? {})) body.append(k, v);
   const res = await fetchWithRefresh(path, { method: "POST", credentials: "include", body });
   const data = await res.json().catch(() => null);
   if (!res.ok) {

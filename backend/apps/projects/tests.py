@@ -297,6 +297,60 @@ class P6ScheduleImportTests(TestCase):
         titles = set(Milestone.objects.filter(project=project).values_list("title", flat=True))
         self.assertEqual(titles, {"Kickoff", "Handover party"})  # no duplicate Kickoff
 
+    def test_reimport_creates_a_new_batch_and_keeps_the_old_one(self):
+        """A re-import used to call project.scopes.all().delete() and rebuild
+        from scratch — every past import's full activity-level detail (cost,
+        earned value, individual progress) was gone the moment a newer one
+        landed, with only a rolled-up ProgressSnapshot surviving (2026-08-30
+        client ask: "I dont mean just the total I mean all of it"). Now it
+        creates a new ScheduleImport batch instead and leaves the previous
+        one's rows alone."""
+        import datetime
+
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity, ProjectScope, ScheduleImport
+        from .services import latest_schedule_import
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        r1 = import_workbook(project, self._workbook(), source="jan.xlsx", snapshot_date=datetime.date(2026, 1, 15))
+        r2 = import_workbook(project, self._workbook(), source="feb.xlsx", snapshot_date=datetime.date(2026, 2, 15))
+
+        self.assertNotEqual(r1["schedule_import_id"], r2["schedule_import_id"])
+        self.assertEqual(ScheduleImport.objects.filter(project=project).count(), 2)
+        # Both generations' rows are still there, not replaced.
+        self.assertEqual(Activity.objects.filter(project=project).count(), 6)  # 3 real activities x 2 imports
+        self.assertEqual(
+            ProjectScope.objects.filter(project=project, schedule_import_id=r1["schedule_import_id"]).count(),
+            ProjectScope.objects.filter(project=project, schedule_import_id=r2["schedule_import_id"]).count(),
+        )
+        latest = latest_schedule_import(project)
+        self.assertEqual(str(latest.id), r2["schedule_import_id"])
+        self.assertEqual(latest_schedule_import(project, as_of=datetime.date(2026, 1, 20)).date,
+                         datetime.date(2026, 1, 15))
+
+    def test_reimport_does_not_double_count_current_progress(self):
+        """The real risk of keeping old batches around: every "current state"
+        query must filter to the latest batch specifically, or a re-import
+        would silently blend two generations of activities into one wrong
+        number instead of reporting either one correctly."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import project_overall_progress
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="jan.xlsx")
+        self.assertEqual(project_overall_progress(project), 52.5)
+
+        # A fully-complete re-import — if the old batch's activities leaked
+        # into the aggregate too, this would land somewhere between 52.5 and
+        # 100, not exactly 100.
+        import_workbook(project, self._workbook(project_performance_pct=1.0, project_schedule_pct=1.0),
+                        source="feb.xlsx")
+        self.assertEqual(project_overall_progress(project), 100.0)
+
     def test_zone_children_become_grid_columns(self):
         """The grid pivots on a Zone, one column per child — so a P6 import has to
         set the column/row coordinates the zone-tracker import provides."""
@@ -597,6 +651,104 @@ class P6ScheduleImportTests(TestCase):
 
 
 STRONG_PW = "Str0ngPassw0rd!"
+
+
+class ScheduleImportApiTests(TestCase):
+    """The view-level surface of the schedule-import history feature
+    (2026-08-30) — a chosen as-of date, the history list, and browsing an
+    older import live via ?import_id=. build_from_p6_schedule's own
+    batch-tagging correctness is covered by P6ScheduleImportTests above;
+    this covers the HTTP layer on top of it."""
+
+    HEADER = ["Activity ID", "Activity Name", "Start", "Finish", "Activity % Complete"]
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        admin_role = Role.objects.create(
+            company=self.company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.admin = User.objects.create_user(email="fa@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=self.admin, role=admin_role)
+        self.project = Project.objects.create(company=self.company, name="Tower", project_type="commercial")
+
+    def login(self, email):
+        resp = self.client.post(reverse("auth-login"), {"email": email, "password": STRONG_PW},
+                                content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def _workbook(self, name="schedule.xlsx"):
+        import io
+
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(self.HEADER)
+        ws.append(["  Zone A", None, "2026-01-01", "2026-06-01", None])
+        ws.append(["CN.01", "Foundation", "2026-01-01", "2026-02-01", 0.5])
+        buf = io.BytesIO()
+        wb.save(buf)
+        return SimpleUploadedFile(
+            name, buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_import_honours_a_chosen_date(self):
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/import/",
+                                {"file": self._workbook(), "date": "2026-03-15"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.json()["snapshot_date"], "2026-03-15")
+
+    def test_import_rejects_a_malformed_date(self):
+        self.login("fa@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/import/",
+                                {"file": self._workbook(), "date": "not-a-date"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_history_list_marks_the_latest_current(self):
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-02-15"})
+
+        resp = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = resp.json()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["date"], "2026-02-15")  # newest first
+        self.assertTrue(rows[0]["is_current"])
+        self.assertFalse(rows[1]["is_current"])
+        self.assertIsNotNone(rows[0]["file_url"])  # the workbook was retained
+
+    def test_structure_defaults_to_latest_but_can_browse_an_older_import(self):
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        r2 = self.client.post(f"/api/projects/{self.project.id}/import/",
+                              {"file": self._workbook(), "date": "2026-02-15"})
+
+        current = self.client.get(f"/api/projects/{self.project.id}/structure/").json()
+        self.assertEqual(current["schedule_import_date"], "2026-02-15")
+        self.assertEqual(current["activity_count"], 1)
+
+        imports = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()
+        older_id = next(r["id"] for r in imports if not r["is_current"])
+
+        historical = self.client.get(
+            f"/api/projects/{self.project.id}/structure/?import_id={older_id}").json()
+        self.assertEqual(historical["schedule_import_date"], "2026-01-15")
+        self.assertEqual(historical["activity_count"], 1)
+        self.assertNotEqual(historical["scopes"][0]["id"], current["scopes"][0]["id"])
+
+    def test_import_requires_manage_projects(self):
+        view_role = Role.objects.create(
+            company=self.company, name="Viewer", permissions=[Permission.VIEW_PROJECTS.value])
+        viewer = User.objects.create_user(email="v@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=viewer, role=view_role)
+        self.login("v@acme.com")
+        resp = self.client.post(f"/api/projects/{self.project.id}/import/", {"file": self._workbook()})
+        self.assertEqual(resp.status_code, 403)
 
 
 class ProjectApiTests(TestCase):

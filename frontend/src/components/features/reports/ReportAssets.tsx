@@ -10,6 +10,7 @@ import { StateView } from "@/components/ui/StateView";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import type { ReportImage, ReportImageKind } from "@/types/report";
+import { PdfPageImportPicker } from "./PdfPageImportPicker";
 import styles from "./reports.module.css";
 
 const KINDS: { value: ReportImageKind; label: string }[] = [
@@ -95,6 +96,14 @@ export function ReportAssets({
             {busy ? "Uploading…" : "Upload"}
           </Button>
         </form>
+      )}
+
+      {canManage && (
+        <PdfPageImportPicker
+          reportId={reportId}
+          kind={only ?? kind}
+          onImported={() => { reload(); onChanged?.(); }}
+        />
       )}
 
       {actionError && <p className="formError">{actionError}</p>}

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
-import type { ChartSvgMap, LayoutElement, TableDataMap, TocEntry } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, TableDataMap, TocCaptionsData, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
@@ -40,12 +40,19 @@ interface Props {
   onElementChange?: (el: LayoutElement) => void;
   /** Present only in the report-level "Customize" tab. */
   liveData?: ReportData | null;
+  /** This report's id — lets a description element's inline image-embed
+   * control attach an upload to this report. */
+  reportId?: string;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
   /** Live, real per-chart previews — see useChartSvgs. */
   chartSvgs?: ChartSvgMap;
   /** Live, real per-table data — see useTableData. */
   tableData?: TableDataMap;
-  /** False until chartSvgs/tableData's first real response has landed. */
+  /** Live, real "List of tables/figures/images" content — see
+   * useTocEntries. */
+  tocCaptions?: TocCaptionsData;
+  /** False until chartSvgs/tableData/tocCaptions's first real response has
+   * landed. */
   previewsReady?: boolean;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
@@ -56,7 +63,8 @@ interface Props {
 
 export function CanvasElementView({
   el, scale, selected, showControls = true, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction,
-  onElementChange, liveData, pinnedItem, chartSvgs, tableData, previewsReady, tocEntries, ownPageId,
+  onElementChange, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries,
+  ownPageId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,7 +96,7 @@ export function CanvasElementView({
       <div className={`${styles.element} ${ghostClass}`} style={style} aria-hidden="true">
         <ElementPreview
           el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-          chartSvgs={chartSvgs} tableData={tableData} previewsReady={previewsReady}
+          chartSvgs={chartSvgs} tableData={tableData} tocCaptions={tocCaptions} previewsReady={previewsReady}
           tocEntries={tocEntries} ownPageId={ownPageId}
         />
       </div>
@@ -122,6 +130,16 @@ export function CanvasElementView({
       tabIndex={0}
       aria-label={`${el.type} element`}
       onKeyDown={(e) => {
+        // Only handle Enter/Space as this div's own "activate like a button"
+        // key (role="button" a11y pattern) when IT is the actual key target
+        // — not when the event bubbled up from a focused descendant. Without
+        // this guard, every space/enter typed into a nested contentEditable
+        // (e.g. the Description element's rich-text editor, rendered inside
+        // this same wrapper) bubbled here and got preventDefault()'d, which
+        // silently blocks the browser from ever inserting the character —
+        // found live: typing "Test description text" produced
+        // "Testdescriptiontext", every space eaten (2026-08-26).
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(el.id, false);
@@ -129,8 +147,8 @@ export function CanvasElementView({
       }}
     >
       <ElementPreview
-        el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-        chartSvgs={chartSvgs} tableData={tableData} previewsReady={previewsReady}
+        el={el} scale={scale} liveData={liveData} reportId={reportId} pinnedItem={pinnedItem}
+        chartSvgs={chartSvgs} tableData={tableData} tocCaptions={tocCaptions} previewsReady={previewsReady}
         tocEntries={tocEntries} ownPageId={ownPageId} onElementChange={onElementChange}
       />
 

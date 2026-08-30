@@ -329,7 +329,7 @@ def _record_milestones(project, tasks):
     return len(tasks)
 
 
-def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, source="",
+def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
                           unwrap_single_root=True):
     """Create scopes + activities from a parsed P6 schedule tree.
 
@@ -349,12 +349,17 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
+    from .models import ScheduleImport
     from .services import project_overall_progress
 
     Scope = ProjectScope
     company = project.company
-    if replace:
-        project.scopes.all().delete()
+    # A re-import creates a new, permanently-retained batch instead of
+    # deleting the previous one — see ScheduleImport's own docstring. `date`
+    # is resolved up front (not after building, as before) since every new
+    # row is tagged to this batch as it's constructed.
+    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
+    schedule_import = ScheduleImport.objects.create(company=company, project=project, date=snap_date, source=source)
 
     # The project-title row (before it's unwrapped below) carries the file's OWN
     # stated actual (Performance % Complete — earned value / budgeted cost, the
@@ -403,7 +408,7 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         columns lands on one row."""
         stype = type_of(node, depth)
         counts[stype] += 1
-        scope = Scope(company=company, project=project, parent=parent, scope_type=stype,
+        scope = Scope(company=company, project=project, parent=parent, scope_type=stype, schedule_import=schedule_import,
                       name=node["name"], label=node.get("label") or "", sort_order=len(scopes_by_depth[depth]),
                       planned_start=node.get("start"), planned_finish=node.get("finish"),
                       discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
@@ -419,7 +424,7 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
                 # zone's columns shares one row instead of stacking up.
                 row_index = rows.setdefault((node["name"], task["name"]), len(rows) + 1)
             activities.append(Activity(
-                company=company, project=project, scope=scope,
+                company=company, project=project, scope=scope, schedule_import=schedule_import,
                 name=task["name"], code=task["code"], weight=weight_of(task),
                 progress_percent=task["pct"], phase_name=node["name"],
                 planned_start=task["start"], planned_finish=task["finish"],
@@ -451,6 +456,8 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
     for depth in sorted(scopes_by_depth):
         Scope.objects.bulk_create(scopes_by_depth[depth], batch_size=1000)
     Activity.objects.bulk_create(activities, batch_size=2000)
+    schedule_import.activity_count = len(activities)
+    schedule_import.save(update_fields=["activity_count", "updated_at"])
 
     milestones = _record_milestones(project, milestone_tasks)
 
@@ -462,12 +469,13 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         "imported_progress_percent", "imported_planned_progress_percent", "updated_at",
     ])
 
-    # _save_snapshot below calls project_overall_progress(project) with no as-of
-    # override, so it picks up imported_progress_percent (just set above) as the
-    # "current" figure — the report's progress history now agrees with the
-    # source schedule's own number instead of our approximation of it.
-    snap_date = snapshot_date or parse_date_from_name(source) or timezone.now().date()
-    _save_snapshot(project, date=snap_date, source=source)
+    # _save_snapshot is scoped to this same batch, so a re-import's snapshot
+    # reflects only its own fresh activities. project_overall_progress with
+    # schedule_import=None inside it (i.e. "current") picks up
+    # imported_progress_percent (just set above) as the figure — the report's
+    # progress history agrees with the source schedule's own number instead
+    # of our approximation of it, same as before batches existed.
+    _save_snapshot(project, date=snap_date, source=source, schedule_import=schedule_import)
 
     return {
         "stages": counts.get(Scope.ScopeType.STAGE, 0),
@@ -476,10 +484,11 @@ def build_from_p6_schedule(project, roots, *, replace=True, snapshot_date=None, 
         "phases": counts.get(Scope.ScopeType.PHASE, 0),
         "milestones": milestones,
         "activities": len(activities),
-        "overall_progress": project_overall_progress(project),
+        "overall_progress": project_overall_progress(project, schedule_import=schedule_import),
         "overall_progress_source": "imported" if project_pct is not None else "computed",
         "planned_progress": float(project_schedule_pct) if project_schedule_pct is not None else None,
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",
         "weighted_by": weight_key or "equal",  # surfaced so the UI can say how % was derived
+        "schedule_import_id": str(schedule_import.id),
     }

@@ -5,16 +5,33 @@ lists, and alignment — including correct right-to-left shaping for Arabic.
 Arabic can't be bidi-shaped per inline run and naively concatenated (the runs end
 up out of order). Instead, for a right-to-left line we reverse the run order and
 shape each run on its own; format boundaries fall on spaces in practice, so glyph
-joining is preserved. This was verified to match a fully-shaped reference line."""
+joining is preserved. This was verified to match a fully-shaped reference line.
+
+Also supports inline embeds — a table/chart/image dropped into the flowing text
+(see CustomTableEditor.tsx's sibling in RichTextEditor.tsx, the "Insert
+table/chart/image" toolbar buttons) — stored as a `<div data-embed="table|chart|
+image" data-spec="{...json...}">` marker the sanitizer keeps verbatim (its own
+children are ignored; the marker is self-describing) and html_to_flowables
+resolves into a real Table/Drawing/Image flowable via the exact same
+resolve_table/resolve_chart every canvas table/chart element already uses (see
+_resolve_embed below) — so an embedded table/chart can't render a different look
+than a standalone one would."""
+import json
 import re
 from html import escape
 from html.parser import HTMLParser
 
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.platypus import Paragraph
+from reportlab.lib.units import mm
+from reportlab.platypus import Image, Paragraph
 
-from .pdf_base import FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape
+from .pdf_base import FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
+# resolve_table/resolve_chart live in pdf_canvas.py, which never imports this
+# module back (any drawing code that needs html_to_flowables imports it
+# locally, inside the function that calls it) — so this stays a one-way
+# dependency, not a cycle.
+from .pdf_canvas import resolve_chart, resolve_table
 
 # Tags we keep when sanitizing; everything else is unwrapped (text kept, tag dropped).
 _INLINE = {"b", "strong", "i", "em", "u", "span", "font"}
@@ -23,6 +40,11 @@ _LIST = {"ul", "ol"}
 _KEEP = _INLINE | _BLOCK | _LIST | {"br"}
 # Tags whose contents are discarded wholesale (never just unwrapped).
 _DROP = {"script", "style", "head", "title", "noscript", "iframe", "object", "embed"}
+# A `<div data-embed="...">` in one of these carries a self-contained JSON spec
+# in `data-spec` (see _resolve_embed) instead of text content — its own
+# children (a display label the editor shows for its own UI) are dropped on
+# sanitize and never read on render, so there's nothing to keep in sync.
+_EMBED_KINDS = {"table", "chart", "image"}
 
 # HTML <font size> 1–7 → point sizes (roughly Word's small→huge scale).
 _SIZE_MAP = {"1": 8, "2": 10, "3": 11, "4": 13, "5": 16, "6": 20, "7": 26}
@@ -158,6 +180,14 @@ def _collect_runs(node, fmt, runs):
                 runs.append((ch.data, fmt))
         elif ch.tag == "br":
             runs.append(("\n", fmt))
+        elif ch.tag == "div" and ch.attrs.get("data-embed") in _EMBED_KINDS:
+            # An embed can't become a text run — in practice the sanitizer's
+            # own auto-close-on-sibling-block parsing (_DOM.handle_starttag)
+            # already promotes it to a top-level sibling (html_to_flowables'
+            # own loop handles it there), so reaching it here only happens
+            # for a genuinely stray nested case; skip rather than absorb it
+            # as blank text.
+            continue
         elif ch.tag in _INLINE:
             _collect_runs(ch, _merge_format(fmt, ch), runs)
         elif ch.tag in _BLOCK | _LIST:
@@ -226,8 +256,72 @@ def _line_para(line_runs, cfg, base_size, default_color, default_align, prefix="
     return Paragraph(markup or "&nbsp;", st)
 
 
-def _render_block(node, cfg, base_size, default_color, flow):
-    """Emit paragraph(s) for one top-level node (block, list, or stray inline)."""
+def _resolve_embed(node, cfg, ctx, scope, avail_width):
+    """One `<div data-embed="table|chart|image" data-spec="{...}">` marker ->
+    a real flowable, or None if the spec is malformed/unresolvable (dropped
+    silently, same "genuinely nothing to show" contract resolve_table/
+    resolve_chart already have — never a broken PDF over one bad embed).
+
+    `data-spec` is `{"kind": ..., "props": {...}}` — `props` is the exact
+    same shape a canvas table/chart element's own `props` would be (source,
+    style, overrides, scope_zone_id, chart_type, custom_data...), so an
+    embedded table/chart is resolved through the identical resolve_table/
+    resolve_chart every standalone table/chart element already uses — it
+    can't end up looking different just because it's inline."""
+    if ctx is None:
+        return None
+    try:
+        spec = json.loads(node.attrs.get("data-spec") or "{}")
+    except (TypeError, ValueError):
+        return None
+    kind, props = spec.get("kind"), spec.get("props") or {}
+    scope = scope if scope is not None else {"item": None}
+
+    if kind == "table":
+        return resolve_table(
+            props.get("source", ""), cfg, ctx, scope, avail_width=avail_width,
+            overrides=props.get("overrides"), style=props, scope_zone_id=props.get("scope_zone_id"),
+        )
+    if kind == "chart":
+        height = float(props.get("embed_height_mm", 80)) * mm
+        return resolve_chart(
+            props.get("source", ""), props.get("chart_type"), cfg, ctx, scope,
+            avail_width, height, scope_zone_id=props.get("scope_zone_id"),
+        )
+    if kind == "image":
+        upload_id, report = props.get("upload_id"), ctx.get("_report")
+        if not upload_id or report is None:
+            return None
+        from .models import ReportImage
+
+        try:
+            image = ReportImage.objects.get(id=upload_id, report=report)
+        except (ReportImage.DoesNotExist, ValueError, TypeError):
+            return None
+        reader = storage_image_reader(image.image.name if image.image else None)
+        if not reader:
+            return None
+        iw, ih = reader.getSize()
+        if not iw or not ih:
+            return None
+        width = avail_width or iw
+        height = width * (ih / iw)
+        max_h = float(props.get("max_height_mm", 120)) * mm
+        if height > max_h:
+            height, width = max_h, max_h * (iw / ih)
+        return Image(reader, width=width, height=height)
+    return None
+
+
+def _render_block(node, cfg, base_size, default_color, flow, ctx=None, scope=None, avail_width=None):
+    """Emit flowable(s) for one top-level node (block, list, embed, or stray
+    inline)."""
+    if node.tag == "div" and node.attrs.get("data-embed") in _EMBED_KINDS:
+        flowable = _resolve_embed(node, cfg, ctx, scope, avail_width)
+        if flowable is not None:
+            flow.append(flowable)
+        return
+
     if node.tag is None:
         if node.data and node.data.strip():
             flow.append(_line_para([(node.data, {})], cfg, base_size, default_color, None))
@@ -263,8 +357,14 @@ def _render_block(node, cfg, base_size, default_color, flow):
         flow.append(_line_para(ln, cfg, base_size, default_color, align))
 
 
-def html_to_flowables(html, cfg, styles):
-    """Render sanitized description HTML into reportlab flowables."""
+def html_to_flowables(html, cfg, styles, *, ctx=None, scope=None, avail_width=None):
+    """Render sanitized description HTML into reportlab flowables.
+
+    `ctx`/`scope`/`avail_width` are only needed to resolve an inline table/
+    chart/image embed (see _resolve_embed) — omitted (the default), any
+    embed marker in `html` is silently dropped rather than resolved, so a
+    caller with no report context (there is none today) still gets valid
+    plain-text flowables instead of a crash."""
     ensure_fonts()  # Paragraphs use the Amiri family; register it if not already
     ds = cfg.get("description", {})
     base_size = float(ds.get("size", cfg["fonts"]["base_size"]))
@@ -273,7 +373,7 @@ def html_to_flowables(html, cfg, styles):
     dom.feed(html or "")
     flow = []
     for node in dom.root.children:
-        _render_block(node, cfg, base_size, default_color, flow)
+        _render_block(node, cfg, base_size, default_color, flow, ctx=ctx, scope=scope, avail_width=avail_width)
     return flow
 
 
@@ -281,6 +381,12 @@ def html_to_flowables(html, cfg, styles):
 
 def _safe_attrs(tag, attrs):
     out = {}
+    if tag == "div" and attrs.get("data-embed") in _EMBED_KINDS:
+        # Self-describing marker — keep exactly these two attrs, nothing
+        # else (no style/align; an embed box isn't formatted like text).
+        out["data-embed"] = attrs["data-embed"]
+        out["data-spec"] = attrs.get("data-spec") or "{}"
+        return out
     if tag == "font":
         if _clean_color(attrs.get("color", "")):
             out["color"] = _clean_color(attrs["color"])
@@ -313,8 +419,12 @@ def _serialize(node, parts):
     attrs = _safe_attrs(node.tag, node.attrs)
     attr_str = "".join(f' {k}="{escape(str(v), quote=True)}"' for k, v in attrs.items())
     parts.append(f"<{node.tag}{attr_str}>")
-    for ch in node.children:
-        _serialize(ch, parts)
+    # An embed's children are the editor's own display chip (an icon/label
+    # for its non-editable UI, no real content) — the marker's data-spec
+    # attribute is the entire source of truth, so children are never stored.
+    if not (node.tag == "div" and node.attrs.get("data-embed") in _EMBED_KINDS):
+        for ch in node.children:
+            _serialize(ch, parts)
     parts.append(f"</{node.tag}>")
 
 
@@ -329,3 +439,29 @@ def sanitize_html(raw):
     for node in dom.root.children:
         _serialize(node, parts)
     return "".join(parts).strip()
+
+
+def sanitize_layout_html(layout):
+    """Sanitizes every "description" element's `props.html` in place across a
+    template `config` or a report `layout_override` — both share the same
+    `{page_design: {master_elements}, layout: {pages: [{elements}]}}` shape
+    (see ReportTemplateSerializer.validate_config / ReportWriteSerializer.
+    validate_layout_override, the only two callers). A description element's
+    rich text lives per-element now (edited directly on the canvas), not in
+    one report-wide `description_html` field, but it still needs the exact
+    same whitelist that field always got before it's stored or rendered —
+    moving *where* the content lives doesn't relax *what* HTML reaches the
+    renderer/database."""
+    def sanitize_elements(elements):
+        for el in elements or []:
+            if not isinstance(el, dict) or el.get("type") != "description":
+                continue
+            props = el.get("props")
+            if isinstance(props, dict) and "html" in props:
+                props["html"] = sanitize_html(props["html"])
+
+    sanitize_elements((layout.get("page_design") or {}).get("master_elements"))
+    for page in (layout.get("layout") or {}).get("pages") or []:
+        if isinstance(page, dict):
+            sanitize_elements(page.get("elements"))
+    return layout

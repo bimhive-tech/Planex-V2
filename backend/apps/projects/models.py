@@ -46,7 +46,16 @@ class Project(TimestampedModel):
 
     # Budget (optional). Money uses DecimalField, never float.
     budget = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    # Default/fallback currency — still used as-is by other money displays
+    # that only ever carry one figure for the whole project (cash flow,
+    # cost performance). The 5 contract-KPI fields below (budget/advance
+    # payment/contract/approved/forecast) each carry their OWN currency
+    # instead: a real project can genuinely have its budget quoted in one
+    # currency and, say, an advance payment paid in another — auto-
+    # converting them from one shared rate would show the wrong number, not
+    # just the wrong label. See each field's own `_currency` companion.
     currency = models.CharField(max_length=8, default="AED")
+    budget_currency = models.CharField(max_length=8, default="AED")
 
     # Stakeholders (kept as fields now; a reusable Client entity comes later).
     client_name = models.CharField(max_length=180, blank=True)
@@ -71,18 +80,23 @@ class Project(TimestampedModel):
 
     # Contract KPIs surfaced on the Overview tab (matches the client's dashboard header).
     advance_payment = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    advance_payment_currency = models.CharField(max_length=8, default="AED")
     eot_days = models.PositiveIntegerField(null=True, blank=True)  # extension of time granted, in days
     # Three distinct cost figures a report may need side by side: what was
     # signed (contract_value), what's approved after variations to date
     # (approved_value), and where it's projected to land (forecast_cost).
     # `budget` stays as the general-purpose figure other flows already use.
     contract_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    contract_value_currency = models.CharField(max_length=8, default="AED")
     # contract_value + the sum of all APPROVED cost Variations (CVOs) — kept in
     # sync automatically (apps.projects.services.resync_approved_value) rather
     # than hand-typed, so it can never disagree with the actual Variation log.
-    # Not directly editable.
+    # Not directly editable. Its currency always mirrors contract_value_currency
+    # (a CVO amount has no currency of its own — see resync_approved_value).
     approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    approved_value_currency = models.CharField(max_length=8, default="AED")
     forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    forecast_cost_currency = models.CharField(max_length=8, default="AED")
 
     # A real P6 schedule states its own actual AND planned % complete for the
     # whole project — Performance % Complete (earned value / budgeted cost) and
@@ -379,6 +393,56 @@ class ProjectScopeAccess(TimestampedModel):
         return f"{self.user.email} → {self.scope.name}"
 
 
+def schedule_import_file_key(instance, filename):
+    """Private R2 key for one retained schedule-import workbook — keyed by the
+    import's own id (not the project's), unlike `source_workbook_key`, so
+    re-importing doesn't overwrite the previous file. Every past import's
+    workbook stays downloadable."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else "xlsx"
+    return f"projects/{instance.project_id}/schedule-imports/{instance.id}.{ext}"
+
+
+class ScheduleImport(TimestampedModel):
+    """One schedule import, as its own permanently-retained batch.
+
+    Before this model existed, every re-import called `project.scopes.all().
+    delete()` and rebuilt from scratch — so only ever one generation of
+    Scope/Activity data existed for a project at a time, and a re-import
+    silently erased the previous one down to the individual activity. That's
+    what `ProgressSnapshot` was for: capturing a *rolled-up* history (overall
+    %, per-zone %) across imports. It never captured the full activity-level
+    detail (budgeted cost, earned value, individual activity progress, ...) —
+    exactly the data the report's BOQ/financial charts depend on.
+
+    Every `ProjectScope`/`Activity` row now carries a `schedule_import` FK to
+    the batch it came from, and a re-import creates a NEW batch instead of
+    deleting the old one — every past import's full data stays queryable,
+    not just its summary. "Current" is simply the most recent batch by
+    `date` (see `apps.projects.services.latest_schedule_import`); picking an
+    older one is a query, not a recovery.
+
+    `date` is the schedule's own as-of date (parsed from the filename, or
+    explicitly chosen at upload) — the date the DATA reflects, not
+    necessarily when it was uploaded."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="schedule_imports")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="schedule_imports")
+    date = models.DateField()
+    source = models.CharField(max_length=200, blank=True)  # original filename
+    file = models.FileField(upload_to=schedule_import_file_key, null=True, blank=True)
+    activity_count = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="schedule_imports")
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "-date"])]
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return f"{self.project_id} @ {self.date}"
+
+
 class ProjectScope(TimestampedModel):
     """A node in a project's flexible work hierarchy
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""
@@ -401,6 +465,11 @@ class ProjectScope(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="project_scopes")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="scopes")
+    # Which import batch this node came from — see ScheduleImport's own
+    # docstring. Nullable only for rows created by hand (the "Add scope"
+    # form has no import to attach to); every imported row always has one.
+    schedule_import = models.ForeignKey(
+        "ScheduleImport", on_delete=models.CASCADE, null=True, blank=True, related_name="scopes")
     parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children")
     scope_type = models.CharField(max_length=20, choices=ScopeType.choices)
     # Stable grouping/matching key — for a code-driven P6 import this is the
@@ -432,7 +501,10 @@ class ProjectScope(TimestampedModel):
     discipline = models.CharField(max_length=20, choices=Discipline.choices, blank=True)
 
     class Meta:
-        indexes = [models.Index(fields=["project", "parent"])]
+        indexes = [
+            models.Index(fields=["project", "parent"]),
+            models.Index(fields=["project", "schedule_import"]),
+        ]
         ordering = ["sort_order", "name"]
 
     def __str__(self):
@@ -451,6 +523,13 @@ class Activity(TimestampedModel):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="activities")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="activities")
     scope = models.ForeignKey(ProjectScope, on_delete=models.CASCADE, related_name="activities")
+    # Denormalized from scope.schedule_import (not just reachable via the FK)
+    # so the heavy, frequent "current activities" queries — full-table
+    # aggregates over tens of thousands of rows — filter directly without an
+    # extra join. Kept in sync at creation time only; activities are never
+    # moved between imports.
+    schedule_import = models.ForeignKey(
+        "ScheduleImport", on_delete=models.CASCADE, null=True, blank=True, related_name="activities")
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=60, blank=True)
     unit = models.CharField(max_length=40, blank=True)
@@ -501,6 +580,7 @@ class Activity(TimestampedModel):
         indexes = [
             models.Index(fields=["project", "scope"]),
             models.Index(fields=["scope", "subzone_index"]),
+            models.Index(fields=["project", "schedule_import"]),
         ]
         ordering = ["sort_order", "name"]
 

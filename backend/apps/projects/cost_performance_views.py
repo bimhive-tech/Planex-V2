@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 
 from .models import Activity, Project
+from .services import latest_schedule_import
 
 
 def _project(request, project_id):
@@ -35,7 +36,13 @@ class ProjectCostPerformanceView(APIView):
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require_view_finances(request)
-        agg = project.activities.aggregate(
+        # Scoped to the latest schedule-import batch — a re-import no longer
+        # deletes the previous one (see ScheduleImport's own docstring), so
+        # an unfiltered aggregate here would silently sum every generation
+        # of activities ever imported together.
+        schedule_import = latest_schedule_import(project)
+        activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+        agg = activities.aggregate(
             budgeted=Sum("budgeted_cost"), earned=Sum("earned_value_cost"), variance=Sum("schedule_variance"),
         )
         return Response({
@@ -67,7 +74,9 @@ class ProjectActivityScheduleListView(ListAPIView):
     def get_queryset(self):
         project = _project(self.request, self.kwargs["project_id"])
         _require_view_finances(self.request)
-        qs = project.activities.order_by("sort_order", "name")
+        schedule_import = latest_schedule_import(project)
+        base = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+        qs = base.order_by("sort_order", "name")
         search = self.request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(Q(name__icontains=search) | Q(code__icontains=search))

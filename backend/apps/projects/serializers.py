@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from django.conf import settings
 
-from .models import Activity, Project, ProjectImage, ProjectMember, ProjectScope
+from .models import Activity, Project, ProjectImage, ProjectMember, ProjectScope, ScheduleImport
 from .services import project_overall_progress
 
 STAKEHOLDER_FIELDS = [
@@ -16,10 +16,16 @@ DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_fi
 # editable: a manual edit would just get silently overwritten by the next
 # SVO action, which is more confusing than not offering the field at all.
 WRITABLE_DATE_FIELDS = [f for f in DATE_FIELDS if f != "revised_finish"]
-CONTRACT_FIELDS = ["advance_payment", "eot_days", "contract_value", "approved_value", "forecast_cost"]
-# approved_value is derived (contract_value + approved cost Variations — see
-# apps.projects.services.resync_approved_value), not directly editable.
-WRITABLE_CONTRACT_FIELDS = [f for f in CONTRACT_FIELDS if f != "approved_value"]
+CONTRACT_FIELDS = [
+    "advance_payment", "advance_payment_currency", "eot_days",
+    "contract_value", "contract_value_currency",
+    "approved_value", "approved_value_currency",
+    "forecast_cost", "forecast_cost_currency",
+]
+# approved_value (and its currency) is derived (contract_value + approved
+# cost Variations — see apps.projects.services.resync_approved_value), not
+# directly editable.
+WRITABLE_CONTRACT_FIELDS = [f for f in CONTRACT_FIELDS if not f.startswith("approved_value")]
 
 
 class ProjectListSerializer(serializers.ModelSerializer):
@@ -50,7 +56,8 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "code", "project_type", "project_type_display",
             "priority", "priority_display", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
+            "budget", "budget_currency", "currency",
+            *STAKEHOLDER_FIELDS, *DATE_FIELDS, *CONTRACT_FIELDS,
             "size_sqm", "notes",
             "is_archived", "overall_progress", "activity_count", "progress_breakdown",
             "team_count", "open_submission_count", "created_at", "updated_at",
@@ -105,7 +112,8 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             "name", "code", "project_type", "priority", "location", "description",
-            "budget", "currency", *STAKEHOLDER_FIELDS, *WRITABLE_DATE_FIELDS, *WRITABLE_CONTRACT_FIELDS,
+            "budget", "budget_currency", "currency",
+            *STAKEHOLDER_FIELDS, *WRITABLE_DATE_FIELDS, *WRITABLE_CONTRACT_FIELDS,
             "size_sqm", "notes", "is_archived",
         ]
 
@@ -170,6 +178,28 @@ class ActivityWriteSerializer(serializers.ModelSerializer):
         if value < 0 or value > 100:
             raise serializers.ValidationError("Progress must be between 0 and 100.")
         return value
+
+
+class ScheduleImportSerializer(serializers.ModelSerializer):
+    """One schedule-import batch, for the project's import-history picker —
+    `is_current` and `file_url` are computed, not stored (see ScheduleImport's
+    own docstring: "current" is always just the most recent batch by date)."""
+
+    is_current = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduleImport
+        fields = ["id", "date", "source", "activity_count", "created_at", "is_current", "file_url"]
+
+    def get_is_current(self, obj):
+        latest_id = self.context.get("latest_id")
+        return latest_id is not None and str(obj.id) == str(latest_id)
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        return f"/api/projects/{obj.project_id}/schedule-imports/{obj.id}/file/"
 
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}

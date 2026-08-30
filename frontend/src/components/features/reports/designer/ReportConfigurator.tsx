@@ -3,13 +3,15 @@
 // Tab 2 — Report Configuration. The Canva-style surface: a page list on the
 // left, drag/drop/resize on the paper, and the master page showing through as
 // a ghost so you can see what's already reserved.
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type {
-  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableDataMap, TocEntry,
+  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableDataMap, TableOverflowMap,
+  TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
+import { buildOverflowPages, overflowTableData } from "@/lib/reportOverflow";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
@@ -40,17 +42,38 @@ interface Props {
   /** Live, real per-table data — each table's own effective style (colors,
    * font size, padding) travels with it — see useTableData. */
   tableData?: TableDataMap;
-  /** False until chartSvgs/tableData's first real response has landed —
-   * chart/table boxes grey out instead of showing the generic mockup.
-   * Defaults true (Template Builder — chartSvgs/tableData never load at
-   * all there, so the mockup is the only look and always "ready"). */
+  /** Live, real continuation-page row data for any table that overflows
+   * its own box — see useTableOverflow. Present only alongside liveData;
+   * undefined in the Template Builder (no real project data to know
+   * whether/where a table would even overflow). Drives buildOverflowPages
+   * below, which is what actually turns this into extra page-list rows. */
+  tableOverflow?: TableOverflowMap;
+  /** Live, real "List of tables/figures/images" content — see
+   * useTocEntries. Present only alongside liveData; undefined in the
+   * Template Builder, where those variants keep their static placeholder
+   * (no real project data to number captions against). */
+  tocCaptions?: TocCaptionsData;
+  /** False until chartSvgs/tableData/tocCaptions's first real response has
+   * landed — chart/table boxes grey out instead of showing the generic
+   * mockup. Defaults true (Template Builder — none of the three load at all
+   * there, so the mockup is the only look and always "ready"). */
   previewsReady?: boolean;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
-  chartSvgs, tableData, previewsReady = true,
+  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true,
 }: Props) {
+  // Real, downloaded-PDF-accurate continuation pages spliced in after any
+  // page whose table overflows its box (see buildOverflowPages) — these
+  // have no backing entry in `pages` itself (the array `onChange`/save
+  // ever touches), so every mutation below still reads/writes `pages`
+  // directly; only the page LIST and the active-page lookup use this
+  // expanded view, so a synthetic page is fully viewable but never
+  // accidentally edited, saved, or duplicated as if it were real.
+  const displayPages = tableOverflow ? buildOverflowPages(pages, tableOverflow) : pages;
+  const overflowData = tableOverflow ? overflowTableData(tableOverflow) : undefined;
+  const mergedTableData = overflowData ? { ...tableData, ...overflowData } : tableData;
   // Every page's real name + real page number, for any "toc" element on the
   // canvas — mirrors apps/reports/pdf_canvas.py's build_canvas_pdf toc_map/
   // toc_order exactly (1-based position in this exact page sequence).
@@ -59,6 +82,14 @@ export function ReportConfigurator({
   const tocEntries: TocEntry[] = pages.map((p, i) => ({ id: p.id, name: p.name, number: i + 1 }));
 
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
+  // Set right before a scroll-triggered page change (see navigatePage below)
+  // so the freshly-mounted next page starts scrolled to the edge you'd
+  // naturally continue from — top when moving forward, bottom when moving
+  // backward — instead of always snapping back to the top. Read-and-cleared
+  // on every render (not state) so it only affects the one mount it was set
+  // for, never a later page change made some other way (PageStrip click,
+  // add/duplicate/delete).
+  const pendingScrollBottomRef = useRef(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // Whether you're moving this page's own content around, or the shared
   // header/footer (only offered where onMasterElementsChange exists — the
@@ -70,7 +101,7 @@ export function ReportConfigurator({
   // controls are just noise here. Template Builder (no liveData) keeps them.
   const isReportContext = Boolean(liveData);
 
-  const active = pages.find((p) => p.id === activeId) ?? pages[0];
+  const active = displayPages.find((p) => p.id === activeId) ?? displayPages[0];
 
   function setElements(updater: (prev: LayoutElement[]) => LayoutElement[]) {
     onChange((prev) =>
@@ -105,6 +136,20 @@ export function ReportConfigurator({
     if (pages.length === 1) return; // a report always has at least one page
     onChange((prev) => (prev.length === 1 ? prev : prev.filter((p) => p.id !== id)));
     if (activeId === id) setActiveId(pages.find((p) => p.id !== id)!.id);
+  }
+
+  /** Scrolling past the top/bottom edge of the canvas moves to the
+   * previous/next page (see LayoutEditor's onNavigatePage) — no wraparound,
+   * scrolling past the first/last page just stops there. Walks
+   * `displayPages`, not `pages` — scrolling past a table that overflows
+   * naturally continues straight into its real continuation page(s),
+   * exactly like paging through the actual downloaded PDF would. */
+  function navigatePage(delta: -1 | 1) {
+    const index = displayPages.findIndex((p) => p.id === active.id);
+    const target = index + delta;
+    if (target < 0 || target >= displayPages.length) return;
+    pendingScrollBottomRef.current = delta === -1;
+    setActiveId(displayPages[target].id);
   }
 
   function movePage(id: string, delta: -1 | 1) {
@@ -186,7 +231,30 @@ export function ReportConfigurator({
       </div>
 
       <div className={styles.pageList}>
-        {pages.map((page, index) => (
+        {displayPages.map((page, index) => {
+          if (page.synthetic) {
+            // A real, downloaded-PDF-accurate continuation page (see
+            // reportOverflow.ts) — viewable like any other row, but nothing
+            // to move/duplicate/delete/rename/repeat: it has no backing
+            // entry in `pages`, and gets regenerated fresh from live data
+            // on every render, so "editing" it here would just be discarded.
+            return (
+              <div
+                key={page.id}
+                className={`${styles.pageRow} ${styles.pageRowSynthetic} ${page.id === active.id ? styles.pageRowActive : ""}`}
+              >
+                <button type="button" className={styles.pageRowMain} onClick={() => setActiveId(page.id)}>
+                  <span className={styles.pageIndex}>{index + 1}</span>
+                  <span className={styles.pageName}>{page.name}</span>
+                  <span className={styles.pageCount} title="This table continues past its box — see REPORT_BUILDER_FEEDBACK.md">
+                    continued
+                  </span>
+                </button>
+              </div>
+            );
+          }
+          const realIndex = pages.findIndex((p) => p.id === page.id);
+          return (
           <div
             key={page.id}
             className={`${styles.pageRow} ${page.id === active.id ? styles.pageRowActive : ""}`}
@@ -222,14 +290,14 @@ export function ReportConfigurator({
             <div className={styles.pageActions}>
               <button
                 type="button" onClick={() => movePage(page.id, -1)}
-                aria-label="Move up" title="Move up" disabled={index === 0}
+                aria-label="Move up" title="Move up" disabled={realIndex === 0}
               >
                 <Icon name="chevronDown" size={12} className={styles.flipUp} />
               </button>
               <button
                 type="button" onClick={() => movePage(page.id, 1)}
                 aria-label="Move down" title="Move down"
-                disabled={index === pages.length - 1}
+                disabled={realIndex === pages.length - 1}
               >
                 <Icon name="chevronDown" size={12} />
               </button>
@@ -280,7 +348,8 @@ export function ReportConfigurator({
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       <p className={styles.panelHint}>Double-click a page name to rename it.</p>
 
@@ -334,6 +403,8 @@ export function ReportConfigurator({
   const effectiveDesign = !editingHeader && active.orientation && active.orientation !== design.orientation
     ? { ...design, orientation: active.orientation }
     : design;
+  const scrollToBottom = pendingScrollBottomRef.current;
+  pendingScrollBottomRef.current = false;
 
   return (
     <LayoutEditor
@@ -344,8 +415,17 @@ export function ReportConfigurator({
       key={`${active.id}-${editMode}`}
       design={effectiveDesign}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
-      onElementsChange={editingHeader ? onMasterElementsChange! : setElements}
+      // A synthetic continuation page (see buildOverflowPages) has no
+      // backing entry in `pages` for setElements to write into, and
+      // shouldn't be editable anyway — it's a live-computed preview of
+      // what the download does, not something you author. A no-op instead
+      // of setElements itself: any edit attempt is silently discarded
+      // rather than throwing (onElementsChange isn't optional) or writing
+      // into a page id that doesn't really exist in `pages`.
+      onElementsChange={editingHeader ? onMasterElementsChange! : (active.synthetic ? () => {} : setElements)}
       masterElements={editingHeader || active.skip_master ? [] : (masterElements ?? design.master_elements)}
+      onNavigatePage={editingHeader ? undefined : navigatePage}
+      initialScrollToBottom={scrollToBottom}
       leftHeader={pageList}
       emptyHint={
         editingHeader
@@ -357,12 +437,22 @@ export function ReportConfigurator({
       reportId={reportId}
       pinnedItem={editingHeader ? null : pinnedItem}
       chartSvgs={chartSvgs}
-      tableData={tableData}
+      tableData={mergedTableData}
+      tocCaptions={tocCaptions}
       previewsReady={previewsReady}
       tocEntries={tocEntries}
       ownPageId={active.id}
+      // 2026-08-26 (client ask): the bottom Canva-style page-thumbnail
+      // strip is gone from the report Customize tab specifically — the
+      // left page list already covers everything it did (select/add/
+      // duplicate/delete), and it never learned about synthetic
+      // continuation pages (see buildOverflowPages above), so next to the
+      // left list it read as a second, incomplete/inconsistent page list
+      // rather than a useful shortcut. Left in place for the Template
+      // Builder's own Page Designer/Report Configuration tab, which has no
+      // continuation-page concept to fall out of sync with.
       bottomPanel={
-        editingHeader ? undefined : (
+        editingHeader || isReportContext ? undefined : (
           <PageStrip
             pages={pages}
             design={design}

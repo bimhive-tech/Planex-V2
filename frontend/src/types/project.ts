@@ -25,7 +25,13 @@ export interface ProjectDetail {
   priority: string;
   priority_display: string;
   budget: string | null;
+  // General-purpose fallback currency (cash flow, cost performance still use
+  // this one). Each of the 5 contract-KPI fields below carries its OWN
+  // currency instead — a project can genuinely have its budget in EGP and
+  // an advance payment in USD, so there's no shared conversion between them
+  // (see apps/reports/pdf_base.py's format_money).
   currency: string;
+  budget_currency: string;
   location: string;
   description: string;
   client_name: string;
@@ -43,12 +49,17 @@ export interface ProjectDetail {
   revised_finish: string | null;
   forecast_finish: string | null;
   advance_payment: string | null;
+  advance_payment_currency: string;
   eot_days: number | null;
   contract_value: string | null;
+  contract_value_currency: string;
   // Derived: contract_value + approved cost Variations (CVOs) — read-only,
-  // not accepted on PATCH. Edit it via the Variations tab instead.
+  // not accepted on PATCH. Edit it via the Variations tab instead. Currency
+  // always mirrors contract_value_currency.
   approved_value: string | null;
+  approved_value_currency: string;
   forecast_cost: string | null;
+  forecast_cost_currency: string;
   size_sqm: string | null;
   notes: string;
   is_archived: boolean;
@@ -214,6 +225,19 @@ export interface ProjectStructure {
   scope_activity_counts: Record<string, number>;
   activity_count: number;
   progress_breakdown: ProgressBreakdown;
+  schedule_import_id: string | null;
+  schedule_import_date: string | null;
+}
+
+// One retained schedule import — the history picker's data source.
+export interface ScheduleImportSummary {
+  id: string;
+  date: string;
+  source: string;
+  activity_count: number;
+  created_at: string;
+  is_current: boolean;
+  file_url: string | null;
 }
 
 // Excel grid (one zone): subzones across columns, tasks down the rows.

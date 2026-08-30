@@ -22,6 +22,8 @@ import { Modal } from "@/components/ui/Modal";
 import { StateView } from "@/components/ui/StateView";
 import { useChartSvgs } from "@/hooks/useChartSvgs";
 import { useTableData } from "@/hooks/useTableData";
+import { useTableOverflow } from "@/hooks/useTableOverflow";
+import { useTocEntries } from "@/hooks/useTocEntries";
 import { api, ApiError } from "@/lib/api";
 import { readPageDesign, readPages } from "@/lib/reportLayout";
 import type { LayoutElement, LayoutPage } from "@/lib/reportLayout";
@@ -81,10 +83,13 @@ export function ReportLayoutEditor({
   // refresh or a save.
   const { charts: chartSvgs, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
   const { tables: tableData, loaded: tablesLoaded } = useTableData(reportId, pages, masterElements);
-  // Neither hook has produced its first real response yet — chart/table
-  // boxes grey out instead of showing the generic client-side mockup, so a
-  // still-loading canvas never looks like it's already showing real content.
-  const previewsReady = chartsLoaded && tablesLoaded;
+  const { captions: tocCaptions, loaded: tocLoaded } = useTocEntries(reportId, pages, masterElements);
+  const { continuations: tableOverflow, loaded: overflowLoaded } = useTableOverflow(reportId, pages, masterElements);
+  // None of the four hooks has produced its first real response yet —
+  // chart/table boxes grey out instead of showing the generic client-side
+  // mockup, so a still-loading canvas never looks like it's already showing
+  // real content.
+  const previewsReady = chartsLoaded && tablesLoaded && tocLoaded && overflowLoaded;
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);
@@ -181,6 +186,8 @@ export function ReportLayoutEditor({
         onMasterElementsChange={updateMasterElements}
         chartSvgs={chartSvgs}
         tableData={tableData}
+        tableOverflow={tableOverflow}
+        tocCaptions={tocCaptions}
         previewsReady={previewsReady}
       />
       <Modal

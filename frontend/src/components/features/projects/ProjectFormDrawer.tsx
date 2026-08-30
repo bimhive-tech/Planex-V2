@@ -24,11 +24,12 @@ type Form = Record<string, string>;
 
 const FIELDS = [
   "name", "code", "project_type", "priority", "location", "description",
-  "budget", "currency", "advance_payment", "client_name",
+  "budget", "budget_currency", "currency", "advance_payment", "advance_payment_currency", "client_name",
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
   "planned_start", "planned_finish", "forecast_finish",
-  "eot_days", "size_sqm", "notes", "contract_value", "forecast_cost",
+  "eot_days", "size_sqm", "notes",
+  "contract_value", "contract_value_currency", "forecast_cost", "forecast_cost_currency",
 ];
 
 const blank = (): Form => {
@@ -67,7 +68,12 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
   useEffect(() => {
     if (isEdit || !open || form.currency || !currencyOptions.length) return;
     const preferred = currenciesData?.results.find((c) => c.is_default)?.code ?? currencyOptions[0].value;
-    setForm((f) => ({ ...f, currency: preferred }));
+    // Each contract-KPI field starts on this company's default currency too
+    // — independently changeable per field from there, not locked together.
+    setForm((f) => ({
+      ...f, currency: preferred, budget_currency: preferred, advance_payment_currency: preferred,
+      contract_value_currency: preferred, forecast_cost_currency: preferred,
+    }));
   }, [isEdit, open, currencyOptions, currenciesData, form.currency]);
 
   useEffect(() => {
@@ -148,26 +154,42 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
             options={priorityOptions.length ? priorityOptions : [{ value: form.priority, label: "Loading…" }]}
             value={form.priority} onChange={set("priority")} />
         </div>
-        <div className={styles.row2}>
+        <p className={styles.sectionHint}>
+          Each amount below keeps its own currency — a project can have its budget in EGP and an advance payment
+          in USD, for example, with no conversion between them.
+        </p>
+        <div className={styles.moneyRow}>
           <Input label="Budget" name="budget" type="number" step="0.01" value={form.budget} onChange={set("budget")} />
-          <Select label="Currency" name="currency"
-            options={currencyOptions.length ? currencyOptions : [{ value: form.currency, label: "Loading…" }]}
-            value={form.currency} onChange={set("currency")} />
+          <Select label="Currency" name="budget_currency"
+            options={currencyOptions.length ? currencyOptions : [{ value: form.budget_currency, label: "Loading…" }]}
+            value={form.budget_currency} onChange={set("budget_currency")} />
         </div>
-        <div className={styles.row2}>
+        <div className={styles.moneyRow}>
           <Input label="Advance payment" name="advance_payment" type="number" step="0.01"
             value={form.advance_payment} onChange={set("advance_payment")} />
-          <Input label="EOT (days)" name="eot_days" type="number" step="1"
-            value={form.eot_days} onChange={set("eot_days")} />
+          <Select label="Currency" name="advance_payment_currency"
+            options={currencyOptions.length ? currencyOptions : [{ value: form.advance_payment_currency, label: "Loading…" }]}
+            value={form.advance_payment_currency} onChange={set("advance_payment_currency")} />
         </div>
-        <div className={styles.row2}>
+        <div className={styles.moneyRow}>
           <Input label="Contract value" name="contract_value" type="number" step="0.01"
             value={form.contract_value} onChange={set("contract_value")} />
+          <Select label="Currency" name="contract_value_currency"
+            options={currencyOptions.length ? currencyOptions : [{ value: form.contract_value_currency, label: "Loading…" }]}
+            value={form.contract_value_currency} onChange={set("contract_value_currency")} />
+        </div>
+        <div className={styles.moneyRow}>
           <Input label="Forecast cost" name="forecast_cost" type="number" step="0.01"
             value={form.forecast_cost} onChange={set("forecast_cost")} />
+          <Select label="Currency" name="forecast_cost_currency"
+            options={currencyOptions.length ? currencyOptions : [{ value: form.forecast_cost_currency, label: "Loading…" }]}
+            value={form.forecast_cost_currency} onChange={set("forecast_cost_currency")} />
         </div>
+        <Input label="EOT (days)" name="eot_days" type="number" step="1"
+          value={form.eot_days} onChange={set("eot_days")} />
         <p className={styles.sectionHint}>
-          Approved value is derived from Contract value plus approved cost Variations (CVOs) — edit it via the Variations tab.
+          Approved value is derived from Contract value plus approved cost Variations (CVOs), in Contract value&apos;s
+          own currency — edit it via the Variations tab.
         </p>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="description">Description</label>

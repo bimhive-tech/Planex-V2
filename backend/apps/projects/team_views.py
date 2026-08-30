@@ -18,6 +18,7 @@ from apps.accounts.models import User
 
 from .models import Project, ProjectMember, ProjectScope, ProjectScopeAccess
 from .serializers import ProjectMemberSerializer, ProjectMemberWriteSerializer
+from .services import latest_schedule_import
 
 
 def _set_scope(project, user, scope_ids):
@@ -112,7 +113,12 @@ class ProjectZonesView(APIView):
     def get(self, request, project_id):
         project = _project(request, project_id)
         _require(request, Permission.MANAGE_PROJECTS.value)
-        zones = project.scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order", "name")
+        # Current batch only — otherwise every past import's zones would pile
+        # up here as duplicate picker options (see ScheduleImport's own
+        # docstring: a re-import no longer deletes the previous batch).
+        schedule_import = latest_schedule_import(project)
+        scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+        zones = scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order", "name")
         return Response([{"id": str(z.id), "name": z.name} for z in zones])
 
 

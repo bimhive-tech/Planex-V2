@@ -68,6 +68,7 @@ export const TABLE_SOURCES = [
   { value: "invoices", label: "Invoices" },
   { value: "submittals", label: "Submittals" },
   { value: "delays", label: "Areas of concern" },
+  { value: "custom", label: "Custom table (build your own)" },
 ];
 
 /** Data behind a chart element. */
@@ -80,7 +81,13 @@ export const CHART_SOURCES = [
   { value: "duration", label: "Duration & delay" },
   { value: "cashflow_monthly", label: "Cash flow — monthly" },
   { value: "cashflow_cumulative", label: "Cash flow — cumulative" },
+  { value: "invoice_status", label: "Invoice status (invoiced vs remaining)" },
+  { value: "budget_total_cost", label: "Budget total cost" },
+  { value: "boq_financial_progress", label: "Financial progress by BOQ" },
+  { value: "progress_comparison", label: "Progress comparison (planned/actual/earned value)" },
   { value: "gantt", label: "Gantt schedule" },
+  { value: "submittals_material", label: "Material submittals by status/discipline" },
+  { value: "submittals_shop_drawing", label: "Shop drawings by status/discipline" },
 ];
 
 // Only offered on a page marked "repeat" — resolved against the item the
@@ -166,6 +173,10 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
       { key: "toc_images", label: "List of images", type: "toc", icon: "image", w: 170, h: 100,
         props: { size: 11, row_height: 8, color: "#1e2430", variant: "images" },
         hint: "Lists every captioned Site Photos slot, numbered in the order it appears in the PDF." },
+      { key: "description", label: "Description", type: "description", icon: "text", w: 170, h: 220,
+        props: { html: "" },
+        hint: "A rich-text block you write and format right here — double-click to start typing, insert "
+          + "tables/charts/images inline. Continues onto extra pages if it doesn't fit this box." },
     ],
   },
   {
@@ -184,6 +195,10 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
         props: { source: "milestones", zebra: true, border: true, header_bg: "#1F4E79", header_text: "#ffffff" } },
       { key: "table_critical_path", label: "Critical path delays", type: "table", icon: "flag", w: 170, h: 60,
         props: { source: "critical_path_delays", zebra: true, border: true, header_bg: "#1F4E79", header_text: "#ffffff" } },
+      { key: "table_custom", label: "Custom table", type: "table", icon: "table", w: 170, h: 60,
+        props: { source: "custom", zebra: true, border: true, header_bg: "#1F4E79", header_text: "#ffffff",
+                 custom_data: { columns: ["Column 1", "Column 2"], rows: [["", ""], ["", ""]] } },
+        hint: "Build a table from scratch, or paste cells copied from Excel straight into it." },
     ],
   },
   {
@@ -207,6 +222,12 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
       { key: "chart_gantt", label: "Gantt schedule", type: "chart", icon: "calendar", w: 170, h: 80,
         props: { source: "gantt", chart_type: "bar", legend: false,
                  color_a: "#4F81BD", color_b: "#C0504D" } },
+      { key: "chart_submittals", label: "Material submittals", type: "chart", icon: "table", w: 150, h: 60,
+        props: { source: "submittals_material", chart_type: "stacked", legend: true },
+        hint: "Status (submitted/approved/rejected/pending) by discipline, stacked bars." },
+      { key: "chart_shop_drawings", label: "Shop drawings", type: "chart", icon: "table", w: 150, h: 60,
+        props: { source: "submittals_shop_drawing", chart_type: "stacked", legend: true },
+        hint: "Same breakdown as Material submittals, for shop drawing records." },
     ],
   },
 ];

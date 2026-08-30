@@ -10,12 +10,18 @@
 // to the representative placeholder it always showed.
 import { useEffect, useRef, useState } from "react";
 
+import { Icon } from "@/components/ui/Icon";
+import { RichTextEditor, type RichTextEditorHandle } from "@/components/ui/RichTextEditor";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
-import type { ChartSvgMap, LayoutElement, TableDataMap, TableStyle, TocEntry } from "@/lib/reportLayout";
+import type {
+  ChartSvgMap, CustomTableData, LayoutElement, TableDataMap, TableStyle, TocCaptionsData, TocEntry,
+} from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
+import { CustomTableEditor } from "./CustomTableEditor";
+import { DescriptionEmbedToolbar } from "../DescriptionEmbedToolbar";
 import styles from "./designer.module.css";
 
 interface PreviewProps {
@@ -28,6 +34,10 @@ interface PreviewProps {
    * different zoom levels purely from the mismatch, not any real change. */
   scale: number;
   liveData?: ReportData | null;
+  /** This report's id — lets a description element's inline image-embed
+   * control attach an upload to this report. Undefined in the project-
+   * agnostic Template Builder, where the image-embed button is hidden. */
+  reportId?: string;
   pinnedItem?: RepeatItem | RepeatItem[] | null;
   /** Live, real per-chart previews (see useChartSvgs) — the same Drawing
    * the real PDF renders for this exact chart, exported to SVG. Present
@@ -53,6 +63,12 @@ interface PreviewProps {
    * (it only needs the page list, not real project data), so a "toc"
    * element never falls back to a sample list. */
   tocEntries?: TocEntry[];
+  /** Live, real "List of tables/figures/images" content — see
+   * useTocEntries. Present only in the report Customize tab; a "tables"/
+   * "figures"/"images" TOC variant falls back to its "resolved in the
+   * downloaded PDF" placeholder in the Template Builder, which has no real
+   * project data to number captions against. */
+  tocCaptions?: TocCaptionsData;
   /** The page this element is being drawn on — a toc element skips its
    * own page, mirroring pdf_canvas._draw_toc_element. */
   ownPageId?: string;
@@ -190,10 +206,10 @@ function projectInfoRows(data: ReportData): string[][] {
   const rows: [string, string][] = [
     ["Name", p.name], ["Code", p.code ?? ""], ["Client", p.client],
     ["Consultant", p.consultant], ["Contractor", p.contractor], ["Type", p.type],
-    ["Location", p.location], ["Value", money(p.budget, p.currency)],
-    ["Contract value", money(p.contract_value, p.currency)],
-    ["Approved value", money(p.approved_value, p.currency)],
-    ["Forecast cost", money(p.forecast_cost, p.currency)],
+    ["Location", p.location], ["Value", money(p.budget, p.budget_currency ?? p.currency)],
+    ["Contract value", money(p.contract_value, p.contract_value_currency ?? p.currency)],
+    ["Approved value", money(p.approved_value, p.approved_value_currency ?? p.currency)],
+    ["Forecast cost", money(p.forecast_cost, p.forecast_cost_currency ?? p.currency)],
     ["Duration", dur?.total ? `${dur.total} days` : ""],
     ["Start", fmtDate(p.planned_start)], ["Finish", fmtDate(p.planned_finish)],
     ["Revised finish", p.revised_finish ? fmtDate(p.revised_finish) : ""],
@@ -267,6 +283,45 @@ function TableCell({ text, onCommit }: { text: string; onCommit?: (next: string)
   return <InlineEditableText value={text} onCommit={onCommit} dir={ARABIC_RE.test(text) ? "rtl" : "ltr"} />;
 }
 
+/** A data-bound table's `live.rows` already has hidden rows filtered out
+ * server-side (see apps/reports/pdf_tables.py's apply_table_overrides) — but
+ * `overrides`/`hidden_rows` keys both refer to the row's *original*,
+ * pre-filter position. This reconstructs that original index for each
+ * displayed row (in order, skipping whatever's already hidden) so an edit
+ * or a new hide made after an earlier row was hidden still lands on the
+ * right row instead of silently shifting by one. */
+function originalRowIndices(count: number, hiddenRows: number[] | undefined): number[] {
+  const hidden = new Set(hiddenRows ?? []);
+  const out: number[] = [];
+  let k = 0;
+  for (let n = 0; n < count; n++) {
+    while (hidden.has(k)) k++;
+    out.push(k);
+    k++;
+  }
+  return out;
+}
+
+/** The small "×" gutter cell that hides a data-bound table's row from this
+ * report's view (see TablePreview's commitHideRow) — a real table cell so it
+ * lines up with the header/body rows around it, not an absolutely
+ * positioned overlay. */
+function RowHideButton({ onHide }: { onHide: () => void }) {
+  return (
+    <td className={styles.tableLiveRowHandle}>
+      <button
+        type="button"
+        className={styles.tableLiveRowHideBtn}
+        onClick={onHide}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label="Hide this row"
+      >
+        <Icon name="close" size={10} />
+      </button>
+    </td>
+  );
+}
+
 /** Mirrors pdf_tables.py's _pct_or_dash exactly (one decimal place, an
  * em-dash for a missing value) — hierarchy rows are numbers, not
  * pre-formatted strings, unlike every other table kind. */
@@ -287,16 +342,20 @@ function tableStyleVars(style: TableStyle | null | undefined): React.CSSProperti
   } as React.CSSProperties;
 }
 
-/** Clips a live table to its element's own box instead of letting an
- * over-tall table (more rows than the box has room for) spill past it —
- * previously it grew right past the box, past the page, off the bottom of
- * the paper. The real PDF now genuinely continues an overflowing table onto
- * extra pages (see apps/reports/pdf_canvas.py's _expand_table_overflow);
+/** Clips live content to its element's own box instead of letting something
+ * too tall for it (a table with more rows than fit, or a description with
+ * more content than fits) spill past it — previously it grew right past the
+ * box, past the page, off the bottom of the paper. The real PDF now
+ * genuinely continues either kind onto extra pages (see apps/reports/
+ * pdf_canvas.py's _expand_table_overflow / _expand_description_overflow);
  * the canvas doesn't synthesize matching extra pages into the editor's own
  * page list (a much bigger UI change — phantom pages the user never
  * created), so this shows what fits and says so, rather than either
- * spilling or silently cutting rows with no indication anything's missing. */
-function TableOverflowClip({ children }: { children: React.ReactNode }) {
+ * spilling or silently cutting content with no indication anything's
+ * missing. */
+function OverflowClip({ children, note = "More rows than fit here — continues in the downloaded PDF" }: {
+  children: React.ReactNode; note?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
@@ -309,15 +368,29 @@ function TableOverflowClip({ children }: { children: React.ReactNode }) {
   return (
     <div ref={ref} className={styles.tableClip}>
       {children}
-      {overflowing && (
-        <div className={styles.tableOverflowNote}>More rows than fit here — continues in the downloaded PDF</div>
-      )}
+      {overflowing && <div className={styles.tableOverflowNote}>{note}</div>}
     </div>
   );
 }
 
 function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = true, onElementChange }: PreviewProps) {
   const p = el.props;
+
+  // "custom" — no backend data source at all; it's built by hand or pasted
+  // from Excel (see CustomTableEditor) — checked *before* the live-data
+  // block below, since a custom table's own resolve_table branch still
+  // returns a resolvable "ok" table from its seed data, which would
+  // otherwise make the live read-only view win here too. Edited directly on
+  // the canvas: real <input> cells, add/remove row/column controls, right
+  // on the page instead of tucked in the Properties panel.
+  if (p.source === "custom" && onElementChange) {
+    return (
+      <CustomTableEditor
+        data={p.custom_data as CustomTableData | undefined}
+        onChange={(custom_data) => onElementChange({ ...el, props: { ...p, custom_data } })}
+      />
+    );
+  }
 
   // The real thing — the exact same header/rows resolve_table computes for
   // the real PDF table (see useTableData/apps/reports/views.py's table_data,
@@ -345,100 +418,139 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
       }
     : undefined;
 
+  // A clicked row's "×" writes into props.hidden_rows — a data-bound table's
+  // rows come from real project data and can't be deleted the way a custom
+  // table's can, but a report author can still drop specific ones from this
+  // one report's view. pdf_tables.apply_table_overrides reads the same prop
+  // to filter it out of the downloaded PDF too, so this is never just a
+  // canvas-only trick. Undefined for "custom" tables — those rows are
+  // deleted for real instead (see the CustomTableEditor branch below).
+  const hiddenRows = p.hidden_rows as number[] | undefined;
+  const commitHideRow = onElementChange && p.source !== "custom"
+    ? (originalIndex: number) => {
+        onElementChange({ ...el, props: { ...p, hidden_rows: [...(hiddenRows ?? []), originalIndex] } });
+      }
+    : undefined;
+
   if (live) {
     if (live.status !== "ok") {
       return <div className={styles.chartPlaceholder}>{`No data: ${String(p.source ?? "")}`}</div>;
     }
     const vars = tableStyleVars(live.style);
+    // live.rows already has hidden rows filtered out server-side — recover
+    // each displayed row's real original index (see originalRowIndices) so
+    // overrides/hidden_rows keys stay in the same index space as the data
+    // actually came from, not the shorter post-filter list.
+    const rowIdx = originalRowIndices(live.rows.length, hiddenRows);
 
     if (live.kind === "info") {
       return (
-        <TableOverflowClip>
+        <OverflowClip>
           <table className={styles.tableLive} data-kind="info" style={vars}>
             <tbody>
-              {live.rows.map(([labelText, valueText], i) => (
-                <tr key={i}>
-                  <td className={styles.tableLiveInfoLabel}>
-                    <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${i}c0`, v))} /> •
-                  </td>
-                  <td className={styles.tableLiveInfoValue}>
-                    <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${i}c1`, v))} />
-                  </td>
-                </tr>
-              ))}
+              {live.rows.map(([labelText, valueText], i) => {
+                const oi = rowIdx[i];
+                return (
+                  <tr key={i}>
+                    {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
+                    <td className={styles.tableLiveInfoLabel}>
+                      <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} /> •
+                    </td>
+                    <td className={styles.tableLiveInfoValue}>
+                      <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-        </TableOverflowClip>
+        </OverflowClip>
       );
     }
 
     if (live.kind === "hierarchy") {
       return (
-        <TableOverflowClip>
+        <OverflowClip>
           <table className={styles.tableLive} data-kind="hierarchy" style={vars}>
             <thead>
               <tr>
+                {commitHideRow && <th className={styles.tableLiveRowHandle} />}
                 {live.header.map((h, i) => (
                   <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {live.rows.map((row, i) => (
-                <tr key={i} data-zone={row.level === 0 ? "on" : undefined}>
-                  <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
-                    <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
-                      <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${i}c0`, v))} />
-                    </span>
-                  </td>
-                  <td data-align="center">
-                    <TableCell text={fmtPctOrDash(row.actual)} onCommit={commitCell && ((v) => commitCell(`r${i}c1`, v))} />
-                  </td>
-                  <td data-align="center">
-                    <TableCell text={fmtPctOrDash(row.previous)} onCommit={commitCell && ((v) => commitCell(`r${i}c2`, v))} />
-                  </td>
-                  <td data-align="center">
-                    <TableCell text={fmtPctOrDash(row.planned)} onCommit={commitCell && ((v) => commitCell(`r${i}c3`, v))} />
-                  </td>
-                </tr>
-              ))}
+              {live.rows.map((row, i) => {
+                const oi = rowIdx[i];
+                return (
+                  <tr key={i} data-zone={row.level === 0 ? "on" : undefined}>
+                    {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
+                    <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
+                      <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
+                        <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} />
+                      </span>
+                    </td>
+                    <td data-align="center">
+                      <TableCell text={fmtPctOrDash(row.actual)} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
+                    </td>
+                    <td data-align="center">
+                      <TableCell text={fmtPctOrDash(row.previous)} onCommit={commitCell && ((v) => commitCell(`r${oi}c2`, v))} />
+                    </td>
+                    <td data-align="center">
+                      <TableCell text={fmtPctOrDash(row.planned)} onCommit={commitCell && ((v) => commitCell(`r${oi}c3`, v))} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-        </TableOverflowClip>
+        </OverflowClip>
       );
     }
 
     // "data" — a plain header + flat rows grid (zone_progress, milestones,
     // invoices, etc.).
     return (
-      <TableOverflowClip>
+      <OverflowClip>
         <table className={styles.tableLive} data-kind="data" style={vars}>
           <thead>
             <tr>
+              {commitHideRow && <th className={styles.tableLiveRowHandle} />}
               {live.header.map((h, i) => (
                 <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {live.rows.map((row, i) => (
-              <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined}>
-                {row.map((cell, j) => (
-                  <td key={j} data-align="center">
-                    <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${i}c${j}`, v))} />
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {live.rows.map((row, i) => {
+              const oi = rowIdx[i];
+              return (
+                <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined}>
+                  {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
+                  {row.map((cell, j) => (
+                    <td key={j} data-align="center">
+                      <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${oi}c${j}`, v))} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      </TableOverflowClip>
+      </OverflowClip>
     );
   }
 
   const headerBg = String(p.header_bg ?? "#1F4E79");
   const headerText = String(p.header_text ?? "#ffffff");
-  const real = realTableRows(p.source, liveData, pinnedItem);
+  // "custom" has no backend data behind it (it's authored directly in the
+  // Properties panel — see CustomTableEditor) so it renders here straight
+  // from props, not through realTableRows/liveData like every other source.
+  const customData = p.source === "custom" ? (p.custom_data as CustomTableData | undefined) : undefined;
+  const real = customData
+    ? (customData.rows.length ? customData.rows : null)
+    : realTableRows(p.source, liveData, pinnedItem);
   return (
     <div className={styles.tablePreview}>
       <div className={styles.tablePreviewHead} style={{ background: headerBg, color: headerText }}>
@@ -659,52 +771,82 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
   );
 }
 
-/** Reserves a footer strip under a table/chart box when its "Show caption"
- * toggle is on — mirrors apps/reports/pdf_canvas.py's _CAPTION_H reservation
- * in _draw_table_element/_draw_chart_element. The real PDF prefixes this
- * text with a running "جدول N:"/"شكل N:" number computed across the whole
- * document (repeat expansion, table-overflow pagination) — not reproducible
- * from this one page in isolation, so the canvas shows the caption's name
- * without a number rather than a wrong or fake one. */
-function CaptionedBox({ show, text, children }: { show: boolean; text: string; children: React.ReactNode }) {
-  if (!show) return <>{children}</>;
+/** Reserves a header strip above and/or a footer strip under a table/chart
+ * box — mirrors apps/reports/pdf_canvas.py's _TITLE_H/_CAPTION_H reservation
+ * in _draw_table_element/_draw_chart_element. `titleShow` defaults to shown
+ * (missing `show_title` counts as on — see _table_or_chart_title's
+ * docstring on the backend); `captionShow` defaults to off, unchanged. The
+ * caption's real PDF text is prefixed with a running "جدول N:"/"شكل N:"
+ * number computed across the whole document (repeat expansion, table-
+ * overflow pagination) — not reproducible from this one page in isolation,
+ * so the canvas shows its name without a number rather than a wrong one;
+ * the title carries no running number to begin with, so it matches exactly. */
+function CaptionedBox({
+  titleShow, titleText, captionShow, captionText, children,
+}: {
+  titleShow: boolean; titleText: string; captionShow: boolean; captionText: string; children: React.ReactNode;
+}) {
+  if (!titleShow && !captionShow) return <>{children}</>;
   return (
     <div className={styles.captionedBox}>
+      {titleShow && <div className={styles.elementTitle}>{titleText}</div>}
       <div className={styles.captionedBoxBody}>{children}</div>
-      <div className={styles.elementCaption}>{text}</div>
+      {captionShow && <div className={styles.elementCaption}>{captionText}</div>}
     </div>
   );
 }
 
-function TocPreview({ el, liveData, tocEntries, ownPageId, onElementChange }: PreviewProps) {
+function TocPreview({ el, liveData, tocEntries, tocCaptions, ownPageId, onElementChange }: PreviewProps) {
   const p = el.props;
   const variant = String(p.variant ?? "contents");
-
-  // "Tables"/"Figures"/"Images" variants list every OTHER captioned element
-  // in the template, in final PDF page order — numbering that depends on
-  // the whole document (repeat expansion, table-overflow pagination), not
-  // just this one page's data, so it isn't something this per-page canvas
-  // editor can recompute live the way the Contents variant does from
-  // tocEntries. apps/reports/pdf_canvas.py's _collect_captions pre-pass
-  // computes the real thing; this placeholder just says so.
-  if (variant !== "contents") {
-    const label = variant === "tables" ? "tables" : variant === "figures" ? "figures / charts" : "images";
-    return (
-      <div className={styles.chartPlaceholder}>
-        {`List of ${label} — numbered and resolved in the downloaded PDF`}
-      </div>
-    );
-  }
-
-  const excludeCover = p.exclude_cover ?? true;
   const size = Number(p.size ?? 11);
   const color = String(p.color ?? "#1e2430");
   // One global direction for the whole TOC — mirrors pdf_canvas.py's
   // _draw_toc_element exactly (`rtl = bool(ctx.get("arabic"))`, computed
   // once for the report, not re-guessed per row). A per-row guess would put
   // the page-number column on a different side for an Arabic row than an
-  // English one, which the real PDF never does.
+  // English one, which the real PDF never does. Shared by all four variants
+  // — the same report is either Arabic or not, regardless of which TOC list
+  // is being shown.
   const rtl = liveData?.arabic ?? false;
+
+  // "Tables"/"Figures"/"Images" variants list every OTHER captioned element
+  // in the template, in final PDF page order — numbering that depends on
+  // the whole document (repeat expansion, table-overflow pagination), not
+  // just this one page's data, so it isn't something this per-page canvas
+  // editor can recompute on its own the way the Contents variant does from
+  // tocEntries. `tocCaptions` (see useTocEntries) is the real thing, fetched
+  // from apps/reports/pdf_canvas.py's own _collect_captions pre-pass — the
+  // same one the downloaded PDF runs — so this can't drift from it. Only
+  // falls back to the old "resolved in the downloaded PDF" placeholder when
+  // there's no real project data to ask at all (the Template Builder).
+  if (variant !== "contents") {
+    const label = variant === "tables" ? "tables" : variant === "figures" ? "figures / charts" : "images";
+    if (!tocCaptions) {
+      return (
+        <div className={styles.chartPlaceholder}>
+          {`List of ${label} — numbered and resolved in the downloaded PDF`}
+        </div>
+      );
+    }
+    const rows = tocCaptions[variant as "tables" | "figures" | "images"] ?? [];
+    if (rows.length === 0) {
+      return <div className={styles.chartPlaceholder}>{`No captioned ${label} yet`}</div>;
+    }
+    return (
+      <div className={styles.tocPreview} dir={rtl ? "rtl" : "ltr"} style={{ fontSize: `${size}px`, color }}>
+        {rows.map((row, i) => (
+          <div key={i} className={styles.tocPreviewRow}>
+            <span>{row.text}</span>
+            <span className={styles.tocPreviewDots} />
+            <span>{row.page}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const excludeCover = p.exclude_cover ?? true;
   // A double-clicked row writes into props.name_overrides, keyed by page id
   // — the same keys pdf_canvas._draw_toc_element reads, so a renamed TOC
   // entry reaches the downloaded PDF too, without touching the page's own
@@ -811,9 +953,122 @@ function resolveImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem 
   return (item?.url as string) || null;
 }
 
+/** This description element's own rich text (`props.html`, already-sanitized
+ * HTML — see apps/reports/richtext.py's sanitize_html, the whitelisted-
+ * tags-only output this is a direct render of, safe to drop straight into
+ * the DOM) — a per-element block, edited directly in place here, the same
+ * way any other canvas element's content is authored, rather than a
+ * separate report-level field edited on its own tab. An inline table/chart/
+ * image embed only resolves to real data in the downloaded PDF (see
+ * richtext._resolve_embed) — there's no live-preview equivalent of that
+ * resolution here, so an embed shows as a labeled placeholder chip instead
+ * (driven by the `data-embed`/`data-spec` attributes the marker itself
+ * already carries), same "honest placeholder over a wrong preview"
+ * precedent as an unresolved TOC caption number elsewhere in this file.
+ *
+ * Double-click to edit in place: swaps in the real RichTextEditor (its own
+ * toolbar plus the table/chart/image embed buttons) as a floating overlay
+ * anchored to this box, large enough to comfortably work in regardless of
+ * how small/zoomed-out the placed element is. A click outside commits the
+ * draft into this element's own props and exits, the same "commit on
+ * blur/outside-click, not on every keystroke" convention every other
+ * inline-editable field on this canvas already uses (see
+ * InlineEditableText) — editing a letter at a time would otherwise flood
+ * undo history with one entry per keystroke. */
+function DescriptionPreview({
+  el, reportId, onElementChange,
+}: {
+  el: LayoutElement;
+  reportId?: string;
+  onElementChange?: (el: LayoutElement) => void;
+}) {
+  const html = typeof el.props.html === "string" ? el.props.html : "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(html);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorHandleRef = useRef<RichTextEditorHandle>(null);
+
+  useEffect(() => { if (!editing) setDraft(html); }, [html, editing]);
+
+  // The outside-click/Escape listener below binds once per edit session
+  // (not per keystroke — see its own effect), so its handler closes over
+  // whatever `draft`/`el`/`onElementChange` were at BIND time, not the
+  // latest ones — refs keep it reading the current values on commit
+  // instead of silently discarding everything typed since the edit began.
+  const latest = useRef({ draft, html, el, onElementChange });
+  useEffect(() => { latest.current = { draft, html, el, onElementChange }; });
+
+  useEffect(() => {
+    if (!editing) return;
+    function commitAndExit() {
+      setEditing(false);
+      const { draft: d, html: h, el: e, onElementChange: change } = latest.current;
+      if (d !== h) change?.({ ...e, props: { ...e.props, html: d } });
+    }
+    function onDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) commitAndExit();
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") commitAndExit();
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [editing]);
+
+  if (!onElementChange) {
+    // Template Builder ghost / read-only — static render only, no editing.
+    if (!html) return <div className={styles.chartPlaceholder}>Description</div>;
+    return (
+      <OverflowClip note="More content than fits here — continues in the downloaded PDF">
+        {/* eslint-disable-next-line react/no-danger -- sanitize_html's whitelisted-tags-only output */}
+        <div className={styles.descriptionPreview} dangerouslySetInnerHTML={{ __html: html }} />
+      </OverflowClip>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <div
+        className={styles.descriptionClickToEdit}
+        onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      >
+        {html ? (
+          <OverflowClip note="More content than fits here — continues in the downloaded PDF">
+            {/* eslint-disable-next-line react/no-danger -- sanitize_html's whitelisted-tags-only output */}
+            <div className={styles.descriptionPreview} dangerouslySetInnerHTML={{ __html: html }} />
+          </OverflowClip>
+        ) : (
+          <div className={styles.chartPlaceholder}>Double-click to write the description</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className={styles.descriptionEditOverlay} onPointerDown={(e) => e.stopPropagation()}>
+      <RichTextEditor
+        ref={editorHandleRef}
+        value={draft}
+        onChange={setDraft}
+        placeholder="Write the report's description — نسّق النص كما تريد…"
+        extraToolbar={
+          <DescriptionEmbedToolbar
+            reportId={reportId}
+            onInsert={(chip) => editorHandleRef.current?.insertHtml(chip)}
+          />
+        }
+      />
+    </div>
+  );
+}
+
 export function ElementPreview({
-  el, scale, liveData, pinnedItem, chartSvgs, tableData, previewsReady, tocEntries, ownPageId,
-  onElementChange,
+  el, scale, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries,
+  ownPageId, onElementChange,
 }: PreviewProps) {
   const p = el.props;
 
@@ -931,8 +1186,10 @@ export function ElementPreview({
     case "table":
       return (
         <CaptionedBox
-          show={Boolean(p.show_caption)}
-          text={String(p.caption || label(TABLE_SOURCES, p.source, "Table"))}
+          titleShow={p.show_title !== false}
+          titleText={String(p.title_text || label(TABLE_SOURCES, p.source, "Table"))}
+          captionShow={Boolean(p.show_caption)}
+          captionText={String(p.caption || label(TABLE_SOURCES, p.source, "Table"))}
         >
           <TablePreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
@@ -945,8 +1202,10 @@ export function ElementPreview({
     case "chart":
       return (
         <CaptionedBox
-          show={Boolean(p.show_caption)}
-          text={String(p.caption || label(CHART_SOURCES, p.source, "Chart"))}
+          titleShow={p.show_title !== false}
+          titleText={String(p.title_text || label(CHART_SOURCES, p.source, "Chart"))}
+          captionShow={Boolean(p.show_caption)}
+          captionText={String(p.caption || label(CHART_SOURCES, p.source, "Chart"))}
         >
           <ChartPreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
@@ -958,10 +1217,13 @@ export function ElementPreview({
     case "toc":
       return (
         <TocPreview
-          el={el} scale={scale} liveData={liveData} tocEntries={tocEntries} ownPageId={ownPageId}
-          onElementChange={onElementChange}
+          el={el} scale={scale} liveData={liveData} tocEntries={tocEntries} tocCaptions={tocCaptions}
+          ownPageId={ownPageId} onElementChange={onElementChange}
         />
       );
+
+    case "description":
+      return <DescriptionPreview el={el} reportId={reportId} onElementChange={onElementChange} />;
 
     default:
       return null;

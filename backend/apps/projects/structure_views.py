@@ -21,15 +21,17 @@ logger = logging.getLogger(__name__)
 
 from .access import accessible_scope_ids
 from .imports import import_workbook
-from .models import Activity, Project, ProjectScope
+from .models import Activity, Project, ProjectScope, ScheduleImport
 from .serializers import (
     ActivitySerializer,
     ActivityWriteSerializer,
+    ScheduleImportSerializer,
     ScopeSerializer,
     ScopeWriteSerializer,
 )
 from .services import (
     breakdown_from_map,
+    latest_schedule_import,
     progress_series,
     project_overall_progress,
     scope_progress_map,
@@ -100,19 +102,39 @@ class ProjectStructureView(APIView):
         project = _project(request, project_id)
         _require_view_schedule(request)
         accessible = accessible_scope_ids(project, request.user)
-        scopes_qs = project.scopes.all()
+
+        # ?import_id=<uuid> views an older import's own full state — omitted
+        # (the common case) always resolves to the latest, so the tab shows
+        # current data by default and only shows history when explicitly
+        # asked (2026-08-30: "we will always show the latest data unless I
+        # filter to show a later month"). See ScheduleImport's own docstring.
+        import_id = request.query_params.get("import_id")
+        if import_id:
+            try:
+                schedule_import = ScheduleImport.objects.get(pk=import_id, project=project)
+            except (ScheduleImport.DoesNotExist, ValueError, TypeError):
+                raise NotFound("Import not found.")
+        else:
+            schedule_import = latest_schedule_import(project)
+
+        scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
         if accessible is not None:
             scopes_qs = scopes_qs.filter(id__in=accessible)
+        activities_qs = (
+            project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+        )
         counts = {
             str(r["scope_id"]): r["n"]
-            for r in project.activities.values("scope_id").annotate(n=Count("id"))
+            for r in activities_qs.values("scope_id").annotate(n=Count("id"))
             if accessible is None or r["scope_id"] in accessible
         }
-        # Optional as-of / month-delta view (?mode=asof|month&as_of=YYYY-MM-DD).
+        # Optional as-of / month-delta view (?mode=asof|month&as_of=YYYY-MM-DD)
+        # — a different axis (dated progress-entry readings against the same
+        # current schedule), independent of which import batch is shown.
         value_map = _view_map(request, project)
         if value_map is None:
             from django.db.models import Q
-            agg = project.activities.aggregate(
+            agg = activities_qs.aggregate(
                 total=Count("id"),
                 completed=Count("id", filter=Q(progress_percent__gte=100)),
                 not_started=Count("id", filter=Q(progress_percent__lte=0)),
@@ -123,15 +145,17 @@ class ProjectStructureView(APIView):
                 "in_progress": total - agg["completed"] - agg["not_started"],
             }
         else:
-            breakdown = breakdown_from_map(project, value_map)
+            breakdown = breakdown_from_map(project, value_map, schedule_import)
             total = breakdown["total"]
         return Response({
-            "overall_progress": project_overall_progress(project, value_map),
-            "scope_progress": scope_progress_map(project, value_map),
+            "overall_progress": project_overall_progress(project, value_map, schedule_import),
+            "scope_progress": scope_progress_map(project, value_map, schedule_import),
             "scopes": ScopeSerializer(scopes_qs, many=True).data,
             "scope_activity_counts": counts,
             "activity_count": total,
             "progress_breakdown": breakdown,
+            "schedule_import_id": str(schedule_import.id) if schedule_import else None,
+            "schedule_import_date": schedule_import.date.isoformat() if schedule_import else None,
         })
 
 
@@ -145,7 +169,17 @@ class ScopeTreeView(APIView):
         project = _project(request, project_id)
         _require_view(request)
         parent = request.query_params.get("parent")
-        qs = project.scopes.filter(parent__isnull=True) if not parent else project.scopes.filter(parent_id=parent)
+        # Top-level (no parent given) is scoped to the current import batch —
+        # otherwise every past import's zones would pile up as duplicate
+        # top-level picker options. A `parent` id is always already
+        # batch-scoped by construction (it came from a previous call into
+        # this same view), so no further filtering is needed walking down.
+        if not parent:
+            schedule_import = latest_schedule_import(project)
+            qs = project.scopes.filter(parent__isnull=True, schedule_import=schedule_import) if schedule_import \
+                else project.scopes.filter(parent__isnull=True)
+        else:
+            qs = project.scopes.filter(parent_id=parent)
         children = list(qs.order_by("sort_order", "name").values("id", "name", "scope_type"))
         ids = [c["id"] for c in children]
         has_sub = set(ProjectScope.objects.filter(parent_id__in=ids).values_list("parent_id", flat=True))
@@ -253,7 +287,13 @@ class ScopeListCreateView(APIView):
         serializer = ScopeWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         _validate_parent(project, serializer.validated_data.get("parent"))
-        scope = serializer.save(company=request.user.company, project=project)
+        # A hand-added scope belongs to whichever import batch is current
+        # right now — same "always current" default a hand-added activity
+        # gets right below, so it doesn't vanish from the live view the
+        # moment schedule_import-based filtering (added alongside this
+        # feature) starts applying to `project.scopes`/`project.activities`.
+        scope = serializer.save(company=request.user.company, project=project,
+                                schedule_import=latest_schedule_import(project))
         return Response(ScopeSerializer(scope).data, status=status.HTTP_201_CREATED)
 
 
@@ -297,7 +337,8 @@ class ActivityListCreateView(APIView):
         serializer = ActivityWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         _validate_scope(project, serializer.validated_data.get("scope"))
-        activity = serializer.save(company=request.user.company, project=project)
+        activity = serializer.save(company=request.user.company, project=project,
+                                   schedule_import=latest_schedule_import(project))
         return Response(ActivitySerializer(activity).data, status=status.HTTP_201_CREATED)
 
 
@@ -349,16 +390,29 @@ class ProjectImportView(APIView):
         if upload.size > MAX_IMPORT_BYTES:
             raise ValidationError({"file": "File is too large (max 40 MB)."})
 
+        # The date this schedule DATA is as of — not necessarily today.
+        # Defaults (inside import_workbook) to a date parsed from the
+        # filename, then to today, when the caller doesn't choose one.
+        snapshot_date = None
+        raw_date = request.data.get("date")
+        if raw_date:
+            import datetime as _dt
+            try:
+                snapshot_date = _dt.date.fromisoformat(raw_date)
+            except ValueError:
+                raise ValidationError({"date": "Use YYYY-MM-DD."})
+
         # Read the bytes once: import parses from a copy, and the same bytes are
         # retained verbatim for the P6 export (so neither read disturbs the other).
         raw = upload.read()
         try:
-            result = import_workbook(project, BytesIO(raw), source=upload.name)
+            result = import_workbook(project, BytesIO(raw), source=upload.name, snapshot_date=snapshot_date)
         except Exception as exc:  # parsing failures shouldn't 500
             raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
 
         # Retain the original workbook so the P6 export can be returned with only
-        # its progress column refreshed (see exports.refresh_source_workbook).
+        # its progress column refreshed (see exports.refresh_source_workbook) —
+        # always the LATEST import's file, refreshed each time.
         # Non-fatal: the structure import already succeeded — but log failures
         # (don't swallow them) so a misconfigured store is visible, not silent.
         try:
@@ -368,7 +422,60 @@ class ProjectImportView(APIView):
         except Exception:
             logger.exception("Failed to retain source workbook for project %s", project.id)
 
+        # Also retain THIS import's own copy, keyed to its own batch — unlike
+        # source_workbook above (always overwritten), every past import's
+        # workbook stays downloadable. Same non-fatal logging treatment.
+        schedule_import_id = result.get("schedule_import_id")
+        if schedule_import_id:
+            try:
+                from .models import ScheduleImport
+
+                batch = ScheduleImport.objects.get(id=schedule_import_id)
+                batch.file.save(upload.name, ContentFile(raw), save=True)
+            except Exception:
+                logger.exception("Failed to retain schedule-import workbook %s", schedule_import_id)
+
         return Response(result)
+
+
+class ScheduleImportListView(APIView):
+    """List every retained schedule-import batch for a project, newest first —
+    the picker's data source (see ScheduleImport's own docstring). Small list
+    (one row per import, not per activity), so no pagination."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = _project(request, project_id)
+        _require_view_schedule(request)
+        latest = latest_schedule_import(project)
+        imports = project.schedule_imports.all()
+        data = ScheduleImportSerializer(
+            imports, many=True, context={"latest_id": latest.id if latest else None}).data
+        return Response(data)
+
+
+class ScheduleImportFileView(APIView):
+    """Stream one retained import's own workbook — same private, tenant-scoped
+    pattern as ProjectImageFileView (apps/projects/image_views.py)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, import_id):
+        import mimetypes
+
+        from django.http import FileResponse, Http404
+
+        project = _project(request, project_id)
+        _require_view_schedule(request)
+        try:
+            batch = project.schedule_imports.get(pk=import_id)
+        except (ScheduleImport.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Import not found.")
+        if not batch.file:
+            raise Http404
+        content_type = mimetypes.guess_type(batch.file.name)[0] or "application/octet-stream"
+        return FileResponse(batch.file.open("rb"), content_type=content_type, filename=batch.source or "schedule.xlsx")
 
 
 class ProjectSnapshotsView(APIView):
