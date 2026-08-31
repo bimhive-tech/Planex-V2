@@ -171,6 +171,19 @@ DEFAULT_CONFIG = {
         "col_discipline": "التخصص",
         "col_reference": "المرجع",
         "col_count": "العدد",
+        # Item-scoped chart sources (a repeating page's own zone/phase). Without
+        # these, a title/caption falls back to the raw source key and prints
+        # "item.spi" on the page (2026-08-30).
+        "item.spi": "مؤشر الأداء الزمني",
+        "item.duration": "المدة الزمنية",
+        "item.units": "الإنجاز حسب الوحدة",
+        "item.children": "تفاصيل الوحدات",
+        # The reference report's own "Progress Sheet" columns (its page 32).
+        "progress_sheet": "ورقة متابعة الإنجاز",
+        "col_actual_this": "الفعلي التراكمي (هذا الشهر)",
+        "col_this_month": "إنجاز هذا الشهر",
+        "col_performance_factor": "معامل الأداء",
+        "col_variance": "الانحراف",
         "col_unit": "الوحدة",
         "col_concrete": "الخرسانة",
         "col_architecture": "المعماري",

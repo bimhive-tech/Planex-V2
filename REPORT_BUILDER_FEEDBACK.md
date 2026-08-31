@@ -2030,3 +2030,74 @@ all.
 
 Verified against the live dev DB: hierarchy and area dashboards back to 15
 rows with no duplicate names, activity total back to 24,377.
+
+---
+
+## 2026-08-30 — Builder UX pass, page reordering, and the missing reference sections
+
+Ran a UI/UX critique and a simulated-user walkthrough over the builder. They
+independently reached the same short list, which is what made it worth acting
+on. Everything below was verified in the code before being changed.
+
+### Data-loss and honesty fixes
+
+- **Clicking a table never selected it.** Every custom-table cell input called
+  `stopPropagation` on pointerdown, and the editor fills the element's whole
+  box — so the press never reached `CanvasElementView` and the element stayed
+  unselected, leaving the Properties panel on its empty state and every one of
+  that table's own controls unreachable while editing it. This is the root of
+  the "adding and removing rows and columns feels wrong" report. A press on a
+  control inside an element now selects it without starting a drag.
+- **Switching tabs silently discarded all unsaved layout work.** The editor was
+  conditionally rendered (`{tab === "layout" && ...}`), so any other tab
+  unmounted it and its entire draft. It now stays mounted and hidden once
+  opened, plus a `beforeunload` guard while dirty.
+- **The canvas drew fake content for elements that would print blank.** A
+  failed preview fetch was swallowed and fell through to the generic mockup —
+  plausible bars, a plausible empty grid. It now says the preview failed.
+- **Author-facing placeholders printed into the client PDF.** "Chart too
+  small" / "Table too small" dashed boxes now draw nothing; the Customize tab
+  still flags them, where the author can act.
+- **Hiding a table row was one-way.** The inspector now shows "N rows hidden ·
+  Show all rows" and "N cells manually edited · Revert to source" — also the
+  only signal that a table carries manual edits at all.
+- **Page delete** was one 22px click beside Duplicate with no confirm and no
+  undo. It now confirms when the page has content, and activates the
+  neighbouring page instead of jumping back to page 1.
+- Empty states printed raw source keys ("No data: hierarchy_progress"); they
+  now use the friendly localized name and say why.
+
+### Page reordering
+
+Reordering was up/down chevrons only — 35 clicks to move page 38 to position
+3, each on a different row because the list re-renders under the cursor after
+every swap. Pages are now drag-and-drop in the list, with the dragged row
+faded and the drop target marked.
+
+### Sections added from the reference report
+
+New `progress_sheet` table source (the reference's own Progress Sheet, its
+page 32): zone, planned, actual-this-month, the month's movement,
+actual-last-month, performance factor, variance — all derived from figures the
+context already holds, so no new queries.
+
+New `phase_dashboards` repeat source and `_phase_rows`, giving one row per
+STAGE scope with its own activity-weighted progress and its zones as children.
+Deliberately shares `_hierarchy_rows`' aggregation rather than re-deriving a
+rollup: a phase's percentage has to be the weighted average of everything
+beneath it, not the mean of its zones, or a phase holding one small zone and
+one huge one reports a figure matching nothing else in the report. Verified
+against the real project — PH5 reads 54.4% actual against the reference's own
+51.71% for the same phase.
+
+Five pages appended to both the template and this report's saved layout
+(additive; existing pages untouched, and both were backed up first): نسب
+الإنجاز, ورقة متابعة الإنجاز, لوحة معلومات المرحلة (repeating per phase),
+منحنى الإنجاز, بيان مالي عن المشروع.
+
+**Worth knowing:** the first render of the phase pages came out blank. A chart
+box has its title (7mm) and caption (8mm) strips removed before the drawing
+gets what's left, so the 56mm boxes offered only 41mm against a 45mm minimum
+and were skipped. Silencing the "too small" placeholder (above) is what made
+this invisible in the PDF rather than obvious — the trade-off is deliberate,
+but it means the Customize tab is now the only place that surfaces it.

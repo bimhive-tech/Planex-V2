@@ -86,6 +86,11 @@ export function ReportConfigurator({
   const tocEntries: TocEntry[] = pages.map((p, i) => ({ id: p.id, name: p.name, number: i + 1 }));
 
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
+  // Page being dragged in the list, and the row it's currently hovering over
+  // — see reorderPage. Held as ids, not indices, so a re-render mid-drag
+  // (the list re-orders live) can't leave the drag pointing at the wrong row.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // Set right before a scroll-triggered page change (see navigatePage below)
   // so the freshly-mounted next page starts scrolled to the edge you'd
   // naturally continue from — top when moving forward, bottom when moving
@@ -138,8 +143,25 @@ export function ReportConfigurator({
 
   function deletePage(id: string) {
     if (pages.length === 1) return; // a report always has at least one page
+    const index = pages.findIndex((p) => p.id === id);
+    const page = pages[index];
+    // Page operations sit in no undo stack, and Delete is one 22px click away
+    // from Duplicate — so a page with real content on it asks first. An empty
+    // page deletes straight away rather than nagging (2026-08-30).
+    const count = (page?.elements ?? []).length;
+    if (count > 0) {
+      const name = page?.name?.trim() || `Page ${index + 1}`;
+      const ok = window.confirm(
+        `Delete "${name}" and its ${count} element${count === 1 ? "" : "s"}? This can't be undone.`);
+      if (!ok) return;
+    }
     onChange((prev) => (prev.length === 1 ? prev : prev.filter((p) => p.id !== id)));
-    if (activeId === id) setActiveId(pages.find((p) => p.id !== id)!.id);
+    // Activate the neighbour, not page 1 — deleting page 7 of 12 used to jump
+    // the editor back to the top of the report.
+    if (activeId === id) {
+      const neighbour = pages[index + 1] ?? pages[index - 1];
+      if (neighbour) setActiveId(neighbour.id);
+    }
   }
 
   /** Scrolling past the top/bottom edge of the canvas moves to the
@@ -163,6 +185,23 @@ export function ReportConfigurator({
       if (index < 0 || target < 0 || target >= prev.length) return prev;
       const next = [...prev];
       [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  /** Drop `id` at `targetIndex` in the real page order. Moving one page across
+   * a long report was up/down chevrons only — 35 clicks to get page 38 to
+   * position 3, each on a different row because the list re-renders under the
+   * cursor after every swap (2026-08-30 feedback). This moves it in one drag. */
+  function reorderPage(id: string, targetIndex: number) {
+    onChange((prev) => {
+      const from = prev.findIndex((p) => p.id === id);
+      if (from < 0) return prev;
+      const to = Math.max(0, Math.min(prev.length - 1, targetIndex));
+      if (from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
       return next;
     });
   }
@@ -261,7 +300,35 @@ export function ReportConfigurator({
           return (
           <div
             key={page.id}
-            className={`${styles.pageRow} ${page.id === active.id ? styles.pageRowActive : ""}`}
+            className={[
+              styles.pageRow,
+              page.id === active.id ? styles.pageRowActive : "",
+              draggingId === page.id ? styles.pageRowDragging : "",
+              dropTargetId === page.id && draggingId !== page.id ? styles.pageRowDropTarget : "",
+            ].filter(Boolean).join(" ")}
+            // Native HTML5 drag-and-drop: the row is the drag source and the
+            // drop target both, so dropping onto a row means "put the dragged
+            // page at this row's position".
+            draggable={renamingId !== page.id}
+            onDragStart={(e) => {
+              setDraggingId(page.id);
+              e.dataTransfer.effectAllowed = "move";
+              // Firefox won't start a drag without data set on the transfer.
+              e.dataTransfer.setData("text/plain", page.id);
+            }}
+            onDragEnd={() => { setDraggingId(null); setDropTargetId(null); }}
+            onDragOver={(e) => {
+              if (!draggingId) return;
+              e.preventDefault();  // required, or the drop never fires
+              e.dataTransfer.dropEffect = "move";
+              if (dropTargetId !== page.id) setDropTargetId(page.id);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (draggingId) reorderPage(draggingId, pages.findIndex((p) => p.id === page.id));
+              setDraggingId(null);
+              setDropTargetId(null);
+            }}
           >
             <button
               type="button"

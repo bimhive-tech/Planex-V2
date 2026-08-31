@@ -670,7 +670,8 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         _, chunk_h = chunk0.wrap(w, content_h)
         chunk0.drawOn(c, x, y + caption_h + content_h - chunk_h)
     elif not draw_table_in_box(c, table, x, y + caption_h, w, content_h):
-        _draw_placeholder(c, x, y + caption_h, w, content_h, f"Table too small: {source}")
+        # Same reasoning as the chart case above — an author-facing note must
+        # not print into the client's copy.
         return
 
     if show_caption:
@@ -692,7 +693,11 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     content_h = h - caption_h - title_h
     min_w, min_h = MIN_CHART_W_MM * mm, MIN_CHART_H_MM * mm
     if w < min_w or content_h < min_h:
-        _draw_placeholder(c, x, y, w, h, f"Chart too small: {source}")
+        # Draw nothing, same as the no-data case: a dashed "Chart too small"
+        # box is a note to the report's author, and printing it into the
+        # finished document puts it in front of the client instead (found
+        # 2026-08-30 — one had already gone out in a draft). The Customize
+        # tab flags this per element, where the author can act on it.
         return
     drawing = resolve_chart(
         source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h, scope_zone_id=props.get("scope_zone_id"),
@@ -995,6 +1000,44 @@ def resolve_table(
         if raw:
             return {"kind": "hierarchy", "header": header, "rows": rows}
         return _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=avail_width)
+
+    if source == "progress_sheet":
+        # The reference report's own "Progress Sheet" (its page 32): one row per
+        # zone, carrying planned, actual-this-month, the month's own movement,
+        # actual-last-month, performance factor and variance side by side.
+        # Every column is derived from figures ctx already holds — the month's
+        # progress is actual - previous, the performance factor is actual over
+        # planned, the variance is actual - planned — so this adds no query.
+        hierarchy = ctx.get("hierarchy") or []
+        if scope_zone_id:
+            hierarchy = [z for z in hierarchy if z.get("id") == scope_zone_id]
+        rows = []
+        for zone in hierarchy:
+            planned, actual, previous = zone.get("planned"), zone.get("actual"), zone.get("previous")
+            if actual is None:
+                continue  # nothing real to report for this zone yet
+            this_month = actual - previous if previous is not None else None
+            factor = (actual / planned * 100) if planned else None
+            variance = actual - planned if planned is not None else None
+            rows.append([
+                zone["name"],
+                _pct_or_dash(planned),
+                _pct_or_dash(actual),
+                _pct_or_dash(this_month),
+                _pct_or_dash(previous),
+                _pct_or_dash(factor),
+                _pct_or_dash(variance),
+            ])
+        if not rows:
+            return None
+        header = [labels["col_zone"], labels["col_planned"], labels.get("col_actual_this", labels["col_actual"]),
+                  labels.get("col_this_month", "This month %"), labels["col_previous"],
+                  labels.get("col_performance_factor", "Performance factor %"),
+                  labels.get("col_variance", "Variance %")]
+        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        if raw:
+            return {"kind": "data", "header": header, "rows": rows}
+        return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "discipline_progress":
         discipline = ctx.get("discipline") or []
@@ -1645,6 +1688,7 @@ _REPEAT_SOURCES = {
     "photos": "photos",
     "attachments": "attachments",
     "area_dashboards": "area_dashboards",
+    "phase_dashboards": "phase_dashboards",
     "zones": "zones",
     "areas": "areas",
 }

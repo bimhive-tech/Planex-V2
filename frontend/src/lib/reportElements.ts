@@ -60,6 +60,7 @@ export const TABLE_SOURCES = [
   { value: "zone_progress", label: "Progress by zone" },
   { value: "hierarchy_progress", label: "Zone / area breakdown" },
   { value: "discipline_progress", label: "Progress by trade" },
+  { value: "progress_sheet", label: "Progress sheet (plan / actual / this month / factor / variance)" },
   { value: "detailed_progress", label: "Detailed activities" },
   { value: "critical_path_delays", label: "Critical path delays" },
   { value: "activity_schedule", label: "Activity schedule detail (durations, SPI, variance)" },

@@ -86,6 +86,12 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     params.set("tab", next);
     router.replace(`?${params.toString()}`, { scroll: false });
   }, [router, searchParams]);
+  // True once the Customize tab has been opened at least once — see the
+  // ReportLayoutEditor render below for why it then stays mounted.
+  const [layoutOpened, setLayoutOpened] = useState(tab === "layout");
+  useEffect(() => {
+    if (tab === "layout") setLayoutOpened(true);
+  }, [tab]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [data, setData] = useState<ReportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
@@ -343,7 +349,16 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   <ReportAssets reportId={reportId} canManage={canManage} only="attachment" onChanged={bump} />
                 )}
 
-                {tab === "layout" && (
+                {/* Stays MOUNTED once opened, hidden rather than unmounted, so
+                    switching to another tab and back doesn't throw away every
+                    unsaved page edit — the editor holds its whole draft
+                    (pages, master elements, dirty flag) in local state, and a
+                    conditional render silently destroyed all of it on any tab
+                    click, with no warning (2026-08-30). Never mounted at all
+                    until the tab is first opened, so a report the user only
+                    reads doesn't pay for the editor's live-preview fetches. */}
+                {layoutOpened && (
+                  <div hidden={tab !== "layout"}>
                   <ReportLayoutEditor
                     // `data` arrives from a separate fetch and can resolve after this
                     // tab first mounts; remount once it does so the starting page
@@ -357,6 +372,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     canManage={canManage}
                     onSaved={() => { reload(); bump(); }}
                   />
+                  </div>
                 )}
 
                 {saveError && <p className="formError">{saveError}</p>}

@@ -355,6 +355,82 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     return rows
 
 
+def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=None, schedule_import=None):
+    """One row per STAGE-typed scope (the client's "Phase 1..5"), each with its
+    own weighted progress and the zones under it as `children` — what the
+    reference report's per-phase dashboard pages are built from (its pages
+    33-37, 2026-08-30).
+
+    Deliberately shares `_hierarchy_rows`' machinery rather than re-deriving
+    a rollup: a phase's percentage has to be the activity-weighted average of
+    everything beneath it, not the mean of its zones' percentages, or a phase
+    holding one small zone and one huge one reports a figure that matches
+    nothing else in the report."""
+    predicate, _ = _scope_context(project, scope_ids, schedule_import)
+    prev_scopes = prev_scopes or {}
+
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    direct_w, direct_pw = {}, {}
+    for sid, weight_val, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        if not predicate(sid, aid):
+            continue
+        sid = str(sid)
+        w = float(weight_val)
+        prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
+        direct_w[sid] = direct_w.get(sid, 0.0) + w
+        direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
+
+    scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    scopes = {str(s.id): s for s in scopes_qs}
+    children = {}
+    for s in scopes.values():
+        if s.parent_id:
+            children.setdefault(str(s.parent_id), []).append(str(s.id))
+
+    weight, pweight = {}, {}
+
+    def agg(sid):
+        w, pw = direct_w.get(sid, 0.0), direct_pw.get(sid, 0.0)
+        for cid in children.get(sid, []):
+            cw, cpw = agg(cid)
+            w += cw
+            pw += cpw
+        weight[sid], pweight[sid] = w, pw
+        return w, pw
+
+    def pct(sid):
+        w = weight.get(sid, 0.0)
+        return round(pweight[sid] / w, 1) if w else None
+
+    stages = sorted(
+        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.STAGE),
+        key=lambda s: (s.sort_order, s.name),
+    )
+    rows = []
+    for stage in stages:
+        sid = str(stage.id)
+        agg(sid)
+        if not weight.get(sid):
+            continue
+        kids = []
+        for cid in sorted(children.get(sid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+            if not weight.get(cid):
+                continue
+            child = scopes[cid]
+            kids.append({
+                "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
+                "planned": _scope_planned_progress(child, project, as_of),
+            })
+        planned = _scope_planned_progress(stage, project, as_of)
+        actual = pct(sid)
+        rows.append({
+            "id": sid, "name": stage.name, "actual": actual, "previous": prev_scopes.get(sid),
+            "planned": planned, "children": kids,
+            "duration": _zone_duration(stage, project, as_of, planned_pct=planned, actual_pct=actual),
+        })
+    return rows
+
+
 def _financial_percent_complete(project, schedule_import=None):
     """Project-wide financial % complete — sum(earned_value_cost) /
     sum(budgeted_cost) across every real P6-imported Activity (2026-08-30,
@@ -768,6 +844,9 @@ def build_report_context(report):
     boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
     financial_percent_complete = _financial_percent_complete(project, schedule_import)
     area_dashboards = _area_dashboards(project, hierarchy, as_of, schedule_import)
+    # Per-phase (STAGE scope) rollups — backs the reference report's own
+    # per-phase dashboard pages. Same inputs as `hierarchy`, one level up.
+    phase_dashboards = _phase_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
     critical_path = _critical_path_rows(project, hierarchy, as_of, schedule_import)
     gantt = _gantt_rows(project, report.scope_ids, progress, schedule_import)
 
@@ -925,6 +1004,7 @@ def build_report_context(report):
         "boq_financial_progress": boq_financial_progress,
         "financial_percent_complete": financial_percent_complete,
         "area_dashboards": area_dashboards,
+        "phase_dashboards": phase_dashboards,
         "critical_path": critical_path,
         "gantt": gantt,
         "zone_grids": zone_grids,

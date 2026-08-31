@@ -151,12 +151,14 @@ export interface TocEntry {
 
 /** Data sources a repeating page can clone itself against — mirrors
  * apps/reports/pdf_canvas.py's _REPEAT_SOURCES. */
-export type RepeatSource = "photos" | "attachments" | "area_dashboards" | "zones" | "areas";
+export type RepeatSource =
+  "photos" | "attachments" | "area_dashboards" | "phase_dashboards" | "zones" | "areas";
 
 export const REPEAT_SOURCES: { value: RepeatSource; label: string }[] = [
   { value: "photos", label: "Site photos" },
   { value: "attachments", label: "Attachments" },
   { value: "area_dashboards", label: "Area dashboards (per zone)" },
+  { value: "phase_dashboards", label: "Phase dashboards (per phase)" },
   { value: "zones", label: "Zones" },
   { value: "areas", label: "Areas" },
 ];

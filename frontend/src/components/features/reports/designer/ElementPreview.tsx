@@ -395,7 +395,7 @@ function OverflowClip({ children, note = "More rows than fit here — continues 
   );
 }
 
-function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = true, onElementChange }: PreviewProps) {
+function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = true, labels, onElementChange }: PreviewProps) {
   const p = el.props;
 
   // "custom" — no backend data source at all; it's built by hand or pasted
@@ -456,7 +456,8 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
 
   if (live) {
     if (live.status !== "ok") {
-      return <div className={styles.chartPlaceholder}>{`No data: ${String(p.source ?? "")}`}</div>;
+      const name = sourceLabel(labels, TABLE_SOURCES, p.source, String(p.source ?? ""));
+      return <div className={styles.chartPlaceholder}>{`${name} — no data for this project yet`}</div>;
     }
     const vars = tableStyleVars(live.style);
     // live.rows already has hidden rows filtered out server-side — recover
@@ -562,6 +563,15 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
         </table>
       </OverflowClip>
     );
+  }
+
+  // Report Customize tab (tableData present) but this element got no entry
+  // back and loading has finished — the request failed. Say so rather than
+  // dropping to the mockup below, which draws a convincing empty grid for a
+  // table that may print blank. "custom" is exempt: it has no backend data
+  // behind it, so it legitimately never appears in tableData (2026-08-30).
+  if (tableData && p.source !== "custom") {
+    return <div className={styles.chartPlaceholder}>Couldn&apos;t load this table&apos;s data — retry in a moment</div>;
   }
 
   const headerBg = String(p.header_bg ?? "#1F4E79");
@@ -712,7 +722,7 @@ function realDonutFrac(source: unknown, liveData: ReportData | null | undefined,
   return null;
 }
 
-function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = true }: PreviewProps) {
+function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = true, labels }: PreviewProps) {
   const p = el.props;
   const type = String(p.chart_type ?? "column");
   const source = p.source;
@@ -738,8 +748,21 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
         <div className={styles.chartSvgLive} dangerouslySetInnerHTML={{ __html: live.svg }} />
       );
     }
-    const message = live.status === "too_small" ? `Chart too small: ${String(source ?? "")}` : `No data: ${String(source ?? "")}`;
+    const name = sourceLabel(labels, CHART_SOURCES, source, String(source ?? ""));
+    const message = live.status === "too_small"
+      ? `${name} — box too small to draw this chart`
+      : `${name} — no data for this project yet`;
     return <div className={styles.chartPlaceholder}>{message}</div>;
+  }
+
+  // Report Customize tab (chartSvgs present) but this element got no entry
+  // back and loading has finished — the request failed. Say so. Falling
+  // through to the mockup below would draw plausible fake bars for a chart
+  // that may well print blank, which is the one thing this canvas must never
+  // do (2026-08-30). The Template Builder has no chartSvgs at all and keeps
+  // the mockup, which is all it can honestly show.
+  if (chartSvgs) {
+    return <div className={styles.chartPlaceholder}>Couldn&apos;t load this chart&apos;s preview — retry in a moment</div>;
   }
 
   let body: React.ReactNode;
@@ -1219,7 +1242,7 @@ export function ElementPreview({
         >
           <TablePreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-            tableData={tableData} previewsReady={previewsReady}
+            tableData={tableData} previewsReady={previewsReady} labels={labels}
             onElementChange={onElementChange}
           />
         </CaptionedBox>
@@ -1235,7 +1258,7 @@ export function ElementPreview({
         >
           <ChartPreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
-            chartSvgs={chartSvgs} previewsReady={previewsReady}
+            chartSvgs={chartSvgs} previewsReady={previewsReady} labels={labels}
           />
         </CaptionedBox>
       );

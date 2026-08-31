@@ -15,7 +15,7 @@
 // full-page snapshot. There's nothing to "refresh": moving or editing an
 // element updates its own live preview directly, the same way every other
 // element type already did.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -94,6 +94,19 @@ export function ReportLayoutEditor({
   // mockup, so a still-loading canvas never looks like it's already showing
   // real content.
   const previewsReady = chartsLoaded && tablesLoaded && tocLoaded && overflowLoaded;
+
+  // Closing or reloading the tab with unsaved pages loses the whole draft —
+  // it lives only in this component's state until "Save custom layout".
+  // The browser's own confirm is the only thing that can interrupt that.
+  useEffect(() => {
+    if (!dirty) return;
+    function warn(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   function updatePages(updater: (prev: LayoutPage[]) => LayoutPage[]) {
     setPages(updater);

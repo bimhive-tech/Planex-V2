@@ -123,6 +123,11 @@ export function CustomTableEditor({ data, onChange }: Props) {
                 {row.map((cell, c) => (
                   <td key={c} data-header={r === 0 ? "on" : undefined}>
                     <div className={styles.customTableCell}>
+                      {/* No stopPropagation here: CanvasElementView needs the
+                          press so it can select this element (it recognises a
+                          control target and selects without starting a drag —
+                          see its own comment). Swallowing it left the table
+                          unselectable, and its whole Properties panel with it. */}
                       <input
                         value={cell}
                         onChange={(e) => setCell(r, c, e.target.value)}
@@ -130,7 +135,6 @@ export function CustomTableEditor({ data, onChange }: Props) {
                           e.preventDefault();
                           pasteAt(r, c, e.clipboardData.getData("text/plain"));
                         }}
-                        onPointerDown={(e) => e.stopPropagation()}
                       />
                       {r === 0 && grid[0].length > MIN_COLS && (
                         <button

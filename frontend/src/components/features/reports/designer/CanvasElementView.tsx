@@ -113,6 +113,20 @@ export function CanvasElementView({
       onPointerDown={(e) => {
         // Left button only — right-click should not start a drag.
         if (e.button !== 0) return;
+        // A press that lands on a real control INSIDE the element (a custom
+        // table's cell input, its row/column buttons, the rich-text editor)
+        // must still SELECT the element — it just must not start a drag, or
+        // the click-to-place-a-caret gesture would move the box instead.
+        // Those controls used to stopPropagation to avoid the drag, which
+        // meant the press never reached here at all: clicking a table's cells
+        // (i.e. nearly its whole surface) left the element unselected and the
+        // Properties panel stuck on its empty state, so none of that table's
+        // own styling controls could be reached while editing it
+        // (2026-08-30, found reviewing the row/column editing flow).
+        if ((e.target as HTMLElement).closest("input, textarea, select, button, [contenteditable]")) {
+          if (!selected) onSelect(el.id, false);
+          return;
+        }
         const additive = e.shiftKey || e.metaKey || e.ctrlKey;
         if (additive) {
           // Composing a multi-selection — toggle membership only. Starting a

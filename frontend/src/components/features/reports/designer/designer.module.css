@@ -78,6 +78,18 @@
   margin-top: var(--space-1);
 }
 
+/* A count plus the control that reverses it — the hidden-rows / edited-cells
+   rows in the table inspector. Wraps rather than squeezing the button on a
+   narrow panel. */
+.propRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+}
+
 /* ── Palette ─────────────────────────────────────────────────────────── */
 .category {
   margin-top: var(--space-4);
@@ -1121,6 +1133,19 @@
 .pageRowActive {
   border-color: var(--primary);
   background: var(--primary-soft);
+}
+/* Drag-to-reorder (see ReportConfigurator's reorderPage). The row being
+   dragged fades; the row under the cursor shows a thick top edge marking
+   where it will land. */
+.pageRow[draggable="true"] {
+  cursor: grab;
+}
+.pageRowDragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.pageRowDropTarget {
+  border-top: 3px solid var(--primary);
 }
 /* A real, downloaded-PDF-accurate continuation page (see reportOverflow.ts's
    buildOverflowPages) — not something you authored, so it reads as a

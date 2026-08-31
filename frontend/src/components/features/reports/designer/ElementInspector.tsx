@@ -232,6 +232,12 @@ export function ElementInspector({
   }
 
   const fields = typeFields(el.type, repeating);
+  // Manual edits carried by a bound table — surfaced (and made reversible)
+  // in the table block below.
+  const hiddenRowCount = Array.isArray(el.props.hidden_rows) ? el.props.hidden_rows.length : 0;
+  const overrideCount = el.props.overrides && typeof el.props.overrides === "object"
+    ? Object.keys(el.props.overrides as Record<string, unknown>).length
+    : 0;
 
   async function handleUpload(file: File) {
     if (!reportId) return;
@@ -362,6 +368,36 @@ export function ElementInspector({
             Click a row&apos;s × on the canvas to hide it from this report, or double-click a cell to
             override its text — both edit this table directly on the page.
           </p>
+          {/* Hiding a row used to be one-way: nothing anywhere could bring it
+              back, so a misclick was only recoverable by undo (and only before
+              switching page). Both counts below are also the only signal that
+              a table carries manual edits at all. */}
+          {hiddenRowCount > 0 && (
+            <div className={styles.propRow}>
+              <span className={styles.panelHint}>
+                {hiddenRowCount} row{hiddenRowCount === 1 ? "" : "s"} hidden
+              </span>
+              <Button
+                type="button" variant="secondary" size="sm"
+                onClick={() => setProp("hidden_rows", [])}
+              >
+                Show all rows
+              </Button>
+            </div>
+          )}
+          {overrideCount > 0 && (
+            <div className={styles.propRow}>
+              <span className={styles.panelHint}>
+                {overrideCount} cell{overrideCount === 1 ? "" : "s"} manually edited
+              </span>
+              <Button
+                type="button" variant="secondary" size="sm"
+                onClick={() => setProp("overrides", {})}
+              >
+                Revert to source
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
