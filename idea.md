@@ -303,14 +303,26 @@ project information, overall progress, progress-by-zone table, milestones, and
 progress timeline. Running header (project + report no.) and page numbers.
 Arabic text shaping (reshaper + bidi, Amiri font) renders imported names RTL.
 Generated on demand from a saved Report (project + template + period) via
-`GET /api/reports/<id>/pdf/`. **[next]** charts/curves, SPI cards, delays table.
+`GET /api/reports/<id>/pdf/`. Charts/curves, SPI gauges and the delays table
+are **[built]**: S-curve with forecast run-out, cash flow (monthly bars +
+cumulative lines), progress/duration/earned-value pies, per-zone and per-phase
+dashboards, BOQ financial progress, submittals and shop drawings by discipline,
+Gantt, and the Progress Sheet — all matched against the client's own reference
+report (2026-08-30).
 
 ### 14.5 Report/template builder **[built]**
 A schema-driven **Template Builder** controlling the whole document: page size/
 orientation/margins, all colors, font sizes, cover, TOC, header/footer, section
 toggles, table styling, and every heading/column label (set Arabic for a fully
-Arabic report). Templates are company-scoped, named, default-able. **[next]**
-live A4 preview, logo upload (R2), duplicate/reset.
+Arabic report). Templates are company-scoped, named, default-able.
+
+Beyond the schema editor, each report has its own **Customize** canvas: pages
+of freely positioned elements (tables, charts, text, images, TOCs) that render
+live from the real project data — what you arrange is what the PDF draws.
+Pages drag to reorder; undo spans the whole document; a report can be
+**duplicated** with its whole layout so next month starts where last month
+finished. Live A4 preview and reset-to-template are **[built]**. **[next]**
+logo upload to R2 (logos are still stored on the project record).
 
 ### 14.6 Primavera-compatible export **[later]**
 Export accepted progress back to the P6 Excel structure (see §8).
