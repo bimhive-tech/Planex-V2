@@ -41,7 +41,7 @@ from .pdf_charts import (
 from .pdf_layout import _draw_contained_image, _period_str, draw_fitted_image
 from .pdf_tables import (
     _data_table, _fmt_date, _hierarchy_table_flat, _info_table, _pct_or_dash, _styles,
-    apply_table_overrides, draw_table_in_box, table_style_override,
+    _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label, table_style_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -427,7 +427,13 @@ def _draw_caption_text(c, x, y, w, caption_h, text):
     look for every captioned element type."""
     style = ParagraphStyle("canvas_caption", fontName=FONT_NAME, fontSize=8, leading=10,
                            textColor=hexcolor("#595959"), alignment=TA_CENTER)
-    para = Paragraph(shape(text), style)
+    # _wrap_shape, not a bare shape(): a caption long enough to wrap was
+    # shaped as one string and then re-broken by reportlab left-to-right, so
+    # the logically-FIRST words ended up on the LAST line — "رسم توضيحي" sat
+    # underneath its own figure number (2026-08-30). Shaping per line after
+    # the break points are known is the same rule the table values already
+    # follow; see pdf_tables._wrap_shape.
+    para = Paragraph(_wrap_shape(text, style.fontName, style.fontSize, w), style)
     para.wrap(w, caption_h)
     para.drawOn(c, x, y)
 
@@ -437,7 +443,7 @@ def _draw_title_text(c, x, y, w, title_h, text):
     _table_or_chart_title's docstring for why this defaults to shown."""
     style = ParagraphStyle("canvas_title", fontName=BOLD, fontSize=9, leading=11,
                            textColor=hexcolor("#1e2430"), alignment=TA_CENTER)
-    para = Paragraph(shape(text), style)
+    para = Paragraph(_wrap_shape(text, style.fontName, style.fontSize, w), style)
     para.wrap(w, title_h)
     para.drawOn(c, x, y)
 
@@ -1090,7 +1096,8 @@ def resolve_table(
         milestones = ctx.get("milestones") or []
         if not milestones:
             return None
-        rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in milestones]
+        rows = [[m["title"], _fmt_date(m["date"]),
+                 enum_label(cfg, m["status"].replace("_", " ").title())] for m in milestones]
         header = [labels["col_milestone"], labels["col_date"], labels["col_status"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
@@ -1115,7 +1122,8 @@ def resolve_table(
             return None
         header = [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
                   labels.get("col_discipline", "Discipline"), labels["col_status"]]
-        rows = [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub_rows]
+        rows = [[r["title"], enum_label(cfg, r["type"]), enum_label(cfg, r["discipline"]),
+                 enum_label(cfg, r["status"])] for r in sub_rows]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
@@ -1655,19 +1663,39 @@ def _element_will_draw(el, inst, cfg, ctx) -> bool:
     caption_h = _CAPTION_H if props.get("show_caption") else 0
     title_h = _TITLE_H if _table_or_chart_title(props, cfg) else 0
     content_h = h - caption_h - title_h
+
+    # Memoized: _collect_captions runs TWICE (before and after overflow
+    # expansion), so an un-cached check here resolved every captioned chart
+    # and table two extra times on top of the draw pass — enough to take a
+    # ~10 minute render past 37 minutes on this project (2026-08-30). Same
+    # source at the same size in the same scope always resolves the same way,
+    # so key on exactly that.
+    item = (inst.scope or {}).get("item") or {}
+    scope_key = item.get("name") or item.get("id") or (inst.scope or {}).get("index")
+    key = (el.get("type"), source, props.get("scope_zone_id"), scope_key, round(w, 1), round(content_h, 1))
+    cache = ctx.setdefault("_will_draw_cache", {})
+    if key in cache:
+        return cache[key]
+
+    def _remember(value):
+        cache[key] = value
+        return value
+
     try:
         if el.get("type") == "chart":
             if w < MIN_CHART_W_MM * mm or content_h < MIN_CHART_H_MM * mm:
-                return False
-            return resolve_chart(source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
-                                 scope_zone_id=props.get("scope_zone_id")) is not None
-        return resolve_table(source, cfg, ctx, inst.scope, avail_width=w,
-                             overrides=props.get("overrides"), style=props,
-                             scope_zone_id=props.get("scope_zone_id")) is not None
+                return _remember(False)
+            return _remember(resolve_chart(
+                source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
+                scope_zone_id=props.get("scope_zone_id")) is not None)
+        return _remember(resolve_table(
+            source, cfg, ctx, inst.scope, avail_width=w,
+            overrides=props.get("overrides"), style=props,
+            scope_zone_id=props.get("scope_zone_id")) is not None)
     except Exception:
         # Never let the caption pre-pass be what breaks a render — if this
         # can't be determined, assume it draws and let the draw pass decide.
-        return True
+        return _remember(True)
 
 
 def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:

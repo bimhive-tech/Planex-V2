@@ -129,6 +129,20 @@ def _aligned(style, text, *, force=None, max_width=None):
     return Paragraph(shape(text), s)
 
 
+def enum_label(cfg, text):
+    """Translate a model enum's English display label through the template's
+    own `labels` (see the "enum_*" keys). The models keep English labels
+    because the UI and API depend on them, so a fully-Arabic report has to
+    localise them at render time or print English inside Arabic tables.
+    Anything without a key falls through unchanged, so an enum added later
+    degrades to its English label rather than breaking."""
+    raw = str(text or "")
+    if not raw:
+        return raw
+    key = "enum_" + raw.strip().lower().replace(" ", "_")
+    return cfg.get("labels", {}).get(key, raw)
+
+
 def _fmt_date(d):
     return d.strftime("%d %b %Y") if d else "—"
 
@@ -296,7 +310,13 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
     head = ParagraphStyle("th", parent=styles["body"], fontName=BOLD if tcfg.get("header_bold") else FONT_NAME,
                           textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
     max_widths = _auto_col_max_widths(col_widths, len(header), avail_width)
-    data = [[Paragraph(shape(h), head) for h in header]]
+    # Header cells wrap-shape too. A header long enough to break ("نهاية
+    # المشروع التعاقدية") was shaped whole and then re-wrapped by reportlab
+    # left-to-right, putting its first word on the last line — the same defect
+    # the body values were already protected from (2026-08-30).
+    data = [[Paragraph(_wrap_shape(h, head.fontName, head.fontSize, max_widths[i])
+                       if max_widths and max_widths[i] else shape(h), head)
+             for i, h in enumerate(header)]]
     for row in rows:
         data.append([
             _aligned(styles["body"], cell, force=TA_CENTER, max_width=(max_widths[i] if max_widths else None))

@@ -171,6 +171,31 @@ DEFAULT_CONFIG = {
         "col_discipline": "التخصص",
         "col_reference": "المرجع",
         "col_count": "العدد",
+        # Arabic for the model enums that reach the page as data (milestone
+        # status, submittal type/discipline/status). The models keep English
+        # display labels because the UI and API use them; a fully-Arabic
+        # report translates them here instead, which is what
+        # `labels` is for — otherwise ~320 English values print inside an
+        # otherwise all-Arabic document (2026-08-30). Keyed by the model's own
+        # English label, so an untranslated one simply falls through unchanged.
+        "enum_completed": "مكتمل",
+        "enum_in_progress": "قيد التنفيذ",
+        "enum_upcoming": "قادم",
+        "enum_open": "مفتوح",
+        "enum_resolved": "تم الحل",
+        "enum_pending": "قيد الانتظار",
+        "enum_approved": "معتمد",
+        "enum_approved_with_comments": "معتمد مع ملاحظات",
+        "enum_rejected": "مرفوض",
+        "enum_under_review": "قيد المراجعة",
+        "enum_shop_drawing": "رسومات تنفيذية",
+        "enum_material": "مواد",
+        "enum_concrete": "خرسانة",
+        "enum_architecture": "معماري",
+        "enum_electrical": "كهرباء",
+        "enum_mechanical": "ميكانيكا",
+        "enum_other": "أخرى",
+        "enum_residential": "سكني",
         # Item-scoped chart sources (a repeating page's own zone/phase). Without
         # these, a title/caption falls back to the raw source key and prints
         # "item.spi" on the page (2026-08-30).

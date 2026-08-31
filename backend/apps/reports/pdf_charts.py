@@ -161,7 +161,9 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4)
 
 def zone_progress_chart(cfg, ctx, width, height=None):
     """Actual progress per zone — fallback when no planned baseline exists."""
-    zones = ctx["zones"][:12]
+    # Uncapped, same reasoning as planned_actual_chart above — a silently
+    # truncated zone chart hides whichever zones fall past the cut.
+    zones = ctx["zones"]
     if not zones:
         return None
     height = height or 70 * mm
@@ -207,7 +209,14 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     crowds out the actual bars that *do* vary between zones. When that's the
     case for every zone shown, draw actual-only instead, with a text note
     explaining the 100% rather than a wall of duplicate planned bars."""
-    zones = [z for z in ctx["zones"] if z.get("planned") is not None][:10]
+    # Every zone, uncapped. This used to take the first 10, which on this
+    # project silently dropped zones 11-15 — and those included the THREE
+    # WORST in the whole job (54%, 61%, 67%). A truncated bar chart on the
+    # executive status page made the project look materially better than it
+    # was, with nothing on the page saying anything had been left out
+    # (2026-08-30 critic pass). A chart with too many bars is a legibility
+    # problem; a chart that hides the bad news is a correctness one.
+    zones = [z for z in ctx["zones"] if z.get("planned") is not None]
     if not zones:
         return zone_progress_chart(cfg, ctx, width, height)
     all_overdue = all(z["planned"] >= 100 for z in zones)
@@ -687,8 +696,14 @@ def overall_donut(cfg, ctx, width, labels, height=None):
                   (labels.get("not_started", "Remaining"), max(0.0, 100 - overall), grey)]
     else:
         planned = float(planned)
+        # Actual + variance, which together ARE the planned figure — not
+        # planned plotted beside them as a third slice. That was the same
+        # self-defeating shape the duration pie had: the total takes half the
+        # disc by construction, so the pie says the same thing whatever the
+        # project is doing (here 100 beside 88 + 12). The planned figure is
+        # still the one the variance is measured against, and it reads off the
+        # legend (2026-08-30 critic pass).
         slices = [
-            (labels.get("planned", "Planned"), planned, cfg["colors"]["chart_planned"]),
             (labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
             (labels.get("variance", "Variance"), max(0.0, planned - overall), grey),
         ]
