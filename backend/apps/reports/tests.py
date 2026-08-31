@@ -2186,6 +2186,33 @@ class DescriptionFallbackTests(SimpleTestCase):
     into the shared, reusable template's default, so every future report
     from a different project would have silently shown it."""
 
+    def test_rich_description_html_is_preferred_over_the_flattened_plain_text(self):
+        """`project.description` is a tag-stripped copy of `description_html`
+        produced WITHOUT separators between blocks, so it arrives as one
+        unbroken run ("...المشروعبلغت"). Rendering that lost every heading and
+        list, and — because shape() bidi-reorders a whole string before
+        reportlab wraps it left-to-right — printed the paragraph's logical end
+        on its FIRST line (2026-08-30). The rich html sits in the same context
+        dict and must win."""
+        from .pdf_canvas import _effective_description_html
+
+        ctx = {"project": {
+            "description": "نظرة عامة على المشروعبلغت نسبة الإنجاز 87%.",
+            "description_html": "<div><b>نظرة عامة</b></div><ul><li>بلغت نسبة الإنجاز 87%.</li></ul>",
+        }}
+        html = _effective_description_html({}, ctx)
+        self.assertIn("<ul>", html)          # block structure survives
+        self.assertIn("<b>", html)
+        self.assertNotIn("المشروعبلغت", html)  # never the fused plain text
+
+    def test_falls_back_to_plain_description_when_there_is_no_rich_html(self):
+        from .pdf_canvas import _effective_description_html
+
+        ctx = {"project": {"description": "سطر أول\nسطر ثانٍ", "description_html": ""}}
+        html = _effective_description_html({}, ctx)
+        # One paragraph per source line, so each is shaped and wrapped alone.
+        self.assertEqual(html.count("<p>"), 2)
+
     def test_blank_element_falls_back_to_the_projects_own_description(self):
         from .pdf_canvas import _effective_description_html
 

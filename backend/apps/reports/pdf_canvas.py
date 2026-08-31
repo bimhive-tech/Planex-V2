@@ -734,7 +734,24 @@ def _effective_description_html(props: dict, ctx: dict) -> str:
         return html
     import html as html_lib
 
-    plain = (ctx.get("project") or {}).get("description") or ""
+    project = ctx.get("project") or {}
+    # The RICH narrative first, and only then the plain-text one. `description`
+    # is a tag-stripped copy of `description_html` produced without separators
+    # between block elements, so it arrives as one unbroken run: a heading
+    # fuses straight into the sentence after it ("نظرة عامة على المشروعبلغت").
+    # Worse, wrapping it is what reversed the page: shape() bidi-reorders the
+    # WHOLE string, and reportlab then breaks that already-visually-ordered
+    # run left-to-right, so the logical END of the text landed on the FIRST
+    # line and the opening heading on the last. Feeding the real HTML instead
+    # gives html_to_flowables its block boundaries back — each becomes its own
+    # short paragraph, shaped individually, in the right order, with headings
+    # and lists intact (found 2026-08-30 looking at the rendered page; the
+    # extracted text alone reads as mere concatenation and hides the reversal).
+    rich = project.get("description_html") or ""
+    if rich:
+        return rich
+
+    plain = project.get("description") or ""
     lines = [line.strip() for line in plain.split("\n") if line.strip()]
     return "".join(f"<p>{html_lib.escape(line)}</p>" for line in lines)
 
@@ -1625,6 +1642,34 @@ def _expand_description_overflow(instances: list, cfg: dict, ctx: dict, design: 
     return out
 
 
+def _element_will_draw(el, inst, cfg, ctx) -> bool:
+    """Whether this table/chart element actually puts something on the page.
+
+    Mirrors the two guards in _draw_chart_element / _draw_table_element: a box
+    under the chart minimum draws nothing, and a source with no data draws
+    nothing. Used by _collect_captions so a caption number is never spent on
+    an element the reader won't find."""
+    props = el.get("props") or {}
+    source = props.get("source", "")
+    w, h = float(el.get("w", 0)) * mm, float(el.get("h", 0)) * mm
+    caption_h = _CAPTION_H if props.get("show_caption") else 0
+    title_h = _TITLE_H if _table_or_chart_title(props, cfg) else 0
+    content_h = h - caption_h - title_h
+    try:
+        if el.get("type") == "chart":
+            if w < MIN_CHART_W_MM * mm or content_h < MIN_CHART_H_MM * mm:
+                return False
+            return resolve_chart(source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
+                                 scope_zone_id=props.get("scope_zone_id")) is not None
+        return resolve_table(source, cfg, ctx, inst.scope, avail_width=w,
+                             overrides=props.get("overrides"), style=props,
+                             scope_zone_id=props.get("scope_zone_id")) is not None
+    except Exception:
+        # Never let the caption pre-pass be what breaks a render — if this
+        # can't be determined, assume it draws and let the draw pass decide.
+        return True
+
+
 def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:
     """Pre-pass, run once before any page is drawn: assigns every captioned
     table/chart/photo its running number ("جدول N"/"شكل N"/"صورة N") and
@@ -1655,6 +1700,16 @@ def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:
             if not props.get("show_caption"):
                 continue
             t = el.get("type")
+            # An element that won't actually draw must not take a number or a
+            # List-of-Tables/Figures line with it. A chart whose source has no
+            # data draws nothing (see _draw_chart_element), and it used to
+            # still be counted here — leaving "رسم توضيحي 53 - موقف
+            # المستخلصات ... 51" pointing at a figure that isn't on page 51
+            # (found 2026-08-30 after the invoice pie started returning None).
+            # Resolving twice costs a second pass over the same data, which is
+            # worth it to keep the numbering honest.
+            if t in ("table", "chart") and not _element_will_draw(el, inst, cfg, ctx):
+                continue
             if t == "table":
                 kind, label_key = "table", "table_caption"
                 name = props.get("caption") or cfg["labels"].get(props.get("source", ""), props.get("source", ""))

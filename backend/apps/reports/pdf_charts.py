@@ -415,12 +415,20 @@ def _duration_pie_for(cfg, dur, width, labels, height=None):
             (labels.get("delay_days", "Delay"), dur.get("delay") or 0, cfg["colors"]["chart_actual"]),
         ]
     else:
+        # Elapsed vs remaining only. The reference plots the phase TOTAL as a
+        # third slice beside the two parts that already sum to it, which makes
+        # the total exactly half the disc by construction — every such pie is
+        # a 50/50 two-tone circle no matter what the project is doing (worst
+        # case here: 1,200 / 1,200 / 0). Same defect as the invoice pie, and
+        # matching the reference's own mistake isn't worth a chart that can
+        # never convey anything (2026-08-30 critic pass). The total stays
+        # available as the caption/legend figure.
         slices = [
-            (labels.get("duration_total", labels.get("duration_days", "Phase duration")), total,
-             cfg["colors"]["chart_planned"]),
             (labels.get("duration_elapsed", "Completed"), dur["elapsed"], cfg["colors"]["chart_actual"]),
             (labels.get("duration_remaining", "Remaining"), dur["remaining"], grey),
         ]
+        if not any(v > 0 for _, v, _ in slices):
+            return None
     return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
@@ -449,6 +457,15 @@ def invoice_status_chart(cfg, ctx, width, labels, height=None):
         return None
     total, invoiced = float(total), float(invoiced)
     remaining = max(0.0, total - invoiced)
+    # Invoiced already at or past the contract total leaves nothing to compare
+    # against: the pie collapses to a single full-circle slice, which renders
+    # as a featureless coloured disc with its value label sitting on top of
+    # the legend (found 2026-08-30 in a critic pass — this project's invoices
+    # sum well past its contract value). Same rule as budget_total_cost: a
+    # one-slice pie carries no information, so draw nothing and let the
+    # invoices table beside it tell the story.
+    if remaining <= 0:
+        return None
     height = height or 60 * mm
     # Two slices, not the reference's three: its Invoice Status pie plots the
     # contract total as a wedge *alongside* the invoiced/remaining wedges that
