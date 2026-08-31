@@ -11,7 +11,7 @@ import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
 import type {
-  ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocCaptionsData, TocEntry,
+  ChartSvgMap, LayoutElement, PageDesign, ReportLabels, TableDataMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
@@ -81,6 +81,8 @@ interface Props {
   /** False until chartSvgs/tableData/tocCaptions's first real response has
    * landed. */
   previewsReady?: boolean;
+  /** This report's effective label dict — see ReportLabels. */
+  labels?: ReportLabels;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
@@ -107,7 +109,7 @@ interface Props {
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
-  pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries, ownPageId, bottomPanel,
+  pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId, bottomPanel,
   onNavigatePage, initialScrollToBottom = false,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -496,6 +498,7 @@ export function LayoutEditor({
             tableData={tableData}
             tocCaptions={tocCaptions}
             previewsReady={previewsReady}
+            labels={labels}
             tocEntries={tocEntries}
             ownPageId={ownPageId}
           />

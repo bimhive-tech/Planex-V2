@@ -15,7 +15,7 @@ import { RichTextEditor, type RichTextEditorHandle } from "@/components/ui/RichT
 import { Skeleton } from "@/components/ui/Skeleton";
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
 import type {
-  ChartSvgMap, CustomTableData, LayoutElement, TableDataMap, TableStyle, TocCaptionsData, TocEntry,
+  ChartSvgMap, CustomTableData, LayoutElement, ReportLabels, TableDataMap, TableStyle, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
 import type { RepeatItem } from "@/lib/reportRepeat";
@@ -69,6 +69,16 @@ interface PreviewProps {
    * downloaded PDF" placeholder in the Template Builder, which has no real
    * project data to number captions against. */
   tocCaptions?: TocCaptionsData;
+  /** This report's effective label dict (cfg["labels"]) — see useChartSvgs/
+   * useTableData. A table/chart element's title/caption falls back to this
+   * (the same dict _table_or_chart_title/_collect_captions read on the
+   * backend) when it has no title_text/caption of its own, so an
+   * un-overridden element's fallback text matches the real PDF exactly
+   * instead of showing the English source-picker label. Undefined outside
+   * the report Customize tab (Template Builder — falls back further, to
+   * CHART_SOURCES/TABLE_SOURCES, since there's no real report to derive an
+   * effective config from). */
+  labels?: ReportLabels;
   /** The page this element is being drawn on — a toc element skips its
    * own page, mirroring pdf_canvas._draw_toc_element. */
   ownPageId?: string;
@@ -91,6 +101,18 @@ function ptToPx(pt: number, scale: number): number {
 
 function label(list: { value: string; label: string }[], value: unknown, fallback: string) {
   return list.find((o) => o.value === value)?.label ?? fallback;
+}
+
+/** A table/chart's title/caption fallback text — the real `labels` dict
+ * (this report's effective cfg["labels"], same as _table_or_chart_title/
+ * _collect_captions read on the backend) when it's loaded, else the
+ * English source-picker `list` label (Template Builder, or before the
+ * first live response lands). Keeps the canvas's fallback text the same
+ * language/wording the download will actually show instead of a
+ * design-time-only English placeholder. */
+function sourceLabel(labels: Record<string, string> | undefined, list: { value: string; label: string }[], value: unknown, fallback: string) {
+  const source = String(value ?? "");
+  return labels?.[source] ?? label(list, value, fallback);
 }
 
 /** Mirrors pdf_canvas.py's _draw_image_border exactly — opt-in via
@@ -780,7 +802,11 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
  * number computed across the whole document (repeat expansion, table-
  * overflow pagination) — not reproducible from this one page in isolation,
  * so the canvas shows its name without a number rather than a wrong one;
- * the title carries no running number to begin with, so it matches exactly. */
+ * the title carries no running number to begin with, so it matches exactly.
+ * The *name* itself (both here and the title) now comes from the real
+ * `labels` prop when the element has no title_text/caption of its own — see
+ * PreviewProps.labels — so the only gap left versus the download is the
+ * missing running number, not the language/wording. */
 function CaptionedBox({
   titleShow, titleText, captionShow, captionText, children,
 }: {
@@ -1067,7 +1093,7 @@ function DescriptionPreview({
 }
 
 export function ElementPreview({
-  el, scale, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries,
+  el, scale, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries,
   ownPageId, onElementChange,
 }: PreviewProps) {
   const p = el.props;
@@ -1187,9 +1213,9 @@ export function ElementPreview({
       return (
         <CaptionedBox
           titleShow={p.show_title !== false}
-          titleText={String(p.title_text || label(TABLE_SOURCES, p.source, "Table"))}
+          titleText={String(p.title_text || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
           captionShow={Boolean(p.show_caption)}
-          captionText={String(p.caption || label(TABLE_SOURCES, p.source, "Table"))}
+          captionText={String(p.caption || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
         >
           <TablePreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
@@ -1203,9 +1229,9 @@ export function ElementPreview({
       return (
         <CaptionedBox
           titleShow={p.show_title !== false}
-          titleText={String(p.title_text || label(CHART_SOURCES, p.source, "Chart"))}
+          titleText={String(p.title_text || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
           captionShow={Boolean(p.show_caption)}
-          captionText={String(p.caption || label(CHART_SOURCES, p.source, "Chart"))}
+          captionText={String(p.caption || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
         >
           <ChartPreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}

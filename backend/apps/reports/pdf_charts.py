@@ -55,6 +55,51 @@ def _thinned_labels(names, avail_width, font_size=7, angled=True):
     return [n if i % step == 0 else "" for i, n in enumerate(names)]
 
 
+def _thin_category_axis(axis, names, avail_width, font_size=7, angled=True):
+    """`_thinned_labels`, plus hiding the tick marks when thinning actually
+    happened. Ticks are drawn at every data point regardless of whether its
+    label survived, so a 50-point monthly series in a narrow panel renders a
+    solid black band along the axis where the ticks merge — the labels were
+    thinned but the ticks underneath them were not (found 2026-08-30
+    comparing the S-curve against the client's reference report, whose own
+    charts carry no category ticks at all)."""
+    thinned = _thinned_labels(names, avail_width, font_size=font_size, angled=angled)
+    axis.categoryNames = thinned
+    if any(n == "" for n in thinned):
+        axis.visibleTicks = 0
+    return thinned
+
+
+def _text_width(text, font_size):
+    """`stringWidth` in the report font, falling back to a per-character
+    estimate when that font isn't registered. Chart builders are callable
+    directly (tests, the chart_svgs preview path) without `ensure_fonts()`
+    having run, and a metrics lookup on an unregistered font raises rather
+    than degrading — which turned a layout measurement into a hard crash."""
+    try:
+        return pdfmetrics.stringWidth(text, FONT_NAME, font_size)
+    except KeyError:
+        return len(text) * font_size * 0.5
+
+
+def _vertical_label_inset(names, font_size=7, pad=10, cap=64):
+    """Bottom inset a category axis needs for labels rotated to 90 degrees:
+    a vertical label is as tall as the text is long, so the fixed ~26pt that
+    suited 30-degree labels clipped them to "ilding 6" (found 2026-08-30
+    after switching these axes to the reference's vertical convention).
+    Capped so a pathologically long name can't squeeze the plot away."""
+    widest = max((_text_width(str(n), font_size) for n in names if n), default=0)
+    return min(cap, widest + pad)
+
+
+def _value_axis_inset(max_value, font_size=6, fmt="{:,.0f}", pad=8):
+    """Left inset a value axis needs so its widest tick label isn't clipped by
+    the drawing's own edge. Money axes run to 9+ digits ("300,000,000"), which
+    a fixed inset sized for percentages silently cuts off (found 2026-08-30:
+    the cash-flow panel rendered "0,000,000")."""
+    return _text_width(fmt.format(max_value or 0), font_size) + pad
+
+
 def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
     """Swatch+label legend. Horizontal by default; `vertical=True` stacks the
     entries in one column (used when labels carry values and would otherwise
@@ -73,6 +118,47 @@ def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
     return leg
 
 
+def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4):
+    """Pie drawn the way every pie in the client's reference report is drawn:
+    slices pulled slightly apart, each one's value printed just outside its
+    own wedge, and a wrapped swatch legend underneath (2026-08-30, matching
+    the reference's PROGRESS / DURATION / Earned Progress / Invoice Status
+    panels). Replaces the older "values live in a side legend" treatment,
+    which read nothing like the reference.
+
+    `slices` is [(label, value, color), ...]. Zero-valued slices keep their
+    legend entry — the reference shows "0" rather than dropping the series —
+    but are given no popout, so they don't push a visible gap into the ring.
+    """
+    if not slices:
+        return None
+    d = Drawing(width, height)
+    legend_rows = _wrapped_legend_rows([(c, n) for n, _, c in slices], width - 16)
+    legend_h = 6 + legend_rows * 8
+    # Leave room on all sides for the outside value labels, which sit at
+    # 1.15x the radius and would otherwise run off the drawing.
+    pw = max(18 * mm, min(height - legend_h - 14, width * 0.56))
+    pie = Pie()
+    pie.x, pie.y = (width - pw) / 2, legend_h + 6
+    pie.width = pie.height = pw
+    pie.data = [max(0.0001, float(v)) for _, v, _ in slices]
+    pie.labels = [value_fmt.format(v) for _, v, _ in slices]
+    pie.simpleLabels = 0
+    pie.sideLabels = 0
+    pie.slices.labelRadius = 1.15
+    pie.slices.fontName = FONT_NAME
+    pie.slices.fontSize = 6
+    pie.slices.strokeColor = hexcolor("#ffffff")
+    pie.slices.strokeWidth = 0.75
+    for i, (_, value, color) in enumerate(slices):
+        pie.slices[i].fillColor = hexcolor(color)
+        if float(value) > 0:
+            pie.slices[i].popout = popout
+    d.add(pie)
+    _draw_wrapped_legend(d, [(c, n) for n, _, c in slices], 8, legend_h, width - 16)
+    return d
+
+
 def zone_progress_chart(cfg, ctx, width, height=None):
     """Actual progress per zone — fallback when no planned baseline exists."""
     zones = ctx["zones"][:12]
@@ -81,15 +167,20 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     height = height or 70 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
-    chart.x, chart.y = 22, 26
-    chart.width, chart.height = width - 44, height - 50
+    names = [shape(z["name"]) for z in zones]
+    chart.x = 22
+    chart.y = _vertical_label_inset(names)
+    chart.width, chart.height = width - 44, height - chart.y - 24
     chart.data = [[round(z["progress"], 1) for z in zones]]
-    chart.categoryAxis.categoryNames = _thinned_labels([shape(z["name"]) for z in zones], chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.boxAnchor = "ne"
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    # 90 degrees and 10% steps, matching the reference report's own per-unit
+    # progress charts — vertical labels are what let it fit ~75 buildings on
+    # one chart where angled ones would collide (2026-08-30).
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
     chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
@@ -123,8 +214,10 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
-    chart.x, chart.y = 24, 26
-    chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
+    names = [shape(z["name"]) for z in zones]
+    chart.x = 24
+    chart.y = _vertical_label_inset(names)  # room for the 90-degree labels
+    chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
     if all_overdue:
         chart.data = [[round(z["progress"], 1) for z in zones]]
     else:
@@ -132,12 +225,15 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
             [round(z["planned"], 1) for z in zones],
             [round(z["progress"], 1) for z in zones],
         ]
-    chart.categoryAxis.categoryNames = _thinned_labels([shape(z["name"]) for z in zones], chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.boxAnchor = "ne"
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    # 90 degrees and 10% steps, matching the reference report's own per-unit
+    # progress charts — vertical labels are what let it fit ~75 buildings on
+    # one chart where angled ones would collide (2026-08-30).
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
     chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
@@ -178,19 +274,24 @@ def _unit_bars(cfg, units, width, labels, height=None):
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
-    chart.x, chart.y = 24, 26
-    chart.width, chart.height = width - 48, height - 60  # leave a top strip for the legend
+    names = [shape(u["name"]) for u in units]
+    chart.x = 24
+    chart.y = _vertical_label_inset(names)  # room for the 90-degree labels
+    chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
     if has_planned and not all_overdue:
         chart.data = [[round(u.get("planned") or 0, 1) for u in units],
                       [round(u["actual"], 1) for u in units]]
     else:
         chart.data = [[round(u["actual"], 1) for u in units]]
-    chart.categoryAxis.categoryNames = _thinned_labels([shape(u["name"]) for u in units], chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.boxAnchor = "ne"
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    # 90 degrees and 10% steps, matching the reference report's own per-unit
+    # progress charts — vertical labels are what let it fit ~75 buildings on
+    # one chart where angled ones would collide (2026-08-30).
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
     chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
@@ -290,26 +391,37 @@ def area_units_chart(cfg, area, width, labels, height=None):
 
 
 def _duration_pie_for(cfg, dur, width, labels, height=None):
+    """Phase / completed / remaining duration in days — the three slices the
+    reference report's own DURATION pie carries (2026-08-30), replacing the
+    previous total-vs-delay pair.
+
+    Note the reference plots the phase total alongside the elapsed and
+    remaining parts that already sum to it, so the wedges intentionally
+    double-count; that is the client's established format, kept here so our
+    output reads the same as the report they already issue."""
     if not dur:
         return None
     height = height or 60 * mm
-    pw = 40 * mm
-    d = Drawing(width, height)
-    pie = Pie()
-    pie.x, pie.y = (width - pw) / 2, 4   # centred; values move to the legend below
-    pie.width = pie.height = pw
-    pie.data = [max(0, dur["total"]), max(0, dur["delay"])]
-    pie.labels = ["", ""]                # no numbers on the slices (they overlapped)
-    pie.simpleLabels = 1
-    pie.slices[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    pie.slices[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-    pie.slices.strokeColor = hexcolor("#ffffff")
-    d.add(pie)
-    # Stacked legend carrying the values, in the clear strip above the pie.
-    d.add(_legend([(cfg["colors"]["chart_planned"], f'{labels["duration_days"]}: {dur["total"]}'),
-                   (cfg["colors"]["chart_actual"], f'{labels["delay_days"]}: {dur["delay"]}')],
-                  10, height - 6, vertical=True))
-    return d
+    grey = cfg["colors"].get("muted", "#A5A5A5")
+    total = dur.get("total")
+    if total is None:
+        return None
+    # elapsed/remaining come from _duration_for, but a caller can hand over a
+    # partial duration dict (only total + delay). Fall back to the older
+    # total-vs-delay pair rather than raising on the missing keys.
+    if dur.get("elapsed") is None or dur.get("remaining") is None:
+        slices = [
+            (labels.get("duration_days", "Project duration"), total, cfg["colors"]["chart_planned"]),
+            (labels.get("delay_days", "Delay"), dur.get("delay") or 0, cfg["colors"]["chart_actual"]),
+        ]
+    else:
+        slices = [
+            (labels.get("duration_total", labels.get("duration_days", "Phase duration")), total,
+             cfg["colors"]["chart_planned"]),
+            (labels.get("duration_elapsed", "Completed"), dur["elapsed"], cfg["colors"]["chart_actual"]),
+            (labels.get("duration_remaining", "Remaining"), dur["remaining"], grey),
+        ]
+    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
 def duration_pie(cfg, ctx, width, labels, height=None):
@@ -338,23 +450,16 @@ def invoice_status_chart(cfg, ctx, width, labels, height=None):
     total, invoiced = float(total), float(invoiced)
     remaining = max(0.0, total - invoiced)
     height = height or 60 * mm
-    pw = 40 * mm
-    d = Drawing(width, height)
-    pie = Pie()
-    pie.x, pie.y = (width - pw) / 2, 4
-    pie.width = pie.height = pw
-    pie.data = [max(0.01, invoiced), max(0.01, remaining)]
-    pie.labels = ["", ""]
-    pie.simpleLabels = 1
-    pie.slices[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-    pie.slices[1].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    pie.slices.strokeColor = hexcolor("#ffffff")
-    d.add(pie)
-    d.add(_legend([
-        (cfg["colors"]["chart_actual"], f'{labels.get("invoice_invoiced", "Invoiced")}: {invoiced:,.0f}'),
-        (cfg["colors"]["chart_planned"], f'{labels.get("invoice_remaining", "Remaining")}: {remaining:,.0f}'),
-    ], 10, height - 6, vertical=True))
-    return d
+    # Two slices, not the reference's three: its Invoice Status pie plots the
+    # contract total as a wedge *alongside* the invoiced/remaining wedges that
+    # already sum to it, which makes every angle on it meaningless. Styling
+    # (popout, on-slice values, legend beneath) matches the reference; the
+    # slices stay the two that actually partition the total.
+    slices = [
+        (labels.get("invoice_invoiced", "Invoiced"), invoiced, cfg["colors"]["chart_actual"]),
+        (labels.get("invoice_remaining", "Remaining"), remaining, cfg["colors"]["chart_planned"]),
+    ]
+    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
 def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
@@ -445,8 +550,15 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
+    # barWidth/groupSpacing are RELATIVE weights unless useAbsolute is set —
+    # reportlab scales them to fill chart.width. groupSpacing=0 therefore made
+    # each bar swallow its whole category slot, so the three bars rendered as
+    # one edge-to-edge block with no gaps (found 2026-08-30 against the
+    # client's reference "Progress Comparison", whose bars are narrow and
+    # clearly separated). Weighting the gap above the bar keeps them ~45% of
+    # the slot at any panel width.
     chart.barWidth = 18
-    chart.groupSpacing = 0
+    chart.groupSpacing = 22
     for i, s in enumerate(series):
         chart.bars[(0, i)].fillColor = hexcolor(s[3])
         chart.bars[(0, i)].strokeColor = None
@@ -455,6 +567,61 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
     chart.barLabelFormat = "%0.1f%%"
     chart.barLabels.nudge = 7
     d.add(chart)
+    return d
+
+
+def progress_tracking_chart(cfg, ctx, width, labels, height=None):
+    """Planned vs. actual, previous month vs. current month — reference
+    dashboard's "Project Tracking" bars (2026-08-30). Reuses ctx
+    ["monthly_tracking"] (services.build_report_context) — `previous.actual`
+    is the most recent real ProgressSnapshot strictly before the report's
+    as-of date (the same "previous" already used for zone-level tracking
+    elsewhere), `current.actual` is today's live figure. A period only
+    shows `None` — not a fabricated 0 — when there's genuinely no snapshot
+    behind it yet (e.g. a project's very first report); when that happens
+    for BOTH periods there's nothing real to draw at all."""
+    tracking = ctx.get("monthly_tracking") or {}
+    prev, cur = tracking.get("previous") or {}, tracking.get("current") or {}
+    if prev.get("actual") is None and cur.get("actual") is None:
+        return None
+    height = height or 60 * mm
+    d = Drawing(width, height)
+    chart = VerticalBarChart()
+    chart.x, chart.y = 24, 26
+    # Reserve a real strip for the legend above the plot. At -46 the plot top
+    # sat 8pt under the legend baseline, so a 100% bar's own value label
+    # collided with the legend text (found 2026-08-30 on the summary page).
+    chart.width, chart.height = width - 48, height - 58
+    periods = [p for p in (("previous", prev), ("current", cur)) if p[1].get("actual") is not None]
+    chart.data = [
+        [round(float(p["planned"]), 1) if p.get("planned") is not None else 0.0 for _, p in periods],
+        [round(float(p["actual"]), 1) for _, p in periods],
+    ]
+    names = {"previous": labels.get("tracking_previous", "Previous month"),
+             "current": labels.get("tracking_current", "Current month")}
+    chart.categoryAxis.categoryNames = [shape(names[key]) for key, _ in periods]
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 7
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.valueAxis.labelTextFormat = "%d%%"
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 7
+    _grid(chart.valueAxis, cfg)
+    chart.groupSpacing = 8
+    chart.barSpacing = 1
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    chart.barLabels.fontName = FONT_NAME
+    chart.barLabels.fontSize = 6
+    chart.barLabelFormat = "%0.0f%%"
+    chart.barLabels.nudge = 6
+    d.add(chart)
+    # Wrapped legend, not reportlab's fixed-pitch Legend: this panel is narrow
+    # (~81mm on the summary page) and a fixed deltax overflows or collides.
+    _draw_wrapped_legend(d, [(cfg["colors"]["chart_planned"], labels.get("planned", "Planned")),
+                             (cfg["colors"]["chart_actual"], labels.get("actual", "Actual"))],
+                         chart.x, height - 4, chart.width)
     return d
 
 
@@ -479,45 +646,36 @@ def budget_total_cost_chart(cfg, ctx, width, labels, height=None):
         slices.append((labels.get("budget_new_items", "New items"), new_items, palette[1]))
     if for_part:
         slices.append((labels.get("budget_for_part", "For part"), for_part, palette[2 % len(palette)]))
+    # A lone contract-amount slice is a filled circle carrying no information
+    # beyond its own caption — the reference has no such panel, so render
+    # nothing rather than a decorative disc (2026-08-30).
+    if len(slices) < 2:
+        return None
     height = height or 60 * mm
-    pw = 40 * mm
-    d = Drawing(width, height)
-    pie = Pie()
-    pie.x, pie.y = (width - pw) / 2, 4
-    pie.width = pie.height = pw
-    pie.data = [max(0.01, v) for _, v, _ in slices]
-    pie.labels = [""] * len(slices)
-    pie.simpleLabels = 1
-    for i, (_, _, color) in enumerate(slices):
-        pie.slices[i].fillColor = hexcolor(color)
-    pie.slices.strokeColor = hexcolor("#ffffff")
-    d.add(pie)
-    d.add(_legend([(color, f"{name}: {value:,.0f}") for name, value, color in slices],
-                  10, height - 6, vertical=True))
-    return d
+    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
 def overall_donut(cfg, ctx, width, labels, height=None):
-    """Overall completion donut with the % in the centre."""
+    """Planned / actual / variance — the three slices the reference report's
+    own PROGRESS pie carries (2026-08-30). Was a two-slice done-vs-remaining
+    donut, which matched nothing in the reference; variance is simply
+    planned - actual, both already in ctx. Falls back to the two real slices
+    when there's no planned baseline to compare against."""
     overall = float(ctx["overall"])
+    planned = ctx.get("planned")
+    grey = cfg["colors"].get("muted", "#A5A5A5")
     height = height or 56 * mm
-    pw = 42 * mm
-    d = Drawing(width, height)
-    pie = Pie()
-    pie.x, pie.y = (width - pw) / 2, 6   # centred so the % lands in the hole
-    pie.width = pie.height = pw
-    pie.data = [max(0.1, overall), max(0.1, 100 - overall)]
-    pie.innerRadiusFraction = 0.58  # donut
-    pie.slices.strokeColor = hexcolor("#ffffff")
-    pie.slices[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    pie.slices[1].fillColor = hexcolor(cfg["colors"]["table_row_alt"])
-    pie.simpleLabels = 1
-    pie.labels = ["", ""]
-    d.add(pie)
-    cx, cy = pie.x + pw / 2, pie.y + pw / 2
-    d.add(String(cx, cy - 5, f"{overall:.1f}%", fontName=FONT_NAME, fontSize=13,
-                 fillColor=hexcolor(cfg["colors"]["heading"]), textAnchor="middle"))
-    return d
+    if planned is None:
+        slices = [(labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
+                  (labels.get("not_started", "Remaining"), max(0.0, 100 - overall), grey)]
+    else:
+        planned = float(planned)
+        slices = [
+            (labels.get("planned", "Planned"), planned, cfg["colors"]["chart_planned"]),
+            (labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
+            (labels.get("variance", "Variance"), max(0.0, planned - overall), grey),
+        ]
+    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.2f}%")
 
 
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
@@ -614,67 +772,151 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
 
 
 def scurve_chart(cfg, ctx, width, labels, height=None):
-    """Time Performance S-curve: planned vs actual cumulative progress."""
+    """Time Performance S-curve: planned vs actual cumulative progress, plus
+    the forecast continuation the reference report's own Progress Curve
+    carries (2026-08-30) — its actual line stops at today and a differently
+    coloured segment runs on from there to 100% at the forecast finish.
+
+    The forecast is drawn as a third series that is `None` everywhere before
+    today, so it starts exactly where `actual` stops instead of being a
+    separate floating line. It's a straight run-out from today's real actual
+    to 100%, which is the only forecast this data supports: the project
+    stores forecast/revised *dates*, not a month-by-month projected curve.
+    Nothing is drawn when there's no forecast date to aim at."""
     series = [p for p in ctx.get("scurve", []) if p.get("planned") is not None]
     if len(series) < 2:
         return None
     height = height or 72 * mm
     d = Drawing(width, height)
     chart = HorizontalLineChart()
-    chart.x, chart.y = 26, 26
-    chart.width, chart.height = width - 52, height - 56  # leave a top strip for the legend
-    chart.data = [[p["planned"] for p in series], [p["actual"] for p in series]]
-    chart.categoryAxis.categoryNames = _thinned_labels(
-        [p["date"].strftime("%b %y") for p in series], chart.width, font_size=6)
+    chart.x, chart.y = 30, 26
+    chart.width, chart.height = width - 56, height - 56  # leave a top strip for the legend
+
+    actual = [p.get("actual") for p in series]
+    swatches = [(cfg["colors"]["chart_planned"], labels["planned"]),
+                (cfg["colors"]["chart_actual"], labels["actual"])]
+
+    # Split at the report's as-of date, not at the last snapshot: a project
+    # can carry snapshots dated past the report period, and drawing those as
+    # "actual" would claim progress the report doesn't cover. Everything at
+    # or before as-of stays actual; the rest becomes the forecast run-out.
+    as_of = ctx.get("as_of")
+    cut = None
+    if as_of is not None:
+        past = [i for i, p in enumerate(series) if p["date"] <= as_of]
+        if past and len(past) < len(series):
+            cut = past[-1]
+
+    if cut is None:
+        data = [[p["planned"] for p in series], actual]
+    else:
+        anchor = actual[cut]
+        data = [[p["planned"] for p in series],
+                [v if i <= cut else None for i, v in enumerate(actual)]]
+        if anchor is not None:
+            # Straight run-out from today's real actual to 100% at the end of
+            # the series. Starts *at* the cut so it joins the actual line
+            # rather than floating; reportlab renders None as a gap, so only
+            # this segment is stroked.
+            forecast = [None] * len(series)
+            span = len(series) - 1 - cut
+            for i in range(cut, len(series)):
+                forecast[i] = anchor + (100.0 - anchor) * ((i - cut) / span)
+            data.append(forecast)
+            palette = cfg["colors"].get("chart_palette") or []
+            forecast_color = palette[5] if len(palette) > 5 else cfg["colors"].get("gauge_warn", "#F79646")
+            swatches.append((forecast_color, labels.get("scurve_forecast", "Forecast")))
+
+    chart.data = data
+    _thin_category_axis(chart.categoryAxis, [p["date"].strftime("%b %y") for p in series],
+                        chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.boxAnchor = "ne"
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 20
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    # 10% steps and a 0-100 range, matching the reference's own percentage axes.
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
     chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
-    chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
-    chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
-    chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2
+    for i, (color, _) in enumerate(swatches):
+        chart.lines[i].strokeColor = hexcolor(color)
+        chart.lines[i].strokeWidth = 2
     d.add(chart)
-    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+    _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
     return d
 
 
 def cashflow_chart(cfg, rows, width, labels, height=None):
-    """Monthly planned-vs-actual cash bars (the values the user typed in the
-    Finances tab — no derivation)."""
-    rows = rows[:24]
+    """The reference report's Cash flow panel: monthly planned/actual as bars
+    AND cumulative planned/actual as lines, sharing one value axis
+    (2026-08-30). Previously these were two separate charts on two panels;
+    the reference draws all four series together, which is what makes the
+    monthly spend readable against the cumulative curve it rolls up into.
+
+    Both sub-charts are given the same explicit valueMin/valueMax/x/width, so
+    the lines land on the same scale and gridlines as the bars — reportlab
+    has no combo primitive, so a shared scale has to be imposed by hand
+    rather than left to each chart's own auto-ranging."""
+    rows = rows[:36]
     if not rows:
         return None
     height = height or 80 * mm
     d = Drawing(width, height)
+    months = [r["month"].strftime("%b %y") for r in rows]
+    monthly = [r["planned"] for r in rows] + [r["actual"] for r in rows]
+    cumulative = [r.get("cum_planned") or 0 for r in rows] + [r.get("cum_actual") or 0 for r in rows]
+    top = max(monthly + cumulative + [0])
+    top = top * 1.08 or 1  # headroom so the cumulative line doesn't touch the frame
+
+    inset = _value_axis_inset(top)
+    plot_x, plot_w = inset, width - inset - 12
+    plot_y, plot_h = 28, height - 62
+
     chart = VerticalBarChart()
-    chart.x, chart.y = 32, 28
-    chart.width, chart.height = width - 60, height - 62
+    chart.x, chart.y = plot_x, plot_y
+    chart.width, chart.height = plot_w, plot_h
     chart.data = [[r["planned"] for r in rows], [r["actual"] for r in rows]]
-    chart.categoryAxis.categoryNames = _thinned_labels(
-        [r["month"].strftime("%b %y") for r in rows], chart.width, font_size=6)
+    _thin_category_axis(chart.categoryAxis, months, chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.boxAnchor = "ne"
-    chart.valueAxis.valueMin = 0
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax = 0, top
     chart.valueAxis.labelTextFormat = lambda v: f"{v:,.0f}"  # thousands separator, not a bare "1000000"
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 6
-    chart.barSpacing = 1
+    chart.groupSpacing = 4
+    chart.barSpacing = 0.5
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     d.add(chart)
-    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+
+    # Cumulative lines over the same plot rect. Its own axes are hidden — the
+    # bar chart already drew them — but the value range must match exactly.
+    curve = HorizontalLineChart()
+    curve.x, curve.y = plot_x, plot_y
+    curve.width, curve.height = plot_w, plot_h
+    curve.data = [[r.get("cum_planned") or 0 for r in rows], [r.get("cum_actual") or 0 for r in rows]]
+    curve.categoryAxis.categoryNames = [""] * len(rows)
+    curve.categoryAxis.visible = 0
+    curve.valueAxis.valueMin, curve.valueAxis.valueMax = 0, top
+    curve.valueAxis.visible = 0
+    curve.valueAxis.visibleGrid = 0
+    curve.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
+    curve.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
+    curve.lines[0].strokeWidth = curve.lines[1].strokeWidth = 1.6
+    d.add(curve)
+
+    _draw_wrapped_legend(d, [
+        (cfg["colors"]["chart_planned"], labels.get("cashflow_planned_monthly", labels["planned"])),
+        (cfg["colors"]["chart_actual"], labels.get("cashflow_actual_monthly", labels["actual"])),
+        (cfg["colors"]["chart_planned"], labels.get("cashflow_cum_planned", "Cumulative planned")),
+        (cfg["colors"]["chart_actual"], labels.get("cashflow_cum_actual", "Cumulative actual")),
+    ], plot_x, height - 4, plot_w)
     return d
 
 
@@ -685,11 +927,13 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = HorizontalLineChart()
-    chart.x, chart.y = 32, 26
-    chart.width, chart.height = width - 60, height - 56
+    # Same money-axis inset reasoning as cashflow_chart above.
+    chart.x = _value_axis_inset(max([r["cum_planned"] for r in rows] + [r["cum_actual"] for r in rows] + [0]))
+    chart.y = 26
+    chart.width, chart.height = width - chart.x - 12, height - 56
     chart.data = [[r["cum_planned"] for r in rows], [r["cum_actual"] for r in rows]]
-    chart.categoryAxis.categoryNames = _thinned_labels(
-        [r["month"].strftime("%b %y") for r in rows], chart.width, font_size=6)
+    _thin_category_axis(chart.categoryAxis, [r["month"].strftime("%b %y") for r in rows],
+                        chart.width, font_size=6)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 6
     chart.categoryAxis.labels.angle = 30

@@ -141,6 +141,12 @@ DEFAULT_CONFIG = {
         "cashflow": "التدفق النقدي",
         "cashflow_monthly": "التدفق النقدي الشهري",
         "cashflow_cumulative": "التدفق النقدي التراكمي",
+        # The four series the combined cash-flow panel draws (monthly bars +
+        # cumulative lines), mirroring the reference report's own legend.
+        "cashflow_planned_monthly": "المخطط الشهري",
+        "cashflow_actual_monthly": "الفعلي الشهري",
+        "cashflow_cum_planned": "التراكمي المخطط",
+        "cashflow_cum_actual": "التراكمي الفعلي",
         "invoices": "المستخلصات",
         "invoice_status": "موقف المستخلصات",
         "invoice_invoiced": "المصروف",
@@ -151,6 +157,9 @@ DEFAULT_CONFIG = {
         "budget_for_part": "قيمة الجزء",
         "boq_financial_progress": "التقدم المالي حسب جدول الكميات",
         "progress_comparison": "مقارنة نسب الإنجاز",
+        "progress_tracking": "متابعة الإنجاز الشهري",
+        "tracking_previous": "الشهر السابق",
+        "tracking_current": "الشهر الحالي",
         "budget_share": "نسبة الميزانية",
         "financial_percent": "نسبة الإنجاز المالي",
         "submittals": "موقف الرسومات والمواد",
@@ -192,8 +201,16 @@ DEFAULT_CONFIG = {
         "duration_section": "Duration & Delay",
         "duration_days": "Project duration",
         "delay_days": "Delay (days)",
-        "duration_elapsed": "Elapsed",
-        "duration_remaining": "Remaining",
+        # Arabic like the rest of this dict — these three now print on the
+        # duration pie itself (not just the legacy duration table), and the
+        # reference report they mirror is entirely Arabic.
+        "duration_total": "مدة المرحلة",
+        "duration_elapsed": "المنقضية",
+        "duration_remaining": "المتبقية",
+        # Planned - actual, the reference PROGRESS pie's own third slice.
+        "variance": "الانحراف",
+        # The forecast run-out on the progress curve (actual -> 100%).
+        "scurve_forecast": "المتوقع",
         # Unit words appended to bare numbers so a reader knows what they mean.
         "unit_days": "days",
         "unit_sqm": "m²",

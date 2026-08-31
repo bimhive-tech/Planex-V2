@@ -741,6 +741,15 @@ def build_report_context(report):
     prev_zone = {z.get("name"): z.get("progress") for z in (prev_snap["zones"] or [])} if prev_snap else {}
     prev_scopes_map = (prev_snap.get("scopes") or {}) if prev_snap else {}
     prev_overall = float(prev_snap["overall_progress"]) if prev_snap else None
+    # "Project Tracking" bars (2026-08-30 — previous month vs. current month,
+    # planned vs. actual): reuses prev_overall/overall/planned above rather
+    # than a new query. `previous.actual` is None (not 0 — see
+    # progress_tracking_chart) when there's no snapshot before as_of at all,
+    # e.g. a project's very first report.
+    monthly_tracking = {
+        "previous": {"planned": planned, "actual": prev_overall},
+        "current": {"planned": planned, "actual": overall},
+    }
 
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
     # the selected tasks (empty selection = whole project).
@@ -906,6 +915,7 @@ def build_report_context(report):
         "overall": overall,
         "planned": planned,
         "previous_overall": prev_overall,
+        "monthly_tracking": monthly_tracking,
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
@@ -929,6 +939,10 @@ def build_report_context(report):
         "submittals": submittals,
         "delays": delays,
         "scurve": scurve,
+        # The report's own as-of date, so a chart can tell "already happened"
+        # from "still ahead" — the progress curve splits its actual line from
+        # its forecast run-out here (see pdf_charts.scurve_chart).
+        "as_of": as_of,
         "milestones": milestones,
         "snapshots": snapshots,
         "logos": {

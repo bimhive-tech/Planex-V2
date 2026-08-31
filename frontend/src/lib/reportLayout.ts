@@ -44,6 +44,15 @@ export interface LayoutElement {
 export type ChartSvgResult = { status: "ok"; svg: string } | { status: "too_small" | "no_data" };
 export type ChartSvgMap = Record<string, ChartSvgResult>;
 
+/** This report's effective `cfg["labels"]` (template defaults merged with
+ * overrides) — see chart_svgs/table_data's docstrings. source -> real Arabic
+ * (or template-language) name, the exact text _table_or_chart_title and
+ * _collect_captions fall back to in the real PDF when an element has no
+ * title_text/caption of its own. The canvas uses the same dict for its own
+ * fallback so an un-overridden chart/table never shows different text here
+ * than in the download. */
+export type ReportLabels = Record<string, string>;
+
 /** One table element's live, real data — see useTableData and
  * apps/reports/views.py's table_data action, which returns the exact same
  * header/rows resolve_table computes for the real PDF table (raw=True mode)

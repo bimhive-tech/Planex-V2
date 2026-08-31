@@ -1881,3 +1881,152 @@ matches by activity `code`, so a re-import could pick an arbitrary one of
 two same-coded rows; access grants against an old batch just go quietly
 stale, not leak data). Lower priority since they don't corrupt anything
 visible today, but real follow-up work.
+
+---
+
+## 2026-08-30 (night) — full audit: what's missing, what's hardcoded — then fixed what was asked
+
+Client asked for a full comparison of the live template against everything
+sent this session, specifically calling out hardcoded/placeholder/dummy
+content. Scanned the entire live template config — every `text` element,
+every `description` element, every `field` source, and searched for any
+manual `overrides`/`hidden_rows` baked into a table or chart (which would
+mean literal fake numbers instead of real computed ones).
+
+**One real finding**: وصف المشروع (Project Description) had Mansoura 6's
+own real description text baked directly into **"التقرير الشهري — Monthly
+Report"** — a genuinely-named, reusable template (this company already has
+3 templates and multi-project infrastructure). The next report built from
+it for a different project would have silently shown Mansoura 6's own
+words. Traced back to an earlier session's "upgrade" from a dynamic
+`project.description` field to a rich-text `description` element (for
+inline-embed support) — the real text got copied in as the element's
+permanent default instead of staying live.
+
+**Fixed properly, not just reverted**: `_effective_description_html`
+(`pdf_canvas.py`) — a description element with no authored `props.html`
+now falls back to the live project's own real `description` field
+(already real data, confirmed via direct query, never actually missing).
+The template's own default is now blank. A report author who wants custom
+content still just double-clicks the canvas and types — that becomes
+`props.html` and the fallback never runs again for that element. Applied
+consistently to both the real draw pass and the overflow-pagination
+pre-pass (they read the html independently; missing one would mean a long
+real description silently stops overflowing into continuation pages
+instead of clipping cleanly).
+
+Also found and fixed two now-stale code comments (not user-facing) still
+claiming BOQ Financial Progress "isn't buildable," left over from before
+it was actually built later in the same session.
+
+**Everything else scanned clean** — no other hardcoded text, no manual
+table/chart overrides anywhere in the template, every `field` element
+correctly bound to a live source.
+
+### Also added: "Project Tracking" (previous vs. current month)
+
+The one item flagged as "buildable but not built" in the audit — client
+asked to add it. `progress_tracking_chart` (`pdf_charts.py`) — planned vs.
+actual, previous month vs. current month, reusing `build_report_context`'s
+own already-computed `prev_overall`/`overall`/`planned` (the same "most
+recent snapshot before the report date" logic already used for zone-level
+tracking) — zero new queries. A period with no real snapshot behind it
+renders as omitted, not a fabricated 0%; both-empty returns `None`
+entirely. Added beside `progress_comparison` on Summary page 3 (room was
+already there in that row). For this project, both months currently read
+88% — an honest reflection of recent snapshots not having moved, not a bug.
+
+Verified: full `apps.reports` suite green (218 tests, +9 new — including
+2 tests specifically proving the description fallback works AND that
+authored content still always wins); `tsc --noEmit` clean; PDF re-rendered
+and visually confirmed both fixes (description page shows the identical
+real text via the fallback now; Project Tracking renders correctly on
+page 3, captioned as figure 12).
+
+---
+
+## 2026-08-30 — Chart/table parity with the client's reference report
+
+Compared the client's own February report (67 pages) and the Excel it
+comes from (`Dashboard template 02-08-2026`, 19 charts on the Dashboard
+sheet) against our generated output for the same project, chart by chart.
+
+### Rendering defects found and fixed
+
+- **Progress Comparison** drew its three bars edge to edge as one solid
+  block. ReportLab treats `barWidth`/`groupSpacing` as *relative weights*
+  unless `useAbsolute` is set, so `groupSpacing = 0` scaled each bar up to
+  fill its whole category slot.
+- **Project Tracking** printed its legend on top of the 100% bars' own
+  value labels (plot top sat 8pt under the legend baseline).
+- **Progress curve** drew a solid black band under the axis: labels were
+  thinned for width, but the ticks underneath them were not.
+- **Cash flow** clipped its money axis to `"0,000,000"` — a fixed 32pt
+  left inset sized for percentage ticks, applied to a nine-digit axis.
+- **Vertical axis labels** clipped to `"ilding 6"` after switching to the
+  reference's 90-degree convention; the bottom inset is now derived from
+  the longest label rather than fixed.
+
+### Matched to the reference
+
+Cash flow is now one combo panel (monthly bars + cumulative lines sharing
+a value axis) instead of two charts; the progress curve gained the
+forecast run-out, splitting on the report's as-of date rather than the
+last snapshot so snapshots dated past the reporting period can't be drawn
+as actuals; the progress pie is the reference's three-slice exploded pie
+(planned/actual/variance) and the duration pie its phase/elapsed/remaining;
+all pies share one helper (popped-out slices, values on the pie, legend
+beneath); percentage axes run 0-100% in 10% steps with 90-degree labels;
+the project-info table uses blue label text on white rather than a filled
+grey column.
+
+`budget_total_cost` used to render a plain filled circle whenever a project
+had no approved CVOs and no Part budget — one slice at 100%, carrying no
+information. It now draws nothing below two real slices, and its test was
+rewritten to assert that.
+
+A dashed **"No data: zone_progress"** debug box was printing into the
+area-dashboard pages of a client deliverable. Unresolved panels now draw
+nothing; the Customize tab still surfaces a per-element "No data" state,
+which is where that signal is actionable.
+
+### Deliberate deviation
+
+The reference's Invoice Status pie plots the contract *total* as a wedge
+alongside the invoiced/remaining wedges that already sum to it, which
+makes every angle on it meaningless. Styling matches the reference; the
+slices stay the two that actually partition the total. (The same
+double-count exists in its duration pie, where it's harmless, so that one
+is matched as-is.)
+
+## 2026-08-30 — Zone duplication: batch filter fell back to "all batches"
+
+Client reported seeing each zone twice per phase. Real bug, and worse than
+duplicate rows.
+
+`latest_schedule_import(project, as_of)` filtered `date__lte=as_of` and
+returned `None` when nothing matched. Every caller shares the shape
+`filter(schedule_import=batch) if batch else .all()`, so `None` doesn't
+mean "no data" to them — it means **don't filter**, i.e. read every batch
+ever imported, combined.
+
+This report is dated 3 Mar 2026; both schedule-import batches are dated
+Aug 2026 (the backfill and the re-import both stamped themselves with the
+date they ran). So no batch was `<= as_of`, the filter dropped out, and
+the report read both generations at once: 15 zones rendered as 30, and
+every activity aggregate summed across 48,754 activities instead of the
+real 24,377.
+
+This is exactly the double-count the versioned-import work was built to
+prevent — the guard was in place, but its `None` return had a second
+meaning downstream that defeated it.
+
+Fixed centrally in `latest_schedule_import`: it now never returns `None`
+for a project that *has* batches. When `as_of` predates every batch it
+falls back to the earliest one (closest to the requested date) instead.
+One function, so all ~47 call sites are covered. `None` now means only
+what the callers assume it means — this project has no schedule import at
+all.
+
+Verified against the live dev DB: hierarchy and area dashboards back to 15
+rows with no duplicate names, activity total back to 24,377.

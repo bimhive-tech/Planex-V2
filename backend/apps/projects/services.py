@@ -10,18 +10,33 @@ _WEIGHTED = ExpressionWrapper(
 def latest_schedule_import(project, as_of=None):
     """The schedule-import batch "current" means for this project right now —
     the most recent one, or (when `as_of` is given) the most recent one whose
-    own `date` isn't after `as_of`. `None` when the project has never had a
-    schedule import (a hand-built project, or one whose only data is a raw
-    zone-tracker import predating this feature — see ScheduleImport's own
-    docstring). Every function that reads "the project's activities/scopes"
-    for anything current-state-shaped resolves this first and filters to it,
-    so a re-import (which now creates a new batch instead of deleting the
-    old one) can't silently double-count both generations together."""
+    own `date` isn't after `as_of`. `None` ONLY when the project has never had
+    a schedule import at all (a hand-built project, or one whose only data is
+    a raw zone-tracker import predating this feature — see ScheduleImport's
+    own docstring). Every function that reads "the project's activities/
+    scopes" for anything current-state-shaped resolves this first and filters
+    to it, so a re-import (which now creates a new batch instead of deleting
+    the old one) can't silently double-count both generations together.
+
+    Never returns None for a project that HAS batches, even when `as_of`
+    predates every one of them. Callers all share the shape
+    `filter(schedule_import=batch) if batch else .all()`, so a None here
+    doesn't mean "no data" to them — it means "don't filter", i.e. read every
+    batch ever imported, combined. That is exactly the double-count this
+    function exists to prevent: a report dated before the first import came
+    back with its zones duplicated once per batch and its activity weights
+    summed across all of them (found 2026-08-30 on a report dated 3 Mar 2026
+    against batches dated 11/30 Aug 2026 — 15 zones rendered as 30). When
+    `as_of` is earlier than every batch, the earliest batch is the closest
+    thing to the requested date, so that's what it falls back to."""
     from .models import ScheduleImport
 
     qs = ScheduleImport.objects.filter(project=project)
     if as_of is not None:
-        qs = qs.filter(date__lte=as_of)
+        on_or_before = qs.filter(date__lte=as_of).order_by("-date", "-created_at").first()
+        if on_or_before is not None:
+            return on_or_before
+        return qs.order_by("date", "created_at").first()
     return qs.order_by("-date", "-created_at").first()
 
 

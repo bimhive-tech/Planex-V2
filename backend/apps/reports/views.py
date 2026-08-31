@@ -219,6 +219,13 @@ class ReportViewSet(viewsets.ModelViewSet):
         what the real PDF itself draws in those same cases (see
         pdf_canvas._draw_chart_element) — never a fake/placeholder chart.
 
+        Also returns this report's effective `labels` dict (cfg["labels"],
+        defaults merged with template overrides) so the canvas's title/
+        caption text falls back to the SAME Arabic name the PDF itself
+        would draw (_table_or_chart_title/_collect_captions both read this
+        same dict) instead of the English source-picker label — the two
+        must never show different text for the same un-overridden chart.
+
         Only meaningful with a real layout_override from the report
         Customize tab: pages arriving there are already expanded to concrete,
         uniquely-id'd pages (see expandRepeatingPages on the frontend), so
@@ -259,7 +266,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                     charts[el["id"]] = {"status": "no_data"}
                     continue
                 charts[el["id"]] = {"status": "ok", "svg": renderSVG.drawToString(drawing)}
-        return Response({"charts": charts})
+        return Response({"charts": charts, "labels": cfg["labels"]})
 
     @action(detail=True, methods=["post"], url_path="table-data")
     def table_data(self, request, pk=None):
@@ -287,6 +294,10 @@ class ReportViewSet(viewsets.ModelViewSet):
         pdf_tables.apply_table_overrides) IS read and applied here — the
         same overrides the real PDF applies in _draw_table_element, so an
         edit made in this live preview always matches what gets downloaded.
+
+        Also returns this report's effective `labels` dict — see chart_svgs'
+        docstring; same reasoning, same dict, same reason it must agree with
+        the real PDF's own title/caption fallback text.
 
         Same Customize-tab-only scoping as chart_svgs — see its docstring.
         """
@@ -331,7 +342,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                     continue
                 tables[el["id"]] = {"status": "ok", "style": style, **grid}
 
-        return Response({"tables": tables})
+        return Response({"tables": tables, "labels": cfg["labels"]})
 
     @action(detail=True, methods=["post"], url_path="table-overflow")
     def table_overflow(self, request, pk=None):

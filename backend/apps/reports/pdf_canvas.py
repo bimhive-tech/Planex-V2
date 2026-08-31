@@ -32,6 +32,7 @@ from .pdf_charts import (
     overall_donut,
     planned_actual_chart,
     progress_comparison_chart,
+    progress_tracking_chart,
     scurve_chart,
     speedometer_chart,
     submittals_breakdown_chart,
@@ -618,8 +619,16 @@ def _draw_toc_element(c, props, x, y, w, h, inst: PageInstance, ctx, el_id=None)
 
 
 def _draw_placeholder(c, x, y, w, h, label):
-    """A visibly-a-placeholder box — used when a table/chart can't be drawn
-    (too small, or not yet implemented) so the gap is obvious, not silent."""
+    """A visibly-a-placeholder box, for a box whose SIZE is the problem
+    ("too small") — a layout mistake the author has to see and fix.
+
+    Deliberately not used for a source that simply resolves to no data: that
+    used to print a dashed "No data: zone_progress" box straight into a
+    client deliverable (found 2026-08-30 against the client's reference
+    report, where no panel is ever empty). Those now draw nothing at all, and
+    the signal lives where it's actionable instead — the Customize tab
+    resolves every element through this same code and shows a per-element
+    "No data" state (see views.chart_svgs / views.table_data)."""
     c.saveState()
     c.setDash(2, 2)
     c.setStrokeColor(hexcolor("#a0a0a0"))
@@ -651,8 +660,7 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         scope_zone_id=props.get("scope_zone_id"),
     )
     if table is None:
-        _draw_placeholder(c, x, y, w, h, f"No data: {source}")
-        return
+        return  # nothing real to draw — see _draw_placeholder's docstring
 
     # This table's first chunk was already computed (and its overflow into
     # continuation pages already spliced in) by _expand_table_overflow —
@@ -690,8 +698,7 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h, scope_zone_id=props.get("scope_zone_id"),
     )
     if drawing is None:
-        _draw_placeholder(c, x, y, w, h, f"No data: {source}")
-        return
+        return  # nothing real to draw — see _draw_placeholder's docstring
     from reportlab.graphics import renderPDF
     renderPDF.draw(drawing, c, x, y + caption_h)
 
@@ -703,13 +710,37 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         _draw_title_text(c, x, y + h - title_h, w, title_h, title)
 
 
+def _effective_description_html(props: dict, ctx: dict) -> str:
+    """The description element's real html — its own authored content
+    (`props.html`) when set, else a live fallback built from the project's
+    own `description` field.
+
+    Keeps a report on a not-yet-customized template showing its own real
+    project narrative, instead of either a blank box or (the bug this
+    replaced, found 2026-08-30) one *specific* project's own description
+    text baked directly into the shared, reusable template's default — the
+    next report built from that template, for a different project, would
+    have silently inherited the wrong client's own words. A report author
+    who wants different/richer content (with inline embeds) still just
+    double-clicks and types on the canvas — that becomes `props.html` and
+    this fallback never runs again for that element."""
+    html = props.get("html") or ""
+    if html:
+        return html
+    import html as html_lib
+
+    plain = (ctx.get("project") or {}).get("description") or ""
+    lines = [line.strip() for line in plain.split("\n") if line.strip()]
+    return "".join(f"<p>{html_lib.escape(line)}</p>" for line in lines)
+
+
 def _draw_description_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_id=None):
-    """This element's own rich text (`props.html` — see richtext.py),
-    including any inline table/chart/image embeds, flowed top-to-bottom
-    inside this box. Per-element authored content, like every other canvas
-    element's own props, not a single report-wide field shared across every
-    placement — edited directly on the canvas (double-click), not a
-    separate tab.
+    """This element's own rich text (`props.html`, or a live fallback — see
+    `_effective_description_html`), including any inline table/chart/image
+    embeds, flowed top-to-bottom inside this box. Per-element authored
+    content, like every other canvas element's own props, not a single
+    report-wide field shared across every placement — edited directly on
+    the canvas (double-click), not a separate tab.
 
     A synthetic continuation page (see _expand_description_overflow) draws
     ONLY its own pre-paginated slice of the flow — the rest already drew on
@@ -720,7 +751,7 @@ def _draw_description_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx
     if inst.continues_flow is not None:
         _draw_flow_in_box(c, inst.continues_flow, x, y, w, h)
         return
-    html = props.get("html") or ""
+    html = _effective_description_html(props, ctx)
     if not html:
         return
     from .richtext import html_to_flowables
@@ -1217,6 +1248,8 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
         return boq_financial_progress_chart(cfg, ctx, w, labels, height=h)
     if source == "progress_comparison":
         return progress_comparison_chart(cfg, ctx, w, labels, height=h)
+    if source == "progress_tracking":
+        return progress_tracking_chart(cfg, ctx, w, labels, height=h)
     if source == "gantt":
         return gantt_chart(cfg, ctx.get("gantt") or [], w, labels, height=h)
     if source in ("submittals_material", "submittals_shop_drawing"):
@@ -1514,7 +1547,7 @@ def _expand_description_overflow(instances: list, cfg: dict, ctx: dict, design: 
         overflow_el, pages = None, None
         for el in desc_els:
             x, y, w, h = el_box(el, page_h_mm)
-            html = (el.get("props") or {}).get("html") or ""
+            html = _effective_description_html(el.get("props") or {}, ctx)
             if not html:
                 continue
             from .richtext import html_to_flowables

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
-import type { ChartSvgMap, LayoutElement, TableDataMap, TocCaptionsData, TocEntry } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, ReportLabels, TableDataMap, TocCaptionsData, TocEntry } from "@/lib/reportLayout";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { ElementPreview } from "./ElementPreview";
@@ -54,6 +54,8 @@ interface Props {
   /** False until chartSvgs/tableData/tocCaptions's first real response has
    * landed. */
   previewsReady?: boolean;
+  /** This report's effective label dict — see ReportLabels. */
+  labels?: ReportLabels;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
@@ -63,8 +65,8 @@ interface Props {
 
 export function CanvasElementView({
   el, scale, selected, showControls = true, ghost, onSelect, onStartMove, onStartResize, onStartRotate, onAction,
-  onElementChange, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, tocEntries,
-  ownPageId,
+  onElementChange, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, labels,
+  tocEntries, ownPageId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -97,7 +99,7 @@ export function CanvasElementView({
         <ElementPreview
           el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
           chartSvgs={chartSvgs} tableData={tableData} tocCaptions={tocCaptions} previewsReady={previewsReady}
-          tocEntries={tocEntries} ownPageId={ownPageId}
+          labels={labels} tocEntries={tocEntries} ownPageId={ownPageId}
         />
       </div>
     );
@@ -149,7 +151,7 @@ export function CanvasElementView({
       <ElementPreview
         el={el} scale={scale} liveData={liveData} reportId={reportId} pinnedItem={pinnedItem}
         chartSvgs={chartSvgs} tableData={tableData} tocCaptions={tocCaptions} previewsReady={previewsReady}
-        tocEntries={tocEntries} ownPageId={ownPageId} onElementChange={onElementChange}
+        labels={labels} tocEntries={tocEntries} ownPageId={ownPageId} onElementChange={onElementChange}
       />
 
       {selected && showControls && (

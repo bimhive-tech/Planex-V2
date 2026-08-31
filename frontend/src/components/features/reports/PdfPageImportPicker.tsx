@@ -105,11 +105,11 @@ export function PdfPageImportPicker({
       for (let i = 0; i < indices.length; i++) {
         const pageNumber = indices[i];
         const blob = await renderPageToBlob(pdf, pageNumber, IMPORT_SCALE);
-        const form = new FormData();
-        form.append("image", new File([blob], `page-${pageNumber}.png`, { type: "image/png" }));
-        form.append("kind", kind);
-        form.append("caption", `Page ${pageNumber}`);
-        await api.uploadApi<ReportImage>(`/reports/${reportId}/images/`, form);
+        const file = new File([blob], `page-${pageNumber}.png`, { type: "image/png" });
+        // Routed through a Next.js route handler (images-file), not the /api
+        // rewrite proxy directly — see that route's docstring: the proxy can
+        // drop a multipart body mid-stream during a dev Fast Refresh recompile.
+        await api.upload<ReportImage>(`/reports/${reportId}/images-file`, file, "image", { kind, caption: `Page ${pageNumber}` });
         setProgress({ done: i + 1, total: indices.length });
       }
       setPdf(null); // triggers the cleanup effect above, which destroys the doc

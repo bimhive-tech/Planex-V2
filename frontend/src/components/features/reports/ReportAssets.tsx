@@ -49,11 +49,10 @@ export function ReportAssets({
     setBusy(true);
     setActionError(null);
     try {
-      const form = new FormData();
-      form.append("image", file);
-      form.append("kind", kind);
-      form.append("caption", caption);
-      await api.uploadApi<ReportImage>(`/reports/${reportId}/images/`, form);
+      // Routed through a Next.js route handler (images-file), not the /api
+      // rewrite proxy directly — see that route's docstring: the proxy can
+      // drop a multipart body mid-stream during a dev Fast Refresh recompile.
+      await api.upload<ReportImage>(`/reports/${reportId}/images-file`, file, "image", { kind, caption });
       setFile(null);
       setCaption("");
       reload();

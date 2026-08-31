@@ -85,6 +85,7 @@ export const CHART_SOURCES = [
   { value: "budget_total_cost", label: "Budget total cost" },
   { value: "boq_financial_progress", label: "Financial progress by BOQ" },
   { value: "progress_comparison", label: "Progress comparison (planned/actual/earned value)" },
+  { value: "progress_tracking", label: "Project tracking (previous vs current month)" },
   { value: "gantt", label: "Gantt schedule" },
   { value: "submittals_material", label: "Material submittals by status/discipline" },
   { value: "submittals_shop_drawing", label: "Shop drawings by status/discipline" },

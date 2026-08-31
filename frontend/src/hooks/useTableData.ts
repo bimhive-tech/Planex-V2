@@ -7,12 +7,15 @@
 // context is cached, so this is cheap enough to fire on every edit.
 import { useEffect, useState } from "react";
 
-import type { LayoutElement, LayoutPage, TableDataMap } from "@/lib/reportLayout";
+import type { LayoutElement, LayoutPage, ReportLabels, TableDataMap } from "@/lib/reportLayout";
 
 const DEBOUNCE_MS = 800;
 
 export interface TableDataState {
   tables: TableDataMap;
+  /** This report's effective label dict — see ReportLabels. Undefined until
+   * the first response lands. */
+  labels?: ReportLabels;
   /** True once the first real response has landed (or there's nothing to
    * wait for) — lets the canvas grey out table boxes instead of showing the
    * generic client-side mockup while the real look is still in flight. */
@@ -41,7 +44,7 @@ export function useTableData(
         }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("table-data fetch failed"))))
-        .then((data: { tables: TableDataMap }) => {
+        .then((data: { tables: TableDataMap; labels: ReportLabels }) => {
           if (alive) setState({ ...data, loaded: true });
         })
         .catch(() => { if (alive) setState((s) => ({ ...s, loaded: true })); });

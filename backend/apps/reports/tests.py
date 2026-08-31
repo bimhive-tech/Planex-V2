@@ -604,7 +604,14 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertIn("Zone B", full_text)  # a real row from the resolved table embed
         self.assertIn("75.0%", full_text)
 
-    def test_description_element_without_html_renders_nothing_not_crash(self):
+    def test_description_element_without_html_falls_back_to_the_project(self):
+        """No authored props.html doesn't mean nothing renders — it means
+        the element shows the live project's own real `description` field
+        (2026-08-30, see _effective_description_html) — never a template
+        left permanently blank, and never a *different* project's baked-in
+        text either."""
+        import fitz
+
         pages = [{"id": "p1", "name": "Description", "elements": [
             {"id": "desc", "type": "description", "x": 10, "y": 10, "w": 190, "h": 250, "z": 0, "props": {}},
         ]}]
@@ -612,6 +619,28 @@ class CanvasPdfTests(SimpleTestCase):
         report = SimpleNamespace(title="T", template=template)
         data = build_canvas_pdf(report, _sample_ctx())
         self.assertTrue(data.startswith(b"%PDF"))
+        doc = fitz.open(stream=data, filetype="pdf")
+        # Arabic round-trips through PDF text extraction in neither logical
+        # nor a fixed shaped order (confirmed unreliable to string-match
+        # directly elsewhere this session) — real content having rendered
+        # at all is the meaningful assertion here; the exact fallback text
+        # is already pinned precisely by the _effective_description_html
+        # unit tests above (DescriptionFallbackTests).
+        self.assertTrue(len(doc[0].get_text().strip()) > 5)
+
+    def test_description_element_without_html_or_project_description_renders_nothing(self):
+        import fitz
+
+        pages = [{"id": "p1", "name": "Description", "elements": [
+            {"id": "desc", "type": "description", "x": 10, "y": 10, "w": 190, "h": 250, "z": 0, "props": {}},
+        ]}]
+        template = self._template(pages)
+        report = SimpleNamespace(title="T", template=template)
+        ctx = {**_sample_ctx(), "project": {**_sample_ctx()["project"], "description": ""}}
+        data = build_canvas_pdf(report, ctx)
+        self.assertTrue(data.startswith(b"%PDF"))
+        doc = fitz.open(stream=data, filetype="pdf")
+        self.assertEqual(doc[0].get_text().strip(), "")  # contrast with the fallback test above
 
     def test_description_overflow_continues_onto_extra_pages_not_truncated(self):
         """Long description text that doesn't fit its box used to just spill
@@ -1206,16 +1235,15 @@ class InvoiceStatusAndBudgetTotalCostChartTests(SimpleTestCase):
         ctx = self._ctx()
         self.assertIsNone(resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90))
 
-    def test_budget_total_cost_is_a_single_real_slice_with_no_variations_or_part(self):
-        """A project with no approved CVOs and no active Part budget renders
-        as one contract-amount slice, not three fabricated ones — the
-        function's own explicit design, not a bug to fix."""
-        from reportlab.graphics.charts.piecharts import Pie
-
+    def test_budget_total_cost_draws_nothing_with_no_variations_or_part(self):
+        """A project with no approved CVOs and no active Part budget has only
+        the contract amount to show, which as a pie is a plain filled circle
+        carrying no information beyond its own caption. Renders nothing at
+        all rather than that (2026-08-30, comparing against the client's
+        reference report, which has no such panel)."""
         ctx = self._ctx(budget=5_632_000_000)
-        drawing = resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90)
-        pie = next(el for el in drawing.contents if isinstance(el, Pie))
-        self.assertEqual(list(pie.data), [5_632_000_000.0])
+        self.assertIsNone(
+            resolve_chart("budget_total_cost", "pie", default_config(), ctx, {"item": None}, 120, 90))
 
     def test_budget_total_cost_adds_a_slice_per_real_extra_amount(self):
         from reportlab.graphics.charts.piecharts import Pie
@@ -1245,6 +1273,42 @@ class InvoiceStatusAndBudgetTotalCostChartTests(SimpleTestCase):
         drawing = resolve_chart("progress_comparison", "bar", default_config(), ctx, {"item": None}, 180, 60)
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
         self.assertEqual(chart.data, [[100.0, 88.0]])
+
+    def test_progress_tracking_draws_planned_and_actual_per_period(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        ctx = {**_full_ctx(), "monthly_tracking": {
+            "previous": {"planned": 100.0, "actual": 92.34},
+            "current": {"planned": 100.0, "actual": 88.0},
+        }}
+        drawing = resolve_chart("progress_tracking", "bar", default_config(), ctx, {"item": None}, 180, 60)
+        self.assertIsNotNone(drawing)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(chart.data, [[100.0, 100.0], [92.3, 88.0]])  # planned, actual (rounded to 1dp)
+        from .pdf_base import shape
+
+        self.assertEqual(list(chart.categoryAxis.categoryNames),
+                         [shape("الشهر السابق"), shape("الشهر الحالي")])  # default_config's own Arabic labels
+
+    def test_progress_tracking_drops_a_period_with_no_snapshot_yet(self):
+        """A project's very first report has no snapshot before it — that
+        period is omitted, not drawn as a fabricated 0%."""
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        ctx = {**_full_ctx(), "monthly_tracking": {
+            "previous": {"planned": 100.0, "actual": None},
+            "current": {"planned": 100.0, "actual": 88.0},
+        }}
+        drawing = resolve_chart("progress_tracking", "bar", default_config(), ctx, {"item": None}, 180, 60)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        self.assertEqual(chart.data, [[100.0], [88.0]])
+
+    def test_progress_tracking_none_with_no_snapshots_at_all(self):
+        ctx = {**_full_ctx(), "monthly_tracking": {
+            "previous": {"planned": 100.0, "actual": None},
+            "current": {"planned": 100.0, "actual": None},
+        }}
+        self.assertIsNone(resolve_chart("progress_tracking", "bar", default_config(), ctx, {"item": None}, 180, 60))
 
     def test_boq_financial_progress_draws_budget_and_financial_series(self):
         from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -2045,6 +2109,77 @@ class FinanceReportTests(TestCase):
         rep = Report.objects.create(company=self.company, project=self.project, title="M", report_number="1")
         ctx = build_report_context(rep)
         self.assertIsNone(ctx["financial_percent_complete"])
+
+
+class MonthlyTrackingContextTests(TestCase):
+    """ctx["monthly_tracking"] (2026-08-30) — backs the "Project Tracking"
+    chart. Reuses the same prev_snap/overall/planned build_report_context
+    already computes, so this is really testing the packaging, not new
+    business logic — but the packaging is what the chart actually reads."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2025, 1, 1), planned_finish=datetime.date(2025, 6, 1))
+
+    def test_previous_is_the_real_snapshot_before_the_report_date(self):
+        from apps.projects.models import ProgressSnapshot
+
+        from .services import build_report_context
+
+        ProgressSnapshot.objects.create(company=self.company, project=self.project,
+                                        date=datetime.date(2026, 6, 1), overall_progress=70.0)
+        ProgressSnapshot.objects.create(company=self.company, project=self.project,
+                                        date=datetime.date(2026, 7, 1), overall_progress=80.0)
+        report = Report.objects.create(company=self.company, project=self.project, title="M",
+                                       report_date=datetime.date(2026, 8, 1))
+        ctx = build_report_context(report)
+        tracking = ctx["monthly_tracking"]
+        self.assertEqual(tracking["previous"]["actual"], 80.0)  # the latest snapshot strictly before Aug 1
+        self.assertEqual(tracking["current"]["actual"], ctx["overall"])
+        self.assertEqual(tracking["previous"]["planned"], tracking["current"]["planned"])  # same time-based baseline
+
+    def test_previous_is_none_with_no_snapshot_yet(self):
+        from .services import build_report_context
+
+        report = Report.objects.create(company=self.company, project=self.project, title="M",
+                                       report_date=datetime.date(2026, 8, 1))
+        ctx = build_report_context(report)
+        self.assertIsNone(ctx["monthly_tracking"]["previous"]["actual"])
+
+
+class DescriptionFallbackTests(SimpleTestCase):
+    """A "description" element with no authored props.html falls back to the
+    project's own real `description` field (2026-08-30) — replaces a bug
+    where one specific project's description text had been baked directly
+    into the shared, reusable template's default, so every future report
+    from a different project would have silently shown it."""
+
+    def test_blank_element_falls_back_to_the_projects_own_description(self):
+        from .pdf_canvas import _effective_description_html
+
+        ctx = {"project": {"description": "Line one.\nLine two."}}
+        html = _effective_description_html({"html": ""}, ctx)
+        self.assertEqual(html, "<p>Line one.</p><p>Line two.</p>")
+
+    def test_authored_html_is_never_overridden_by_the_fallback(self):
+        from .pdf_canvas import _effective_description_html
+
+        ctx = {"project": {"description": "The real project text."}}
+        html = _effective_description_html({"html": "<p>Custom authored content.</p>"}, ctx)
+        self.assertEqual(html, "<p>Custom authored content.</p>")
+
+    def test_fallback_escapes_the_projects_own_text(self):
+        """A project description isn't attacker-controlled the way a public
+        form field would be, but it's still free text a company admin
+        types — escaping it before treating it as HTML costs nothing and
+        means a stray '<' or '&' can't ever break the parse."""
+        from .pdf_canvas import _effective_description_html
+
+        ctx = {"project": {"description": "Cost < budget & on track."}}
+        html = _effective_description_html({"html": ""}, ctx)
+        self.assertEqual(html, "<p>Cost &lt; budget &amp; on track.</p>")
 
 
 class ProjectInfoCostAndDateFieldsTests(TestCase):

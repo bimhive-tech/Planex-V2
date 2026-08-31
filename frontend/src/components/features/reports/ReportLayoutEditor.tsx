@@ -81,8 +81,12 @@ export function ReportLayoutEditor({
   // Debounced and cheap (no PDF assembly, no full-page rasterization), so
   // every edit updates them directly instead of waiting on an explicit
   // refresh or a save.
-  const { charts: chartSvgs, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
-  const { tables: tableData, loaded: tablesLoaded } = useTableData(reportId, pages, masterElements);
+  const { charts: chartSvgs, labels: chartLabels, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
+  const { tables: tableData, labels: tableLabels, loaded: tablesLoaded } = useTableData(reportId, pages, masterElements);
+  // Same dict from either endpoint (both derive it from this report's own
+  // cfg) — whichever fired first (a report might have only tables, or only
+  // charts, on its very first page) is as good as the other.
+  const labels = chartLabels ?? tableLabels;
   const { captions: tocCaptions, loaded: tocLoaded } = useTocEntries(reportId, pages, masterElements);
   const { continuations: tableOverflow, loaded: overflowLoaded } = useTableOverflow(reportId, pages, masterElements);
   // None of the four hooks has produced its first real response yet —
@@ -189,6 +193,7 @@ export function ReportLayoutEditor({
         tableOverflow={tableOverflow}
         tocCaptions={tocCaptions}
         previewsReady={previewsReady}
+        labels={labels}
       />
       <Modal
         open={confirmingReset}

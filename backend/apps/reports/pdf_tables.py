@@ -210,7 +210,10 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None)
     # empirically 2026-08-26.
     size = cfg["fonts"]["base_size"]
     lead = size * 1.15
-    label_style = ParagraphStyle("lbl", fontName=BOLD, fontSize=size, textColor=hexcolor(c["text"]),
+    # Blue label text on a plain white cell — the reference report's own
+    # project-info table (جدول 1) styles its labels by colour, not by a
+    # filled column, and reads far lighter for it (2026-08-30).
+    label_style = ParagraphStyle("lbl", fontName=BOLD, fontSize=size, textColor=hexcolor(c["heading"]),
                                   leading=lead, alignment=TA_RIGHT)
     body_style = ParagraphStyle("bodyc", fontName=styles["body"].fontName, fontSize=size,
                                  textColor=hexcolor(c["text"]), leading=lead)
@@ -240,7 +243,7 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None)
     t = Table(data, colWidths=widths)
     style = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (1 if rtl else 0, 0), (1 if rtl else 0, -1), hexcolor(c["table_row_alt"])),
+        # No fill behind the label column — see label_style above.
         ("TOPPADDING", (0, 0), (-1, -1), pad), ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
         ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]

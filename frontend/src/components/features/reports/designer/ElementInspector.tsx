@@ -238,10 +238,10 @@ export function ElementInspector({
     setUploading(true);
     setUploadError(null);
     try {
-      const form = new FormData();
-      form.append("image", file);
-      form.append("kind", "canvas");
-      const created = await api.uploadApi<ReportImage>(`/reports/${reportId}/images/`, form);
+      // Routed through a Next.js route handler (images-file), not the /api
+      // rewrite proxy directly — see that route's docstring: the proxy can
+      // drop a multipart body mid-stream during a dev Fast Refresh recompile.
+      const created = await api.upload<ReportImage>(`/reports/${reportId}/images-file`, file, "image", { kind: "canvas" });
       onChange({
         ...el!,
         props: { ...el!.props, source: "upload", upload_id: created.id, upload_url: created.url },

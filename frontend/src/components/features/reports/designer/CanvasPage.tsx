@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { contentBox, pageDimensions } from "@/lib/reportLayout";
 import type {
-  ChartSvgMap, LayoutElement, PageDesign, TableDataMap, TocCaptionsData, TocEntry,
+  ChartSvgMap, LayoutElement, PageDesign, ReportLabels, TableDataMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import type { AlignGuides, ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { RESIZE_HANDLES } from "@/hooks/useCanvasInteraction";
@@ -128,6 +128,8 @@ interface Props {
   /** False until chartSvgs/tableData/tocCaptions's first real response has
    * landed. */
   previewsReady?: boolean;
+  /** This report's effective label dict — see ReportLabels. */
+  labels?: ReportLabels;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
@@ -139,7 +141,7 @@ export function CanvasPage({
   design, elements, masterElements = [], scale, selectedIds, showGuides, alignGuides,
   onSelect, onMarqueeSelect, onStartMove, onStartResize, onStartRotate, onStartGroupResize,
   onAction, onDropSpec, onElementChange, liveData, reportId, pinnedItem,
-  chartSvgs, tableData, tocCaptions, previewsReady, tocEntries, ownPageId,
+  chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId,
 }: Props) {
   const { w, h } = pageDimensions(design);
   const box = contentBox(design);
@@ -340,6 +342,7 @@ export function CanvasPage({
           tableData={tableData}
           tocCaptions={tocCaptions}
           previewsReady={previewsReady}
+          labels={labels}
           tocEntries={tocEntries}
           ownPageId={ownPageId}
         />
@@ -365,6 +368,7 @@ export function CanvasPage({
           tableData={tableData}
           tocCaptions={tocCaptions}
           previewsReady={previewsReady}
+          labels={labels}
           tocEntries={tocEntries}
           ownPageId={ownPageId}
         />

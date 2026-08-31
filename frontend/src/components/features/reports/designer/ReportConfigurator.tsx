@@ -8,8 +8,8 @@ import { useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
 import type {
-  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, TableDataMap, TableOverflowMap,
-  TocCaptionsData, TocEntry,
+  ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, ReportLabels, TableDataMap,
+  TableOverflowMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import { buildOverflowPages, overflowTableData } from "@/lib/reportOverflow";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
@@ -58,11 +58,15 @@ interface Props {
    * mockup. Defaults true (Template Builder — none of the three load at all
    * there, so the mockup is the only look and always "ready"). */
   previewsReady?: boolean;
+  /** This report's effective label dict — see ReportLabels. Present only
+   * alongside liveData; undefined in the Template Builder (no real report to
+   * derive an effective config from). */
+  labels?: ReportLabels;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
-  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true,
+  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true, labels,
 }: Props) {
   // Real, downloaded-PDF-accurate continuation pages spliced in after any
   // page whose table overflows its box (see buildOverflowPages) — these
@@ -442,6 +446,7 @@ export function ReportConfigurator({
       previewsReady={previewsReady}
       tocEntries={tocEntries}
       ownPageId={active.id}
+      labels={labels}
       // 2026-08-26 (client ask): the bottom Canva-style page-thumbnail
       // strip is gone from the report Customize tab specifically — the
       // left page list already covers everything it did (select/add/
