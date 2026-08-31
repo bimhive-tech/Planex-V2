@@ -137,7 +137,7 @@ def _pct_or_dash(v):
     return f"{v:.1f}%" if v is not None else "—"
 
 
-def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None):
+def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None, hidden_cols=None):
     """Substitute cell text with a report's own manual overrides (the
     "table" element's `overrides` prop, edited via the Customize tab's
     live table preview) — mutates `header`/`rows` in place *before* either
@@ -156,7 +156,15 @@ def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None):
     to drop specific ones from this one report's view) is a list/set of
     *original* row indices to remove entirely — applied last, after cell
     overrides, so a hidden row's own overrides (if any) are simply
-    discarded with it rather than shifting onto a different row."""
+    discarded with it rather than shifting onto a different row.
+
+    `hidden_cols` is the same idea for columns (2026-08-30): a bound table
+    often carries more columns than the page can hold, and until now the only
+    remedies were shrinking the font or turning the page landscape. Applied
+    after cell overrides for the same reason — so a dropped column's
+    overrides go with it instead of sliding onto its neighbour. "hierarchy"
+    rows are dicts with a fixed column meaning, so dropping a column there
+    would change what the remaining values mean; it's ignored for that kind."""
     if overrides:
         if header:
             for j in range(len(header)):
@@ -179,6 +187,15 @@ def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None):
     if hidden_rows:
         hidden = set(hidden_rows)
         rows[:] = [row for i, row in enumerate(rows) if i not in hidden]
+    # Never applied to "hierarchy": its rows are dicts whose columns carry
+    # fixed meanings (name/actual/previous/planned), so removing one would
+    # silently change what the rest represent.
+    if hidden_cols and kind != "hierarchy":
+        drop = set(hidden_cols)
+        if header:
+            header[:] = [h for j, h in enumerate(header) if j not in drop]
+        for i, row in enumerate(rows):
+            rows[i] = [c for j, c in enumerate(row) if j not in drop]
 
 
 def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None):

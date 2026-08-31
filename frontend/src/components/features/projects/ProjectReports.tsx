@@ -32,6 +32,18 @@ export function ProjectReports({ projectId, canManage }: { projectId: string; ca
     window.open(`${API_BASE}/reports/${r.id}/pdf/`, "_blank", "noopener");
   }
 
+  /** Same "start next month from last month's" copy as the Reports hub —
+   * see the backend's `duplicate` action for what does and doesn't carry. */
+  async function handleDuplicate(r: ReportRow) {
+    setActionError(null);
+    try {
+      await api.post<ReportRow>(`/reports/${r.id}/duplicate/`, { title: `${r.title} (copy)` });
+      reload();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't duplicate report.");
+    }
+  }
+
   async function handleDelete(r: ReportRow) {
     if (!window.confirm(`Delete “${r.title}”? This can't be undone.`)) return;
     setActionError(null);
@@ -69,7 +81,8 @@ export function ProjectReports({ projectId, canManage }: { projectId: string; ca
       >
         <div className={styles.grid}>
           {rows.map((r) => (
-            <ReportCard key={r.id} report={r} canManage={canManage} onView={viewPdf} onDelete={handleDelete} />
+            <ReportCard key={r.id} report={r} canManage={canManage} onView={viewPdf}
+              onDuplicate={handleDuplicate} onDelete={handleDelete} />
           ))}
         </div>
       </StateView>

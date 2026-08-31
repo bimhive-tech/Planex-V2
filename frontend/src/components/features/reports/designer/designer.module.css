@@ -964,6 +964,45 @@
   color: var(--danger-text);
 }
 
+/* Header cell that carries its own "hide this column" control alongside the
+   editable label — the column-wise twin of .tableLiveRowHideBtn above. The
+   button only appears on hover/focus so a clean table isn't peppered with
+   ×s, but stays reachable by keyboard. */
+.tableLiveHeaderCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.tableLiveColHideBtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 1px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+th:hover > .tableLiveHeaderCell > .tableLiveColHideBtn,
+.tableLiveColHideBtn:focus-visible {
+  opacity: 0.75;
+}
+
+.tableLiveColHideBtn:hover {
+  opacity: 1;
+  color: var(--danger-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tableLiveColHideBtn { transition: none; }
+}
+
 /* Double-click any live text on the canvas (table cell, TOC row, field
    value, text box) to edit it in place — see ElementPreview's
    InlineEditableText. Inherits the surrounding element's own font/color/

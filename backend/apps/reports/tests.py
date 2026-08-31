@@ -839,6 +839,36 @@ class ResolveTableTests(SimpleTestCase):
             table = resolve_table(source, cfg, ctx, {"item": None})
             self.assertIsNotNone(table, source)
 
+    def test_hidden_cols_drops_the_column_from_header_and_every_row(self):
+        """A bound table's `hidden_cols` prop removes those columns from this
+        report's view — the column-wise twin of `hidden_rows` (2026-08-30).
+        Checked on every list-shaped source at once, since the drop happens in
+        one shared place (`apply_table_overrides`) and a source that resolves
+        through its own helper is exactly where it went missing before."""
+        cfg = default_config()
+        for source in ("zone_progress", "discipline_progress", "progress_compare",
+                       "milestones", "invoices", "submittals", "delays",
+                       "critical_path_delays", "activity_schedule"):
+            full = resolve_table(source, cfg, _full_ctx(), {"item": None}, raw=True)
+            if not full or full.get("kind") != "data" or len(full["header"]) < 2:
+                continue
+            cut = resolve_table(source, cfg, _full_ctx(), {"item": None}, raw=True,
+                                style={"hidden_cols": [1]})
+            self.assertEqual(len(cut["header"]), len(full["header"]) - 1, source)
+            self.assertNotIn(full["header"][1], cut["header"], source)
+            for row in cut["rows"]:
+                self.assertEqual(len(row), len(full["header"]) - 1, source)
+
+    def test_hidden_cols_is_ignored_for_a_hierarchy_table(self):
+        """A hierarchy row is a dict whose columns carry fixed meanings
+        (name/actual/previous/planned), so dropping one would change what the
+        remaining values represent rather than just hiding a column."""
+        cfg = default_config()
+        full = resolve_table("hierarchy_progress", cfg, _full_ctx(), {"item": None}, raw=True)
+        cut = resolve_table("hierarchy_progress", cfg, _full_ctx(), {"item": None}, raw=True,
+                            style={"hidden_cols": [1]})
+        self.assertEqual(cut["header"], full["header"])
+
     def test_scope_zone_id_narrows_zone_progress_to_one_zone(self):
         # Phase 4's scope-picker — bind this one table element to a single
         # zone instead of the whole project (the الموقف التنفيذي use case:

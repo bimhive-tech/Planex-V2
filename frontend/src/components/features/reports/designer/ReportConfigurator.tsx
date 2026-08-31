@@ -19,6 +19,11 @@ import { PageStrip } from "./PageStrip";
 import styles from "./designer.module.css";
 
 const DEFAULT_REPEAT: PageRepeat = { source: "photos", mode: "chunk", chunk_size: 4 };
+/** Matches LayoutEditor's own former limit — see the history block below. */
+const MAX_HISTORY = 50;
+/** Stands in for "the shared header/footer surface" in the undo history,
+ * which isn't a page in `pages` but is edited through the same canvas. */
+const HEADER_PAGE_ID = "__header__";
 
 interface Props {
   design: PageDesign;
@@ -91,6 +96,63 @@ export function ReportConfigurator({
   // (the list re-orders live) can't leave the drag pointing at the wrong row.
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  // Document-level undo/redo. It lives HERE, not in LayoutEditor, because
+  // LayoutEditor is remounted on every page switch (see its `key` below) —
+  // history kept inside it was wiped each time, so a stray trackpad swipe
+  // (which pages the canvas) permanently destroyed the undo stack for the
+  // page you were working on (2026-08-30).
+  //
+  // Each entry records WHICH page it belongs to: undoing has to put the
+  // elements back on the page they came from, and bring you to that page so
+  // you can see what changed — applying page A's elements to page B would be
+  // silent corruption.
+  const undoStack = useRef<{ pageId: string; elements: LayoutElement[] }[]>([]);
+  const redoStack = useRef<{ pageId: string; elements: LayoutElement[] }[]>([]);
+  const [, setHistoryTick] = useState(0);
+
+  function writePageElements(pageId: string, els: LayoutElement[]) {
+    if (pageId === HEADER_PAGE_ID) {
+      onMasterElementsChange?.(() => els);
+      return;
+    }
+    onChange((prev) => prev.map((p) => (p.id === pageId ? { ...p, elements: els } : p)));
+  }
+
+  function readPageElements(pageId: string): LayoutElement[] {
+    if (pageId === HEADER_PAGE_ID) return masterElements ?? [];
+    return pages.find((p) => p.id === pageId)?.elements ?? [];
+  }
+
+  const history = {
+    /** Snapshot of `pageId` as it was BEFORE the change about to be applied. */
+    record(pageId: string, els: LayoutElement[]) {
+      undoStack.current.push({ pageId, elements: els });
+      if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
+      redoStack.current = [];
+      setHistoryTick((t) => t + 1);
+    },
+    undo() {
+      const entry = undoStack.current.pop();
+      if (!entry) return;
+      redoStack.current.push({ pageId: entry.pageId, elements: readPageElements(entry.pageId) });
+      writePageElements(entry.pageId, entry.elements);
+      if (entry.pageId === HEADER_PAGE_ID) setEditMode("header");
+      else { setEditMode("page"); setActiveId(entry.pageId); }
+      setHistoryTick((t) => t + 1);
+    },
+    redo() {
+      const entry = redoStack.current.pop();
+      if (!entry) return;
+      undoStack.current.push({ pageId: entry.pageId, elements: readPageElements(entry.pageId) });
+      writePageElements(entry.pageId, entry.elements);
+      if (entry.pageId === HEADER_PAGE_ID) setEditMode("header");
+      else { setEditMode("page"); setActiveId(entry.pageId); }
+      setHistoryTick((t) => t + 1);
+    },
+    get canUndo() { return undoStack.current.length > 0; },
+    get canRedo() { return redoStack.current.length > 0; },
+  };
   // Set right before a scroll-triggered page change (see navigatePage below)
   // so the freshly-mounted next page starts scrolled to the edge you'd
   // naturally continue from — top when moving forward, bottom when moving
@@ -514,6 +576,8 @@ export function ReportConfigurator({
       tocEntries={tocEntries}
       ownPageId={active.id}
       labels={labels}
+      history={history}
+      historyPageId={editingHeader ? HEADER_PAGE_ID : active.id}
       // 2026-08-26 (client ask): the bottom Canva-style page-thumbnail
       // strip is gone from the report Customize tab specifically — the
       // left page list already covers everything it did (select/add/

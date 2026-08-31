@@ -344,6 +344,38 @@ function RowHideButton({ onHide }: { onHide: () => void }) {
   );
 }
 
+/** A header cell that can drop its whole column from this report's view —
+ * the column-wise twin of RowHideButton. A bound table often carries more
+ * columns than the page can hold, and until this existed the only remedies
+ * were shrinking the font or turning the page landscape (2026-08-30). */
+function HeaderCell({
+  text, onCommit, onHideColumn,
+}: {
+  text: string;
+  onCommit?: (v: string) => void;
+  onHideColumn?: () => void;
+}) {
+  return (
+    <th>
+      <div className={styles.tableLiveHeaderCell}>
+        <TableCell text={text} onCommit={onCommit} />
+        {onHideColumn && (
+          <button
+            type="button"
+            className={styles.tableLiveColHideBtn}
+            onClick={onHideColumn}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`Hide the "${text}" column`}
+            title={`Hide the "${text}" column`}
+          >
+            <Icon name="close" size={9} />
+          </button>
+        )}
+      </div>
+    </th>
+  );
+}
+
 /** Mirrors pdf_tables.py's _pct_or_dash exactly (one decimal place, an
  * em-dash for a missing value) — hierarchy rows are numbers, not
  * pre-formatted strings, unlike every other table kind. */
@@ -453,6 +485,22 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
         onElementChange({ ...el, props: { ...p, hidden_rows: [...(hiddenRows ?? []), originalIndex] } });
       }
     : undefined;
+  // Same idea for columns. Indices refer to the ORIGINAL column order, so
+  // hiding two columns one after the other can't shift the second target.
+  const hiddenCols = p.hidden_cols as number[] | undefined;
+  const originalColIndices = (shown: number) => {
+    const hidden = new Set(hiddenCols ?? []);
+    const out: number[] = [];
+    for (let i = 0; out.length < shown; i++) if (!hidden.has(i)) out.push(i);
+    return out;
+  };
+  // "hierarchy" columns carry fixed meanings, so dropping one would change
+  // what the rest represent — the backend ignores hidden_cols there too.
+  const commitHideCol = onElementChange && live?.status === "ok" && live.kind !== "hierarchy"
+    ? (originalIndex: number) => {
+        onElementChange({ ...el, props: { ...p, hidden_cols: [...(hiddenCols ?? []), originalIndex] } });
+      }
+    : undefined;
 
   if (live) {
     if (live.status !== "ok") {
@@ -465,6 +513,9 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
     // overrides/hidden_rows keys stay in the same index space as the data
     // actually came from, not the shorter post-filter list.
     const rowIdx = originalRowIndices(live.rows.length, hiddenRows);
+    // Same recovery for columns — the header we render has hidden ones
+    // already removed server-side, so map back to original column indices.
+    const colIdx = originalColIndices(live.header?.length ?? 0);
 
     if (live.kind === "info") {
       return (
@@ -540,9 +591,17 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
           <thead>
             <tr>
               {commitHideRow && <th className={styles.tableLiveRowHandle} />}
-              {live.header.map((h, i) => (
-                <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
-              ))}
+              {live.header.map((h, i) => {
+                const oc = colIdx[i];
+                return (
+                  <HeaderCell
+                    key={i}
+                    text={h}
+                    onCommit={commitCell && ((v) => commitCell(`hc${oc}`, v))}
+                    onHideColumn={commitHideCol && (() => commitHideCol(oc))}
+                  />
+                );
+              })}
             </tr>
           </thead>
           <tbody>

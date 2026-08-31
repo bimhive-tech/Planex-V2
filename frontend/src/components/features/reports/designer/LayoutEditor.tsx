@@ -83,6 +83,19 @@ interface Props {
   previewsReady?: boolean;
   /** This report's effective label dict — see ReportLabels. */
   labels?: ReportLabels;
+  /** Document-level undo/redo owned by the parent, so history survives a page
+   * switch (which remounts this component — see the `key` in
+   * ReportConfigurator). When omitted, this editor keeps its own local
+   * stacks, which is all a single-surface host needs. */
+  history?: {
+    record: (pageId: string, elements: LayoutElement[]) => void;
+    undo: () => void;
+    redo: () => void;
+    canUndo: boolean;
+    canRedo: boolean;
+  };
+  /** Which page the parent's history should attribute changes to. */
+  historyPageId?: string;
   /** Every page in the current draft with its real page number — see
    * ReportConfigurator. */
   tocEntries?: TocEntry[];
@@ -110,7 +123,7 @@ interface Props {
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
   pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId, bottomPanel,
-  onNavigatePage, initialScrollToBottom = false,
+  onNavigatePage, initialScrollToBottom = false, history, historyPageId,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
@@ -143,12 +156,18 @@ export function LayoutEditor({
   // so the toolbar buttons need their own trigger to know when to update
   // their enabled/disabled state.
   const [, setHistoryTick] = useState(0);
-  const canUndo = undoStack.current.length > 0;
-  const canRedo = redoStack.current.length > 0;
+  const canUndo = history ? history.canUndo : undoStack.current.length > 0;
+  const canRedo = history ? history.canRedo : redoStack.current.length > 0;
 
   /** Every mutation goes through here instead of onElementsChange directly,
-   * so undo has a snapshot of what came before it. */
+   * so undo has a snapshot of what came before it. Delegates to the parent's
+   * document-level history when one is supplied (see the `history` prop). */
   function commit(updater: (prev: LayoutElement[]) => LayoutElement[]) {
+    if (history && historyPageId) {
+      history.record(historyPageId, elementsRef.current);
+      onElementsChange(updater);
+      return;
+    }
     undoStack.current.push(elementsRef.current);
     if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
     redoStack.current = [];
@@ -157,6 +176,7 @@ export function LayoutEditor({
   }
 
   function undo() {
+    if (history) { history.undo(); return; }
     const previous = undoStack.current.pop();
     if (!previous) return;
     redoStack.current.push(elementsRef.current);
@@ -165,6 +185,7 @@ export function LayoutEditor({
   }
 
   function redo() {
+    if (history) { history.redo(); return; }
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(elementsRef.current);

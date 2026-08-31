@@ -884,6 +884,7 @@ def resolve_table(
     # data), but a report author can still hide specific ones from this one
     # report's own view — a row clicked on the canvas (see TablePreview.tsx).
     hidden_rows = (style or {}).get("hidden_rows") or []
+    hidden_cols = (style or {}).get("hidden_cols") or []
 
     if source == "item.children":
         children = (scope.get("item") or {}).get("children") or []
@@ -893,7 +894,7 @@ def resolve_table(
                  f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
                  f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
         header = [labels["col_zone"], labels["col_actual"], labels["col_planned"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 30 * mm, 30 * mm], avail_width=avail_width)
@@ -964,7 +965,7 @@ def resolve_table(
         rows = [[k, v] for k, v in rows if v and v != "—"]
         if not rows:
             return None
-        apply_table_overrides("info", None, rows, overrides, hidden_rows)
+        apply_table_overrides("info", None, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "info", "header": None, "rows": rows}
         return _info_table(cfg, styles, rows, rtl, avail_width=avail_width, highlight_labels=highlight_labels)
@@ -977,7 +978,7 @@ def resolve_table(
             return None
         rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
         header = [labels["col_zone"], labels["col_progress"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 40 * mm], avail_width=avail_width)
@@ -996,7 +997,7 @@ def resolve_table(
             for child in zone["children"]:
                 rows.append({"name": child["name"], "actual": child["actual"], "previous": child["previous"],
                              "planned": child["planned"], "level": 1})
-        apply_table_overrides("hierarchy", header, rows, overrides, hidden_rows)
+        apply_table_overrides("hierarchy", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "hierarchy", "header": header, "rows": rows}
         return _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=avail_width)
@@ -1034,7 +1035,7 @@ def resolve_table(
                   labels.get("col_this_month", "This month %"), labels["col_previous"],
                   labels.get("col_performance_factor", "Performance factor %"),
                   labels.get("col_variance", "Variance %")]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
@@ -1048,7 +1049,7 @@ def resolve_table(
         rows = [[r["name"]] + [_pct_or_dash(r.get(d)) for d in
                                ("concrete", "architecture", "electrical", "mechanical", "other")]
                 for r in discipline]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
@@ -1062,7 +1063,7 @@ def resolve_table(
                  f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
                  f"{z['progress']:.1f}%"] for z in zones]
         header = [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm],
@@ -1074,7 +1075,7 @@ def resolve_table(
             return None
         rows = [[m["title"], _fmt_date(m["date"]), m["status"].replace("_", " ").title()] for m in milestones]
         header = [labels["col_milestone"], labels["col_date"], labels["col_status"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=avail_width)
@@ -1086,7 +1087,7 @@ def resolve_table(
         rows = [[i["name"], f"{i['value']:,.2f}", _fmt_date(i["date"]) if i["date"] else "—"] for i in invoices]
         rows.append([labels.get("col_total", "Total"), f"{ctx.get('invoices_total', 0):,.2f}", ""])
         header = [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=avail_width)
@@ -1098,7 +1099,7 @@ def resolve_table(
         header = [labels.get("col_invoice", "Item"), labels.get("col_type", "Type"),
                   labels.get("col_discipline", "Discipline"), labels["col_status"]]
         rows = [[r["title"], r["type"], r["discipline"], r["status"]] for r in sub_rows]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
@@ -1119,18 +1120,20 @@ def resolve_table(
         rows = [[d["title"], str(d["impact_days"]), status_labels.get(d["status"], d["status"].title())]
                 for d in delays]
         header = [labels["col_delay"], labels["col_impact"], labels["col_status"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=avail_width)
 
     if source == "detailed_progress":
         return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width, raw=raw,
-                                                 overrides=overrides, hidden_rows=hidden_rows)
+                                                 overrides=overrides, hidden_rows=hidden_rows,
+                                                 hidden_cols=hidden_cols)
 
     if source == "activity_schedule":
         return _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=avail_width, raw=raw,
-                                                 overrides=overrides, hidden_rows=hidden_rows)
+                                                 overrides=overrides, hidden_rows=hidden_rows,
+                                                 hidden_cols=hidden_cols)
 
     if source == "critical_path_delays":
         rows_data = ctx.get("critical_path") or []
@@ -1139,7 +1142,7 @@ def resolve_table(
         rows = [[r["name"], _fmt_date(r["planned_finish"]), _fmt_date(r["forecast_finish"]), str(r["delay_days"])]
                 for r in rows_data]
         header = [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm],
@@ -1158,7 +1161,7 @@ def resolve_table(
         if not header:
             return None
         rows = [[str(cell) for cell in row] for row in (custom.get("rows") or [])]
-        apply_table_overrides("data", header, rows, overrides, hidden_rows)
+        apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
@@ -1166,7 +1169,8 @@ def resolve_table(
     return None
 
 
-def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None, hidden_rows=None):
+def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None,
+                                     hidden_rows=None, hidden_cols=None):
     """Detailed activity grid — v1 scope: only the first zone's grid, only its
     first 8 columns (the legacy `_grid_section` splits wide grids across
     multiple pages/columns; reproducing that needs a 2D repeat, deferred)."""
@@ -1186,13 +1190,14 @@ def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=Fal
     labels = cfg["labels"]
     header = [labels.get("col_task", "Task")] + grid["columns"][:8]
     rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
-    apply_table_overrides("data", header, rows, overrides, hidden_rows)
+    apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
         return {"kind": "data", "header": header, "rows": rows}
     return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
 
-def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None, hidden_rows=None):
+def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None,
+                                     hidden_rows=None, hidden_cols=None):
     """Every activity's P6 duration/SPI/schedule-variance columns — computed
     lazily and cached in ctx, the same pattern as the detailed-progress grid
     above, since a real project can carry tens of thousands of activities and
@@ -1228,7 +1233,7 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=Fal
          n(r["remaining_duration"]), n(r["schedule_performance_index"], 2), n(r["schedule_variance"])]
         for r in rows_data
     ]
-    apply_table_overrides("data", header, rows, overrides, hidden_rows)
+    apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
         return {"kind": "data", "header": header, "rows": rows}
     return _data_table(cfg, styles, header, rows, avail_width=avail_width)

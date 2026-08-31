@@ -3,6 +3,7 @@ We only include data we actually have; missing fields are simply omitted.
 
 Planned %, previous %, duration and delay are *derived* from data we already
 hold (project dates + dated snapshots) — no extra manual entry needed."""
+import copy
 import datetime
 
 from django.db.models import Sum
@@ -429,6 +430,50 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
             "duration": _zone_duration(stage, project, as_of, planned_pct=planned, actual_pct=actual),
         })
     return rows
+
+
+def copy_layout_override(override):
+    """Deep-copy a report's saved layout for a duplicate of that report.
+
+    Two things are deliberately NOT carried across, both because the new
+    report doesn't own them:
+
+    * `upload_id` / `upload_url` on an image element point at a ReportImage
+      belonging to the SOURCE report. The images aren't copied (a new month
+      has new photos), so a verbatim copy would leave the duplicate pointing
+      at another report's files — broken at best, a cross-report leak at
+      worst. Those elements come back as an empty upload box.
+    * `overrides` / `hidden_rows` on a table are keyed by row/column POSITION
+      in last period's data. Re-applied to a new month's rows they would
+      silently rewrite unrelated cells and drop unrelated rows, which is far
+      worse than making the user redo a few edits.
+
+    Page and element ids are kept: they're only ever meaningful inside one
+    report's own layout blob, so duplicates across reports can't collide.
+    """
+    if not override:
+        return None
+    out = copy.deepcopy(override)
+    for page in ((out.get("layout") or {}).get("pages")) or []:
+        for el in page.get("elements") or []:
+            _strip_report_bound_props(el)
+    for el in ((out.get("page_design") or {}).get("master_elements")) or []:
+        _strip_report_bound_props(el)
+    return out
+
+
+def _strip_report_bound_props(el):
+    """Clear the props on one element that belong to the report it came from
+    — see copy_layout_override for why each one can't travel."""
+    props = el.get("props")
+    if not isinstance(props, dict):
+        return
+    if el.get("type") == "image" and props.get("source") == "upload":
+        props.pop("upload_id", None)
+        props.pop("upload_url", None)
+    if el.get("type") == "table":
+        props.pop("overrides", None)
+        props.pop("hidden_rows", None)
 
 
 def _financial_percent_complete(project, schedule_import=None):

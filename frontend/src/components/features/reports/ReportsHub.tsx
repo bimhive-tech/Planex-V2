@@ -3,6 +3,7 @@
 // Reports Hub: every generated report in the company, with create/edit and
 // on-demand PDF view/download. Templates live on a sibling tab.
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
@@ -17,6 +18,7 @@ import { ReportFormDrawer } from "./ReportFormDrawer";
 import styles from "./reports.module.css";
 
 export function ReportsHub({ canManage }: { canManage: boolean }) {
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -30,6 +32,24 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
   // Same-origin so the httpOnly auth cookie rides along; opens inline in a tab.
   function viewPdf(r: ReportRow) {
     window.open(`${API_BASE}/reports/${r.id}/pdf/`, "_blank", "noopener");
+  }
+
+  /** Start next month from last month's report — copies the whole setup
+   * including its customised layout, so the pages/tables/edits don't have to
+   * be rebuilt by hand every cycle. Dates and photos deliberately don't carry
+   * over (see the backend's `duplicate` action). */
+  async function handleDuplicate(r: ReportRow) {
+    setActionError(null);
+    try {
+      const copy = await api.post<ReportRow>(`/reports/${r.id}/duplicate/`, {
+        title: `${r.title} (copy)`,
+      });
+      reload();
+      // Straight into the copy — the next thing you do is set its period.
+      router.push(ROUTES.report(copy.id));
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't duplicate report.");
+    }
   }
 
   async function handleDelete(r: ReportRow) {
@@ -80,6 +100,7 @@ export function ReportsHub({ canManage }: { canManage: boolean }) {
               report={r}
               canManage={canManage}
               onView={viewPdf}
+              onDuplicate={handleDuplicate}
               onDelete={handleDelete}
             />
           ))}

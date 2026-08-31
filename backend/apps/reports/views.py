@@ -25,7 +25,7 @@ from .serializers import (
     ReportTemplateSerializer,
     ReportWriteSerializer,
 )
-from .services import build_report_context
+from .services import build_report_context, copy_layout_override
 
 class ReportsAccess(BasePermission):
     """EXPORT_REPORTS gates all report/template access — read, download, edit."""
@@ -129,6 +129,50 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company, created_by=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def duplicate(self, request, pk=None):
+        """Copy this report's whole setup — including its customised layout —
+        into a new Draft, so next month's report starts where last month's
+        finished instead of from the template again.
+
+        A monthly report is the same report twelve times, and every layout
+        change (moved tables, hidden rows, retyped headers, per-page
+        orientation) previously had to be redone by hand each cycle, because
+        `layout_override` lives on the report and nothing copied it. That was
+        the single biggest recurring cost reported by a real user walkthrough
+        (2026-08-30).
+
+        What carries over is everything that describes HOW the report is put
+        together; what doesn't is anything tied to the period it covered:
+        dates, status, and the uploaded images (a new month has new photos).
+        The copy is always a Draft regardless of the source's status —
+        duplicating an approved report must not produce a second approved one.
+        """
+        source = self.get_object()
+        title = (request.data.get("title") or "").strip() or f"{source.title} (copy)"
+        copy = Report.objects.create(
+            company=source.company,
+            project=source.project,
+            template=source.template,
+            title=title,
+            report_number=(request.data.get("report_number") or "").strip(),
+            # Period/date deliberately blank — they describe the covered month,
+            # not the layout, and a silently inherited date would make the copy
+            # report last month's figures under this month's name.
+            report_date=None,
+            period_start=None,
+            period_finish=None,
+            description=source.description,
+            description_html=source.description_html,
+            scope_ids=list(source.scope_ids or []),
+            # Progress photos are per-period content, not layout.
+            progress_image_ids=[],
+            status=Report.Status.DRAFT,
+            created_by=request.user,
+            layout_override=copy_layout_override(source.layout_override),
+        )
+        return Response(ReportListSerializer(copy).data, status=201)
 
     @action(detail=True, methods=["get"])
     def data(self, request, pk=None):

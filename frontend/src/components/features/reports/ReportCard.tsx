@@ -23,10 +23,11 @@ interface Props {
   report: ReportRow;
   canManage: boolean;
   onView: (r: ReportRow) => void;
+  onDuplicate: (r: ReportRow) => void;
   onDelete: (r: ReportRow) => void;
 }
 
-export function ReportCard({ report, canManage, onView, onDelete }: Props) {
+export function ReportCard({ report, canManage, onView, onDuplicate, onDelete }: Props) {
   return (
     <article className={styles.card}>
       <div className={styles.cardTop}>
@@ -55,9 +56,17 @@ export function ReportCard({ report, canManage, onView, onDelete }: Props) {
         </button>
         {canManage && (
           <>
-            <Link className={styles.iconBtn} href={`${ROUTES.reports}/${report.id}`} aria-label="Open builder" title="Open builder">
+            <Link className={styles.iconBtn} href={ROUTES.report(report.id)} aria-label="Open builder" title="Open builder">
               <Icon name="edit" size={16} />
             </Link>
+            <button
+              className={styles.iconBtn}
+              onClick={() => onDuplicate(report)}
+              aria-label="Duplicate for next period"
+              title="Duplicate for next period — keeps this report's pages and layout"
+            >
+              <Icon name="copy" size={16} />
+            </button>
             <button
               className={`${styles.iconBtn} ${styles.danger}`}
               onClick={() => onDelete(report)}

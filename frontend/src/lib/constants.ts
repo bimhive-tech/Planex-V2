@@ -12,6 +12,7 @@ export const ROUTES = {
   dashboard: "/dashboard",
   settings: "/settings",
   reports: "/reports",
+  report: (id: string) => `/reports/${id}`,
   reportTemplates: "/reports/templates",
   notifications: "/notifications",
   account: "/account",

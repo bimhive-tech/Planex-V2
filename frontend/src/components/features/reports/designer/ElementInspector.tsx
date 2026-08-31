@@ -235,6 +235,7 @@ export function ElementInspector({
   // Manual edits carried by a bound table — surfaced (and made reversible)
   // in the table block below.
   const hiddenRowCount = Array.isArray(el.props.hidden_rows) ? el.props.hidden_rows.length : 0;
+  const hiddenColCount = Array.isArray(el.props.hidden_cols) ? el.props.hidden_cols.length : 0;
   const overrideCount = el.props.overrides && typeof el.props.overrides === "object"
     ? Object.keys(el.props.overrides as Record<string, unknown>).length
     : 0;
@@ -365,8 +366,9 @@ export function ElementInspector({
       {el.type === "table" && !!el.props.source && el.props.source !== "custom" && (
         <div className={styles.uploadBlock}>
           <p className={styles.panelHint}>
-            Click a row&apos;s × on the canvas to hide it from this report, or double-click a cell to
-            override its text — both edit this table directly on the page.
+            Click a row&apos;s × on the canvas to hide it, or a column header&apos;s × to drop that
+            column; double-click any cell to override its text. All three edit this table
+            directly on the page.
           </p>
           {/* Hiding a row used to be one-way: nothing anywhere could bring it
               back, so a misclick was only recoverable by undo (and only before
@@ -382,6 +384,19 @@ export function ElementInspector({
                 onClick={() => setProp("hidden_rows", [])}
               >
                 Show all rows
+              </Button>
+            </div>
+          )}
+          {hiddenColCount > 0 && (
+            <div className={styles.propRow}>
+              <span className={styles.panelHint}>
+                {hiddenColCount} column{hiddenColCount === 1 ? "" : "s"} hidden
+              </span>
+              <Button
+                type="button" variant="secondary" size="sm"
+                onClick={() => setProp("hidden_cols", [])}
+              >
+                Show all columns
               </Button>
             </div>
           )}

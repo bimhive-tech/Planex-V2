@@ -2101,3 +2101,60 @@ gets what's left, so the 56mm boxes offered only 41mm against a 45mm minimum
 and were skipped. Silencing the "too small" placeholder (above) is what made
 this invisible in the PDF rather than obvious — the trade-off is deliberate,
 but it means the Customize tab is now the only place that surfaces it.
+
+---
+
+## 2026-08-30 — Duplicate report, document-level undo, hide table columns
+
+### Duplicate a report
+
+A monthly report is the same report twelve times, but `layout_override` lives
+on the report and nothing copied it, so every layout change had to be rebuilt
+by hand each cycle. `POST /reports/<id>/duplicate/` now copies the whole setup
+including the customised layout, reached from a copy button on both report
+lists.
+
+What carries over is everything describing HOW the report is assembled. What
+doesn't, and why:
+
+- **Dates/period** — they describe the covered month, not the layout. An
+  inherited date would make the copy report last month's figures under this
+  month's name.
+- **Status** — always Draft. Duplicating an approved report must not produce a
+  second approved one.
+- **Photos** — per-period content.
+- **`upload_id`/`upload_url` on image elements** — they point at the SOURCE
+  report's ReportImage rows, which aren't copied. A verbatim copy would leave
+  the duplicate rendering another report's files.
+- **Table `overrides`/`hidden_rows`** — keyed by row/column POSITION in last
+  period's data. Re-applied to a new month's rows they'd silently rewrite
+  unrelated cells and drop unrelated rows, which is worse than redoing a few
+  edits by hand.
+
+### Undo survives a page switch
+
+The undo stacks lived in `LayoutEditor`, which `ReportConfigurator` remounts on
+every page change — so history was wiped each time, and a stray trackpad swipe
+(which pages the canvas) destroyed it permanently. History now lives in
+`ReportConfigurator`, and each entry records which page it belongs to: undoing
+puts the elements back on the page they came from and brings you to that page,
+because applying page A's elements to page B would be silent corruption.
+
+### Hide a column on a bound table
+
+Bound tables often carry more columns than the page holds, and the only
+remedies were shrinking the font or turning the page landscape. `hidden_cols`
+now mirrors `hidden_rows` end to end: an × on each column header, a "Show all
+columns" reverse in the inspector, and the same drop applied server-side so the
+PDF matches. Ignored for "hierarchy" tables, whose columns carry fixed
+meanings (name/actual/previous/planned) — dropping one there would change what
+the remaining values represent rather than just hiding a column.
+
+**Process note:** threading `hidden_cols` through 15 call sites with a regex
+put it into two that live inside helper functions where it wasn't in scope
+(`_resolve_detailed_progress_table`, `_resolve_activity_schedule_table`) —
+`NameError` on both, caught only by the test suite, since neither tsc nor the
+dev server sees Python. Second time this session a bulk regex edit has bitten.
+Added `test_hidden_cols_drops_the_column_from_header_and_every_row`, which
+walks every list-shaped source precisely because a source resolving through
+its own helper is where this went missing.
