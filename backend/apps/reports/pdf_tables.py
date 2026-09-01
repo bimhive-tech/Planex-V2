@@ -299,10 +299,16 @@ def _auto_col_max_widths(col_widths, n_cols, avail_width):
     widths = col_widths if col_widths is not None else [None] * n_cols
     fixed_sum = sum(w for w in widths if w is not None)
     none_count = sum(1 for w in widths if w is None)
+    # A FIXED column reports its own width, not None. Returning None for it
+    # meant _data_table fell through to the unprotected `shape(h)` branch for
+    # that column's header — so a fixed-width header long enough to wrap was
+    # shaped whole and then re-broken left-to-right, putting its first word on
+    # the last line ("نهاية المشروع التعاقدية" reading as
+    # "المشروع التعاقدية" / "نهاية"). Auto columns still share the leftover.
     if not none_count:
-        return None
+        return [max(w - CELL_H_PADDING, MIN_COL_WIDTH) for w in widths]
     share = max((avail_width - fixed_sum) / none_count - CELL_H_PADDING, MIN_COL_WIDTH)
-    return [share if w is None else None for w in widths]
+    return [share if w is None else max(w - CELL_H_PADDING, MIN_COL_WIDTH) for w in widths]
 
 
 def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
