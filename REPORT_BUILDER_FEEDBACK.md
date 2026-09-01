@@ -2158,3 +2158,75 @@ dev server sees Python. Second time this session a bulk regex edit has bitten.
 Added `test_hidden_cols_drops_the_column_from_header_and_every_row`, which
 walks every list-shaped source precisely because a source resolving through
 its own helper is where this went missing.
+
+---
+
+## 2026-09-01 — Render/review loop: eight rounds to a ship verdict
+
+Rendered the report, read the page images against the client's reference, fixed
+what that surfaced, re-rendered, and repeated until an independent critic pass
+returned SHIP. Eight rounds. 134 pages down to 94.
+
+The method mattered more than any single fix: **for Arabic output, text
+extraction lies.** PyMuPDF reorders RTL text, so a correct page can read as
+garbage and a broken one can read as fine. Several early findings were
+extraction artifacts; the two worst real defects (the reversed description
+paragraph, the blank p41) were invisible in extracted text and obvious in the
+rendered image. Everything here was confirmed by looking at the page.
+
+### Correctness defects — output that misrepresented the project
+
+- Zone charts capped at 10 and 12 rows silently dropped the THREE WORST zones
+  (54%, 61%, 67%) from the executive status page.
+- The Gantt sliced to 25 rows, which meant one zone plus its buildings — 22 of
+  251 rows — presented as the project schedule. Now falls back to zone level.
+- The discipline table keyed rows on a bare unit name, so "Building 30"
+  appeared twice on one page with 100.0% and 75.4%.
+- Two pies plotted a total beside its own parts, so the total took half the
+  disc by construction and the chart said the same thing whatever the project
+  was doing. The reference makes the same mistake; matching it wasn't worth a
+  chart that can never convey anything.
+
+### Rendering defects
+
+Reversed Arabic paragraph (block separators lost upstream, so shape() reordered
+one long run and reportlab re-broke it left-to-right); bracketed Latin runs
+mirroring on the contents page; RTL wrap order on captions, titles and headers;
+continuation pages reusing the source element's box, wasting half of 16 pages;
+landscape footers falling off the page so 13 pages carried no number; a chart
+that drew nothing still consuming a figure number; ~320 English enum values in
+an all-Arabic report.
+
+### Four regressions I introduced, all caught by re-rendering
+
+1. The caption check resolved every element twice more per pass, turning a
+   10-minute render into 37+ minutes. Memoized; back to 1m26s.
+2. Flipping skip_master off everywhere to fix missing page numbers also hit the
+   COVER, stamping a running header and page number onto it.
+3. The landscape re-fit computed available height as (box - caption) while the
+   real content also subtracts the title strip, and its re-balance step
+   collapsed two charts onto the same y — p41 rendered completely blank, on a
+   page the contents list advertises.
+4. Removing panels that drew nothing was individually right each time, but
+   together hollowed out a page until its only remaining content duplicated
+   another page.
+
+Each was correct in isolation and only failed at whole-document scale.
+
+### One false verification, worth remembering
+
+I reported "last page 81.8% filled" from a metric measuring the vertical span
+between the first and last text block — which runs header to page number
+regardless of what sits between. It could not detect the defect it was cited to
+prove, and the critic caught the page byte-identical to before the "fix". The
+underlying bug was real: the tail balancer scaled only the continuation height,
+never the first chunk, so it was a no-op. Page fill is now measured as actual
+non-white ink coverage.
+
+### Accepted follow-up (not blocking)
+
+Discipline table's first column too narrow (wraps every row, doubling an
+18-page section); captions stranded at the page foot on the photo pages;
+continuation pages carry no "(تابع)" marker; Gantt row labels lack their phase
+prefix; two adjacent tables label different quantities "المخطط %"; a title and
+its caption disagree on two pages.
