@@ -126,6 +126,45 @@ def el_box(el: dict, page_h_mm: float):
     )
 
 
+def _master_box(el: dict, design: dict, page_h_mm: float, default_h_mm: float):
+    """(x, y, w, h) in points for one master element on a page whose height may
+    differ from the one the master was authored against.
+
+    Header-band elements keep their distance from the TOP; footer-band ones
+    keep their distance from the BOTTOM. Anything in between is left on its
+    authored y. See _render_page for the bug this fixes."""
+    if abs(page_h_mm - default_h_mm) < 0.01:
+        return el_box(el, page_h_mm)
+    y, h = float(el["y"]), float(el["h"])
+    # "Below the midpoint of the page it was authored for" is the practical
+    # test for a footer element — the master only ever holds a header band and
+    # a footer band, so there's nothing ambiguous in the middle to misclassify.
+    if y + h / 2 > default_h_mm / 2:
+        from_bottom = default_h_mm - (y + h)
+        return (el["x"] * mm, from_bottom * mm, el["w"] * mm, h * mm)
+    return (el["x"] * mm, (page_h_mm - y - h) * mm, el["w"] * mm, h * mm)
+
+
+def _continuation_box(el: dict, design: dict, page_w_mm: float, page_h_mm: float):
+    """(x, y, w, h) in points for a table's overflow on a continuation page.
+
+    Keeps the element's own horizontal placement and width — the columns must
+    line up with the first part of the table — but moves it to the top of the
+    content area and gives it the full height down to the bottom margin, since
+    nothing else is on the page. See _render_page for why."""
+    margin = float(design.get("margin_mm", 0) or 0)
+    header = float(design.get("header_mm", 0) or 0) if design.get("show_header", True) else 0.0
+    footer = float(design.get("footer_mm", 0) or 0) if design.get("show_footer", True) else 0.0
+    top_mm = margin + header
+    avail_h_mm = max(10.0, page_h_mm - top_mm - margin - footer)
+    return (
+        el["x"] * mm,
+        (page_h_mm - top_mm - avail_h_mm) * mm,
+        el["w"] * mm,
+        avail_h_mm * mm,
+    )
+
+
 def has_canvas_layout(cfg: dict) -> bool:
     """True once a template's canvas has real content — at least one page
     with an element or a repeat rule. Drives the legacy-renderer fallback:
@@ -234,15 +273,33 @@ def _render_page(c, design, master_elements, inst: PageInstance, cfg, ctx, page_
     # the running header/footer). A continuation page still gets the running
     # header/footer like any other page of the report.
     if not inst.page.get("skip_master"):
+        # The master is authored against the template's DEFAULT page size. On a
+        # page that flips orientation, anything anchored near the bottom (the
+        # footer band, and the page number in it) has to keep its distance from
+        # the bottom rather than its absolute y — otherwise a footer authored at
+        # y=280 on a 297mm portrait page lands off the end of a 210mm landscape
+        # one and simply never prints. That's why 13 landscape pages carried a
+        # full running header and no page number at all, while the contents and
+        # figure lists cited them by number (2026-08-30).
+        _, default_h_mm = _page_size_mm(design)
         for el in sorted(master_elements, key=lambda e: e.get("z", 0)):
-            _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
+            _draw_element(c, el, _master_box(el, design, page_h_mm, default_h_mm), inst, cfg, ctx)
 
     if inst.continues_element is not None:
         # A synthetic page holding only the overflow of one table — the
         # page's other elements (title, other charts...) already drew on
         # the page(s) before it and shouldn't repeat here.
+        #
+        # The continuation REFLOWS to the top of the content area instead of
+        # reusing the element's own box. A table placed halfway down its
+        # source page (under a heading and a chart) would otherwise start
+        # halfway down every continuation page too, leaving the top half of
+        # each blank — 16 pages of this report were empty to the midpoint
+        # with a 10-row fragment below, which reads as a printing fault
+        # (2026-08-30). Reflowing also fits ~18 rows per page instead of 10,
+        # matching what the reference report's own continuation pages do.
         el = inst.continues_element
-        _draw_element(c, el, el_box(el, page_h_mm), inst, cfg, ctx)
+        _draw_element(c, el, _continuation_box(el, design, page_w_mm, page_h_mm), inst, cfg, ctx)
         return
 
     for el in sorted(inst.page.get("elements") or [], key=lambda e: e.get("z", 0)):
@@ -941,7 +998,8 @@ def resolve_table(
             (labels["info_consultant"], p.get("consultant")),
             (labels["info_contractor"], p.get("contractor")),
             (labels.get("info_contractor_consultant", "Contractor's Consultant"), p.get("contractor_consultant")),
-            (labels["info_type"], p.get("type")),
+            # Project type is a model enum too — localize like the rest.
+            (labels["info_type"], enum_label(cfg, p.get("type"))),
             (labels["info_location"], p.get("location")),
             (labels["info_budget"], format_money(p.get("budget"), p.get("budget_currency"))),
             (labels.get("info_contract_value", "Contract value"),
@@ -1381,7 +1439,7 @@ def expand_pages(cfg, ctx, report) -> list:
     return out
 
 
-def _split_table_chunks(table, w, h, *, max_chunks=500) -> list:
+def _split_table_chunks(table, w, h, *, rest_h=None, max_chunks=500) -> list:
     """Break a Table flowable into successive pieces that each fit height h.
 
     `Table.split(w, h)` only ever answers "what fits" + "the remainder" for
@@ -1389,10 +1447,17 @@ def _split_table_chunks(table, w, h, *, max_chunks=500) -> list:
     remainder, the same way a Platypus Frame pages a flowable across as many
     frames as it takes to exhaust it. `max_chunks` is a defensive cap, not a
     real limit — a genuine report table running past 500 pages on its own
-    would mean something else is wrong."""
+    would mean something else is wrong.
+
+    `rest_h` is the height available to every chunk AFTER the first. A
+    continuation page carries nothing but this table, so it reflows to the
+    full content area (see _continuation_box) and is much taller than the
+    source element's own box — splitting every chunk against the source
+    height would leave that extra space empty on every continuation page."""
     chunks = []
     remaining = table
     while remaining is not None and len(chunks) < max_chunks:
+        h = h if not chunks else (rest_h or h)
         _, natural_h = remaining.wrap(w, h)
         if natural_h <= h:
             chunks.append(remaining)
@@ -1464,7 +1529,12 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
             _, natural_h = table.wrap(w, content_h)
             if natural_h <= content_h:
                 continue
-            candidate = _split_table_chunks(table, w, content_h)
+            # Continuation pages hold nothing but this table and reflow to
+            # the full content area, so they fit far more rows than the
+            # source box does — split them against that taller height.
+            page_w_mm, _ = _page_size_mm(design, inst.page)
+            _, _, _, cont_h = _continuation_box(el, design, page_w_mm, page_h_mm)
+            candidate = _split_table_chunks(table, w, content_h, rest_h=cont_h)
             if len(candidate) > 1:
                 overflow_el, chunks = el, candidate
                 break

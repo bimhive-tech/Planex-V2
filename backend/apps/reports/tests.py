@@ -3423,3 +3423,35 @@ class UploadedImageElementTests(TestCase):
         ctx = _sample_ctx()
         data = build_canvas_pdf(self.report, ctx, cfg=merged_config(template.config))
         self.assertTrue(data.startswith(b"%PDF"))
+
+
+class BidiBracketPinningTests(SimpleTestCase):
+    """`shape()` pins a bracketed Latin run left-to-right before the bidi pass.
+
+    Without it, a closing bracket at the END of a Latin run inside an RTL line
+    has no strong character after it, takes the paragraph direction, mirrors,
+    and is reordered to the far side — the contents page printed every zone as
+    "(PH1 - Z(A" instead of "PH1 - Z(A)" (2026-08-30)."""
+
+    def test_bracketed_latin_run_keeps_its_brackets(self):
+        from .pdf_base import shape
+
+        out = shape("لوحات معلومات المناطق — PH1 - Z(A)")
+        self.assertIn("Z(A)", out)
+        self.assertNotIn("(PH1", out)
+
+    def test_a_bare_bracket_after_arabic_is_left_alone(self):
+        """The report number in "مشروع المنصورة 6 (53)" must not be pinned:
+        anchoring the pattern on a digit swallowed the preceding "6" too and
+        re-ordered the running header to "مشروع المنصورة(53) 6"."""
+        from .pdf_base import _pin_ltr_runs
+
+        text = "التقرير الشهري - مشروع المنصورة 6 (53)"
+        self.assertEqual(_pin_ltr_runs(text), text)
+
+    def test_no_direction_marks_survive_into_the_output(self):
+        """Amiri has no glyph for LRM — any left in the shaped string would
+        draw as a notdef box."""
+        from .pdf_base import shape
+
+        self.assertNotIn("\u200e", shape("لوحات معلومات المناطق — PH1 - Z(A)"))

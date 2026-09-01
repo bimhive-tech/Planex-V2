@@ -575,9 +575,14 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
         unit_pw[unit_id][phase.discipline] += w * prog
 
     units = {str(s.id): s for s in scopes.filter(id__in=unit_w.keys())}
+    # A building name repeats across zones ("Building 30" exists under several),
+    # so a table keyed on the bare name shows the same label twice on one page
+    # with different numbers, reading as contradictory data (2026-08-30). Same
+    # disambiguation `_hierarchy_rows` already applies to its zones.
+    unit_display = _disambiguated_names((u.id, u.name, u.parent_id) for u in units.values())
     rows = []
     for uid, by_disc in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
-        row = {"name": units[uid].name}
+        row = {"name": unit_display.get(uid, units[uid].name)}
         for d in disciplines:
             w = by_disc.get(d, 0.0)
             row[d] = round(unit_pw[uid][d] / w, 1) if w else None

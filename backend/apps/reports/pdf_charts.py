@@ -995,6 +995,10 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     need to know about the type split at all."""
     if not rows:
         return None
+    # Local import: pdf_tables is imported by pdf_canvas, which imports
+    # this module — importing it at module level would be circular.
+    from .pdf_tables import enum_label
+
     status_order: list[tuple[str, str]] = []
     seen_status = set()
     disciplines: list[str] = []
@@ -1012,7 +1016,10 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     d = Drawing(width, height)
     chart = HorizontalBarChart()
     label_font_size = 7
-    status_names = [shape(label) for _, label in status_order]
+    # Localize the enum display labels — the same values render Arabic in
+    # the submittals TABLE, so leaving the chart English put both in one
+    # document (2026-08-30).
+    status_names = [shape(enum_label(cfg, label)) for _, label in status_order]
     # YCategoryAxis labels grow leftward from the axis — reserve real width
     # for the longest one instead of a fixed guess, so "Approved with
     # comments" doesn't clip the way a small fixed margin did.
@@ -1032,7 +1039,7 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     min_side_legend_w = 25 * mm
     side_legend = width - label_w - legend_w - 8 >= min_side_legend_w
     palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
-    swatches = [(palette[i % len(palette)], disciplines[i]) for i in range(len(disciplines))]
+    swatches = [(palette[i % len(palette)], enum_label(cfg, disciplines[i])) for i in range(len(disciplines))]
     legend_rows = 0
     if not side_legend:
         legend_rows = _wrapped_legend_rows(swatches, width, font_size=6)

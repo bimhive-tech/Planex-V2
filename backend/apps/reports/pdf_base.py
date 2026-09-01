@@ -49,6 +49,34 @@ def resolve_arabic(cfg, project) -> bool:
     return has_arabic(project.get("name")) or has_arabic(cfg["labels"].get("summary"))
 
 
+# A Latin run that carries its own brackets, inside otherwise-Arabic text.
+# Matched so it can be pinned left-to-right before the bidi pass — see shape().
+# Must START with a Latin letter. Anchoring on [A-Za-z0-9] instead swallowed
+# the digits in front of an Arabic-context bracket too, so the report number in
+# "مشروع المنصورة 6 (53)" got pinned along with its preceding "6" and the
+# header re-ordered to "مشروع المنصورة(53) 6". A code like "Z(A)" or
+# "Building 12(B)" always leads with a letter; a bare "(53)" after Arabic does
+# not, and never needed pinning because it has no Latin run to keep it with.
+_LTR_BRACKETED = re.compile(r"[A-Za-z][A-Za-z0-9 \-_/.]*[\(\[\{][^\)\]\}]*[\)\]\}]")
+_LRM = "‎"  # LEFT-TO-RIGHT MARK
+
+
+def _pin_ltr_runs(text: str) -> str:
+    """Bracket the Latin-with-parens runs in LRM so bidi keeps them intact.
+
+    A closing bracket at the END of a Latin run inside an RTL line has no
+    strong character after it, so it takes the paragraph's direction, gets
+    mirrored to its opposite, and is reordered to the far side: a zone called
+    "PH1 - Z(A)" printed as "(PH1 - Z(A" on every line of the contents page
+    (2026-08-30). An LRM either side pins the run left-to-right so its own
+    brackets resolve against it instead of against the Arabic around it.
+
+    Only runs that actually contain a bracket are touched — plain Latin words
+    inside Arabic already resolve correctly, and marking those would be churn
+    for no gain."""
+    return _LTR_BRACKETED.sub(lambda m: f"{_LRM}{m.group(0)}{_LRM}", text)
+
+
 def shape(text) -> str:
     """Reshape + bidi-reorder so Arabic renders correctly; safe for Latin too."""
     if text is None:
@@ -56,7 +84,10 @@ def shape(text) -> str:
     text = str(text)
     if not text:
         return ""
-    return get_display(arabic_reshaper.reshape(text))
+    # The LRM marks exist only to steer the bidi pass; once get_display has
+    # produced the visual order they carry no meaning, and Amiri has no glyph
+    # for them — left in, they draw as notdef boxes. Strip them afterwards.
+    return get_display(arabic_reshaper.reshape(_pin_ltr_runs(text))).replace(_LRM, "")
 
 
 def format_money(value, currency: str | None) -> str:
