@@ -13,5 +13,7 @@ export default async function ReportTemplatesPage() {
   const canManage = user.is_platform_admin || user.permissions.includes(Permission.EXPORT_REPORTS);
   if (!canManage) redirect(ROUTES.reports);
 
-  return <TemplatesHub />;
+  // Installing a template into another company is a cross-tenant write, so
+  // the control only exists for platform admins (the API enforces it too).
+  return <TemplatesHub isPlatformAdmin={user.is_platform_admin} />;
 }

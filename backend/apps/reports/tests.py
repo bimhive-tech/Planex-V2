@@ -3497,3 +3497,83 @@ class TableChunkBalanceTests(SimpleTestCase):
 
         chunks = _split_table_chunks_balanced(self._table(3), 120, 400)
         self.assertEqual(len(chunks), 1)
+
+
+class TemplateInstallTests(TestCase):
+    """POST /api/report-templates/<id>/install/ — hand a template to another
+    company as their own editable copy. The only cross-tenant write in the
+    reports API, so the gate matters more than the copy does."""
+
+    def setUp(self):
+        self.platform = Company.objects.create(name="Planex", is_platform_admin=True)
+        self.target = Company.objects.create(name="Acme")
+        self.template = ReportTemplate.objects.create(
+            company=self.platform, name="Monthly", config=default_config(), is_default=True)
+
+    def _client(self, company, email):
+        role = Role.objects.create(
+            company=company, name=SeededRole.COMPANY_ADMIN, permissions=COMPANY_ADMIN_PERMISSIONS)
+        user = User.objects.create_user(email=email, password=STRONG_PW, company=company)
+        Membership.objects.create(company=company, user=user, role=role)
+        client = APIClient()
+        client.force_authenticate(user)
+        return client
+
+    def test_platform_admin_installs_an_independent_copy(self):
+        client = self._client(self.platform, "admin@planex.com")
+        resp = client.post(f"/api/report-templates/{self.template.id}/install/",
+                           {"company": str(self.target.id)}, format="json")
+        self.assertEqual(resp.status_code, 201)
+
+        copy = ReportTemplate.objects.get(company=self.target)
+        self.assertNotEqual(copy.id, self.template.id)
+        self.assertEqual(copy.config, self.template.config)
+        # Never inherits "default" — that would silently change which template
+        # the target company's new reports pick up.
+        self.assertFalse(copy.is_default)
+
+        # The copy is detached: editing it must not reach back into the source.
+        copy.config["colors"] = {"primary": "#000000"}
+        copy.save(update_fields=["config"])
+        self.template.refresh_from_db()
+        self.assertNotEqual(self.template.config.get("colors"), {"primary": "#000000"})
+
+    def test_installing_twice_suffixes_instead_of_overwriting(self):
+        client = self._client(self.platform, "admin@planex.com")
+        url = f"/api/report-templates/{self.template.id}/install/"
+        for _ in range(2):
+            self.assertEqual(
+                client.post(url, {"company": str(self.target.id)}, format="json").status_code, 201)
+        names = set(ReportTemplate.objects.filter(company=self.target).values_list("name", flat=True))
+        self.assertEqual(len(names), 2)
+        self.assertIn("Monthly", names)
+
+    def test_company_admin_of_another_tenant_is_refused(self):
+        """A full-permission company admin still cannot push into a company
+        they don't belong to — and their own template stays unreachable."""
+        other = Company.objects.create(name="Other")
+        own = ReportTemplate.objects.create(company=other, name="Theirs", config=default_config())
+        client = self._client(other, "admin@other.com")
+
+        resp = client.post(f"/api/report-templates/{own.id}/install/",
+                           {"company": str(self.target.id)}, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(ReportTemplate.objects.filter(company=self.target).exists())
+
+    def test_missing_and_unknown_company_are_rejected(self):
+        client = self._client(self.platform, "admin@planex.com")
+        url = f"/api/report-templates/{self.template.id}/install/"
+        self.assertEqual(client.post(url, {}, format="json").status_code, 400)
+        self.assertEqual(
+            client.post(url, {"company": "00000000-0000-0000-0000-000000000000"},
+                        format="json").status_code, 404)
+        self.assertFalse(ReportTemplate.objects.filter(company=self.target).exists())
+
+    def test_inactive_company_cannot_receive_a_template(self):
+        self.target.is_active = False
+        self.target.save(update_fields=["is_active"])
+        client = self._client(self.platform, "admin@planex.com")
+        resp = client.post(f"/api/report-templates/{self.template.id}/install/",
+                           {"company": str(self.target.id)}, format="json")
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(ReportTemplate.objects.filter(company=self.target).exists())

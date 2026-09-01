@@ -4,16 +4,21 @@ Access: EXPORT_REPORTS gates everything — viewing, downloading, and editing.
 Reports are sensitive deliverables, so a role without it (e.g. a site engineer)
 sees no reports at all, not just a hidden download button.
 """
+import copy as copy_module
 import json
 
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 
 from apps.accounts.constants import Permission
+from apps.accounts.models import Company
 
 from .constants import merge_layout_override, merged_config
 from .layout_seed import seed_layout_from_sections
@@ -92,6 +97,50 @@ class ReportTemplateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company)
+
+    @action(detail=True, methods=["post"])
+    def install(self, request, pk=None):
+        """Copy this template into another company.
+
+        Templates are company-scoped, so a company that wants the standard
+        monthly report has no way to get it without someone rebuilding it by
+        hand. This hands them a real copy: their own row, editable, with no
+        link back to the original.
+
+        Platform admins ONLY. This is the one place in the reports API that
+        writes into a company the caller doesn't belong to, so it is gated on
+        the platform-admin company rather than on EXPORT_REPORTS — a company
+        admin holding every permission in their own tenant still must not be
+        able to push a template into someone else's.
+        """
+        if not request.user.is_platform_admin:
+            raise PermissionDenied("Only platform admins can install a template into another company.")
+
+        source = self.get_object()
+        company_id = request.data.get("company")
+        if not company_id:
+            raise ValidationError({"company": "Choose a company to install this template into."})
+        try:
+            target = Company.objects.get(pk=company_id, is_active=True)
+        except (Company.DoesNotExist, ValidationError, ValueError, DjangoValidationError):
+            raise NotFound("Company not found.")
+
+        name = (request.data.get("name") or "").strip() or source.name
+        # Templates are unique per (company, name) in practice — suffix rather
+        # than overwrite, so installing twice never silently replaces a
+        # template that company may already have customised.
+        if ReportTemplate.objects.filter(company=target, name=name).exists():
+            name = f"{name} ({timezone.now():%Y-%m-%d})"
+
+        copy = ReportTemplate.objects.create(
+            company=target,
+            name=name,
+            config=copy_module.deepcopy(source.config or {}),
+            # Never inherit "default" — that would silently change which
+            # template that company's new reports pick up.
+            is_default=False,
+        )
+        return Response(ReportTemplateSerializer(copy).data, status=201)
 
     @action(detail=True, methods=["post"], url_path="seed-layout")
     def seed_layout(self, request, pk=None):

@@ -16,25 +16,58 @@ import { api, ApiError, type Paginated } from "@/lib/api";
 import { ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
 import type { ReportTemplate } from "@/types/report";
+import type { CompanyRow } from "@/types/settings";
 import styles from "./reports.module.css";
 
 function fmt(date: string): string {
   return new Date(date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-export function TemplatesHub() {
+export function TemplatesHub({ isPlatformAdmin = false }: { isPlatformAdmin?: boolean }) {
   const router = useRouter();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // "Install to company" — copies a template into another tenant. Platform
+  // admins only; the API enforces the same rule independently.
+  const [installing, setInstalling] = useState<ReportTemplate | null>(null);
+  const [targetCompany, setTargetCompany] = useState("");
+  const [installMsg, setInstallMsg] = useState<string | null>(null);
 
   const { data, loading, error, reload } = useFetch(
     () => api.get<Paginated<ReportTemplate>>(`/report-templates/?page=${page}`),
     [page],
   );
   const rows = data?.results ?? [];
+  // Only fetched for a platform admin, and only once the drawer is opened —
+  // a normal company admin never has any business listing other tenants.
+  const { data: companies } = useFetch(
+    () => (isPlatformAdmin && installing
+      ? api.get<Paginated<CompanyRow>>("/companies/?page_size=200")
+      : Promise.resolve(null)),
+    [isPlatformAdmin, installing?.id],
+  );
+
+  async function handleInstall(e: React.FormEvent) {
+    e.preventDefault();
+    if (!installing || !targetCompany) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      const created = await api.post<ReportTemplate>(
+        `/report-templates/${installing.id}/install/`, { company: targetCompany });
+      const to = (companies?.results ?? []).find((c) => c.id === targetCompany);
+      setInstallMsg(`Installed "${created.name}" into ${to?.name ?? "that company"}.`);
+      setInstalling(null);
+      setTargetCompany("");
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't install this template.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -79,6 +112,7 @@ export function TemplatesHub() {
       </header>
 
       {actionError && <p className="formError">{actionError}</p>}
+      {installMsg && <p className={styles.installOk}>{installMsg}</p>}
 
       <StateView
         loading={loading}
@@ -102,6 +136,16 @@ export function TemplatesHub() {
                 <Link className={styles.iconBtn} href={`${ROUTES.reportTemplates}/${t.id}`} aria-label="Edit design" title="Edit design">
                   <Icon name="edit" size={16} />
                 </Link>
+                {isPlatformAdmin && (
+                  <button
+                    className={styles.iconBtn}
+                    onClick={() => { setInstallMsg(null); setTargetCompany(""); setInstalling(t); }}
+                    aria-label="Install into another company"
+                    title="Install into another company"
+                  >
+                    <Icon name="companies" size={16} />
+                  </button>
+                )}
                 <button className={`${styles.iconBtn} ${styles.danger}`} onClick={() => handleDelete(t)} aria-label="Delete" title="Delete">
                   <Icon name="trash" size={16} />
                 </button>
@@ -136,6 +180,41 @@ export function TemplatesHub() {
       >
         <form id="template-create" onSubmit={handleCreate} className={styles.drawerForm}>
           <Input label="Template name" name="name" required autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        </form>
+      </Drawer>
+
+      <Drawer
+        open={Boolean(installing)}
+        title="Install into a company"
+        onClose={() => setInstalling(null)}
+        footer={
+          <>
+            <Button variant="secondary" type="button" onClick={() => setInstalling(null)}>Cancel</Button>
+            <Button type="submit" form="template-install" disabled={saving || !targetCompany}>
+              {saving ? "Installing…" : "Install"}
+            </Button>
+          </>
+        }
+      >
+        <form id="template-install" onSubmit={handleInstall} className={styles.drawerForm}>
+          <p className={styles.drawerHint}>
+            Gives <strong>{installing?.name}</strong> to another company as their own editable
+            copy. It starts as a normal template there — not their default — and nothing you
+            change here afterwards affects it.
+          </p>
+          <label className={styles.drawerLabel} htmlFor="install-company">Company</label>
+          <select
+            id="install-company"
+            className={styles.drawerSelect}
+            value={targetCompany}
+            onChange={(e) => setTargetCompany(e.target.value)}
+            required
+          >
+            <option value="">Choose a company…</option>
+            {(companies?.results ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </form>
       </Drawer>
     </div>
