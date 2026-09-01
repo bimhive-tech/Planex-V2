@@ -1509,8 +1509,13 @@ def _split_table_chunks_balanced(table, w, h, *, rest_h=None, max_chunks=500) ->
         return chunks
 
     for factor in _REBALANCE_STEPS:
+        # Scale the FIRST chunk's height too, not just the continuation
+        # height. Squeezing only rest_h moves rows between continuation pages
+        # and never off page one — so a table that put 9 rows on its source
+        # page and orphaned the 10th kept doing exactly that, and the retry
+        # silently changed nothing (2026-08-30).
         candidate = _split_table_chunks(
-            table, w, h, rest_h=page_h * factor, max_chunks=max_chunks)
+            table, w, h * factor, rest_h=page_h * factor, max_chunks=max_chunks)
         if len(candidate) != len(chunks):
             continue
         _, cand_tail = candidate[-1].wrap(w, page_h)
