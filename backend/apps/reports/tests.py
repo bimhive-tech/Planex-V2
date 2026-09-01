@@ -3455,3 +3455,45 @@ class BidiBracketPinningTests(SimpleTestCase):
         from .pdf_base import shape
 
         self.assertNotIn("\u200e", shape("لوحات معلومات المناطق — PH1 - Z(A)"))
+
+
+class TableChunkBalanceTests(SimpleTestCase):
+    """A table that divides badly used to end on a page holding one or two
+    rows over most of a sheet of white — and when it was the report's last
+    table, the whole document ended on that near-blank page (2026-08-30).
+
+    The tail can't be repaired after splitting: reportlab's `split()` returns
+    immutable pieces, so rows can't be pulled back up into the previous chunk.
+    Squeezing the per-page height slightly redistributes rows across the SAME
+    number of pages instead."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    def _table(self, rows):
+        from reportlab.platypus import Table
+        return Table([["h1", "h2"]] + [[f"r{i}", str(i)] for i in range(rows)],
+                     colWidths=[60, 60], repeatRows=1)
+
+    def test_a_tiny_tail_is_evened_out(self):
+        from .pdf_canvas import _split_table_chunks, _split_table_chunks_balanced
+
+        # Height chosen so the naive split leaves a very short last chunk.
+        w, h = 120, 92
+        plain = _split_table_chunks(self._table(41), w, h)
+        balanced = _split_table_chunks_balanced(self._table(41), w, h)
+        self.assertGreaterEqual(len(plain), 2)
+        # Never trades a thin last page for an extra page.
+        self.assertLessEqual(len(balanced), len(plain))
+        _, plain_tail = plain[-1].wrap(w, h)
+        _, bal_tail = balanced[-1].wrap(w, h)
+        self.assertGreaterEqual(bal_tail, plain_tail)
+
+    def test_a_table_that_already_fits_is_untouched(self):
+        from .pdf_canvas import _split_table_chunks_balanced
+
+        chunks = _split_table_chunks_balanced(self._table(3), 120, 400)
+        self.assertEqual(len(chunks), 1)

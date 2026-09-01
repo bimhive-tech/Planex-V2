@@ -1060,7 +1060,12 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     for i in range(len(disciplines)):
         chart.bars[i].fillColor = hexcolor(palette[i % len(palette)])
         chart.bars[i].strokeColor = None
-    chart.barLabelFormat = "%d"
+    # Blank instead of "0" on an empty segment. A stacked bar draws a label
+    # per series whether or not that series has anything in it, so every
+    # status with no submittals stacked its zeros on top of each other at the
+    # axis origin — two or three "0" glyphs overprinting on the axis spine of
+    # the executive summary (2026-08-30).
+    chart.barLabelFormat = lambda v: "" if not v else "%d" % v
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
     d.add(chart)
@@ -1122,7 +1127,19 @@ def gantt_chart(cfg, rows, width, labels, height=None):
     are compressed to fit — and if that would make them illegible (<4mm),
     rows are dropped instead of squeezed further, same as the too-small-box
     fallback used elsewhere."""
-    rows = rows[:25]
+    # Too many rows to fit: drop to ZONE level (level 0) rather than taking the
+    # first 25 and stopping. Slicing showed one zone plus its buildings and
+    # nothing else — 22 of 251 rows, all from Z(A) — presented as if it were
+    # the project's schedule, with no marker saying otherwise (2026-08-30).
+    # Every zone at level 0 covers the whole project in ~15 readable bars,
+    # which is what a schedule summary on one page should be. Only if the
+    # zones alone still overflow does it slice, and that is a genuine
+    # last resort rather than the normal path.
+    MAX_ROWS = 25
+    if len(rows) > MAX_ROWS:
+        zone_rows = [r for r in rows if r.get("level", 0) == 0]
+        rows = zone_rows if zone_rows else rows
+    rows = rows[:MAX_ROWS]
     if not rows:
         return None
 

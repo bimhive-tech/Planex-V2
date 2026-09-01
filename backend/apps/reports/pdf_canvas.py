@@ -157,8 +157,15 @@ def _continuation_box(el: dict, design: dict, page_w_mm: float, page_h_mm: float
     footer = float(design.get("footer_mm", 0) or 0) if design.get("show_footer", True) else 0.0
     top_mm = margin + header
     avail_h_mm = max(10.0, page_h_mm - top_mm - margin - footer)
+    # Centred, not left at the source element's x. The width has to stay the
+    # element's own — the chunks were already split and their columns sized
+    # against it, so widening here would only stretch the box, not the table —
+    # but a table authored on the right-hand half of its source page inherited
+    # that offset on every continuation page, leaving the left ~40% dead on 11
+    # pages (2026-08-30). Centring spreads the leftover evenly instead.
+    x_mm = max(margin, (page_w_mm - float(el["w"])) / 2)
     return (
-        el["x"] * mm,
+        x_mm * mm,
         (page_h_mm - top_mm - avail_h_mm) * mm,
         el["w"] * mm,
         avail_h_mm * mm,
@@ -1473,6 +1480,45 @@ def _split_table_chunks(table, w, h, *, rest_h=None, max_chunks=500) -> list:
     return chunks
 
 
+# A final chunk shorter than this fraction of its page reads as an orphan.
+_ORPHAN_FRACTION = 0.35
+# How far the per-page height may be squeezed to even out that last page.
+_REBALANCE_STEPS = (0.92, 0.85, 0.78, 0.7)
+
+
+def _split_table_chunks_balanced(table, w, h, *, rest_h=None, max_chunks=500) -> list:
+    """`_split_table_chunks`, retried at slightly reduced page heights when the
+    LAST chunk comes out tiny.
+
+    A table whose rows happen to divide badly ends on a page holding one or two
+    rows over most of a sheet of white — and when it is the report's final
+    table, the whole document ends on that near-blank page (2026-08-30). The
+    tail can't be fixed after the fact: reportlab's split() yields immutable
+    pieces, so rows can't be pulled back up into the previous chunk. Squeezing
+    the per-page height slightly redistributes rows across the SAME number of
+    pages, which is what actually evens the tail out.
+
+    Only accepts a retry that keeps the page count identical — trading a thin
+    last page for an extra page would be a worse outcome, not a better one."""
+    chunks = _split_table_chunks(table, w, h, rest_h=rest_h, max_chunks=max_chunks)
+    if len(chunks) < 2:
+        return chunks
+    page_h = rest_h or h
+    _, tail_h = chunks[-1].wrap(w, page_h)
+    if tail_h >= page_h * _ORPHAN_FRACTION:
+        return chunks
+
+    for factor in _REBALANCE_STEPS:
+        candidate = _split_table_chunks(
+            table, w, h, rest_h=page_h * factor, max_chunks=max_chunks)
+        if len(candidate) != len(chunks):
+            continue
+        _, cand_tail = candidate[-1].wrap(w, page_h)
+        if cand_tail >= page_h * _ORPHAN_FRACTION:
+            return candidate
+    return chunks
+
+
 def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) -> list:
     """Splices extra synthetic pages in after any page whose table element
     has more rows than fit its box — mirrors what a normal Platypus flowing
@@ -1534,7 +1580,7 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
             # source box does — split them against that taller height.
             page_w_mm, _ = _page_size_mm(design, inst.page)
             _, _, _, cont_h = _continuation_box(el, design, page_w_mm, page_h_mm)
-            candidate = _split_table_chunks(table, w, content_h, rest_h=cont_h)
+            candidate = _split_table_chunks_balanced(table, w, content_h, rest_h=cont_h)
             if len(candidate) > 1:
                 overflow_el, chunks = el, candidate
                 break
