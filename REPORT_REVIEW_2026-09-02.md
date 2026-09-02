@@ -29,7 +29,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
 | 11 | Missing page: Progress Sheet table | Missing | ☐ |
 | 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ☐ |
-| 13 | Landscape pages use the portrait header/footer | Layout | ☐ |
+| 13 | Landscape pages use the portrait header/footer | Layout | ✅ **done** |
 | 14 | Why are some rows coloured? | Question | ☐ |
 | 15 | Zone-progress chart on p13 makes no sense | Wrong content | ✅ **done** (with item 2) |
 | 16 | Missing units/currencies in some tables | Polish | ☐ |
@@ -279,11 +279,23 @@ still think they are in portrait mode so please fix this if possible or tell me 
 to do or do we need to make some sort of page editor template for pages that are
 landscape?"
 
-**Understood:** Master (header/footer) elements are positioned against the portrait
-page width, so on a landscape page they sit wrong. The client asks whether this is
-fixable centrally or whether landscape needs its own master layout. My read: fixable
-centrally — master elements should lay out against the *current* page's dimensions
-rather than the design's default. Confirm in `_master_box`.
+**Fixed 2026-09-02 — centrally. No separate landscape master is needed.**
+
+`_master_box` already corrected for a page's HEIGHT (that's how footers stopped
+falling off landscape pages) but never for its WIDTH, so every header element kept
+its portrait x. A right-hand logo authored 25mm in from a 210mm page's right edge
+landed two-thirds of the way across a 297mm one, and a centred title sat left of
+centre.
+
+Header and footer bands are laid out against page EDGES, so `_master_x` now keeps
+whichever edge an element was placed against: left-anchored keeps its left margin,
+right-anchored keeps its right margin, centred stays centred, and a full-width rule
+keeps both insets and stretches. Classification is by the element's own centre
+against the authored page width — no per-element configuration, and portrait pages
+are byte-identical (the same-width case returns the authored values untouched).
+
+Verified on a landscape page: MCG at the left edge, title centred, BIM Hive at the
+right edge, footer spanning the full width. 6 new tests.
 
 ---
 

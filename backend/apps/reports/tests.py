@@ -1120,14 +1120,14 @@ class ResolveChartTests(SimpleTestCase):
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
         self.assertEqual(len(chart.data), 2)  # planned + actual, as before
 
-    def test_planned_actual_chart_collapses_to_one_series_when_every_zone_is_pinned_at_100(self):
-        """A badly overdue project clamps every zone's time-based planned% to
-        100% (see services._planned_progress) — ~20 near-identical planned
-        bars carry no information and just crowd the chart, so this collapses
-        to actual-only with a note instead (the "cropped-looking" chart from
-        2026-08-25's investigation)."""
+    def test_planned_actual_chart_keeps_both_series_when_every_zone_is_at_100(self):
+        """Planned now comes from the schedule's own baseline, so on an overdue
+        project EVERY zone reads 100% — which is the normal case, not an edge
+        one. Both series are still drawn: the client's own dashboard plots the
+        flat 100% planned bar beside each actual one, and the gap between them
+        is the whole point of the chart. An earlier version collapsed this to
+        actual-only with a note, which hid that comparison (2026-09-02)."""
         from reportlab.graphics.charts.barcharts import VerticalBarChart
-        from reportlab.graphics.shapes import String
 
         cfg = default_config()
         ctx = {**_sample_ctx(), "zones": [
@@ -1136,17 +1136,13 @@ class ResolveChartTests(SimpleTestCase):
         ]}
         drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 246, 325)
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
-        self.assertEqual(len(chart.data), 1)  # actual only, no duplicate 100% bars
-        self.assertEqual(chart.data[0], [97.0, 69.0])
-        # The note's Arabic text is bidi-reshaped for RTL display (see
-        # pdf_base.shape) — "100%" visually reorders to "%100" — so check
-        # for the digits alone rather than the exact pre-shaped substring.
-        note_texts = [el.text for el in drawing.contents if isinstance(el, String)]
-        self.assertTrue(any("100" in t for t in note_texts))
+        self.assertEqual(chart.data, [[100.0, 100.0], [97.0, 69.0]])
+        # Only the actual bars carry a printed value — labelling a flat 100%
+        # stacked "100%" over every bar in one colliding row.
+        self.assertEqual(chart.barLabelFormat, [None, "%0.0f%%"])
 
     def test_planned_actual_chart_keeps_both_series_when_only_some_zones_are_pinned(self):
-        """A mix of overdue and on-schedule zones is still informative as a
-        real comparison — only collapse when *every* zone shown is pinned."""
+        """The mixed case reads the same way — nothing special about it now."""
         from reportlab.graphics.charts.barcharts import VerticalBarChart
 
         cfg = default_config()
@@ -1156,7 +1152,7 @@ class ResolveChartTests(SimpleTestCase):
         ]}
         drawing = resolve_chart("zone_progress", "bar", cfg, ctx, {"item": None}, 246, 325)
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
-        self.assertEqual(len(chart.data), 2)
+        self.assertEqual(chart.data, [[100.0, 65.0], [97.0, 40.0]])
 
     def test_spi_gauge_returns_none_without_a_value(self):
         from .pdf_charts import speedometer_chart
@@ -1210,8 +1206,13 @@ class ResolveChartTests(SimpleTestCase):
         # 2 disciplines appear in the material rows (Architecture, Electrical),
         # each a series stacked across however many statuses appear.
         self.assertEqual(len(chart.data), 2)
-        total_counted = sum(sum(series) for series in chart.data)
-        self.assertEqual(total_counted, 3)  # the 3 material rows, not the 2 shop_drawing ones
+        # Category 0 is the derived SUBMITTED total (see submittals_breakdown_chart),
+        # so every row is counted twice over the whole grid — once in its own
+        # status bar and once in the total. Check the two halves separately.
+        totals = sum(series[0] for series in chart.data)
+        by_status = sum(sum(series[1:]) for series in chart.data)
+        self.assertEqual(totals, 3)      # the 3 material rows, not the 2 shop_drawing ones
+        self.assertEqual(by_status, 3)   # and the total equals the statuses beneath it
 
     def test_submittals_shop_drawing_chart_only_counts_shop_drawing_rows(self):
         drawing = resolve_chart("submittals_shop_drawing", None, default_config(), self._submittals_ctx(),
@@ -3642,3 +3643,52 @@ class TableSizingTests(SimpleTestCase):
         against an older one — pad/trim instead of drawing a broken table."""
         self.assertEqual(element_row_heights([10, 20], [], 4), [None, 10 * mm, 20 * mm, None, None])
         self.assertEqual(element_row_heights([10, 20, 30], [], 2), [None, 10 * mm, 20 * mm])
+
+
+class MasterLandscapeTests(SimpleTestCase):
+    """Header/footer elements are authored against the template's default page
+    size. On a page that flips orientation they must lay out against the page
+    they are actually on — the client saw the running header still positioned
+    for portrait on every landscape page (reported 2026-09-02)."""
+
+    PORTRAIT_W, LANDSCAPE_W = 210.0, 297.0
+
+    def _x(self, x, w):
+        from .pdf_canvas import _master_x
+        return _master_x({"x": x, "w": w}, self.LANDSCAPE_W, self.PORTRAIT_W)
+
+    def test_same_width_page_is_left_exactly_as_authored(self):
+        from .pdf_canvas import _master_x
+        self.assertEqual(_master_x({"x": 150.0, "w": 40.0}, self.PORTRAIT_W, self.PORTRAIT_W),
+                         (150.0, 40.0))
+
+    def test_a_left_hand_logo_keeps_its_left_margin(self):
+        self.assertEqual(self._x(15.0, 35.0), (15.0, 35.0))
+
+    def test_a_right_hand_logo_keeps_its_RIGHT_margin(self):
+        """Authored 25mm in from a 210mm page's right edge, it must stay 25mm
+        in from the 297mm one — not sit at its old absolute x, two-thirds of
+        the way across."""
+        x, w = self._x(150.0, 35.0)
+        self.assertEqual(self.LANDSCAPE_W - (x + w), self.PORTRAIT_W - (150.0 + 35.0))
+        self.assertEqual((x, w), (237.0, 35.0))
+
+    def test_a_centred_title_stays_centred(self):
+        x, w = self._x(65.0, 80.0)
+        self.assertAlmostEqual(x + w / 2, self.LANDSCAPE_W / 2)
+
+    def test_a_full_width_rule_stretches_and_keeps_both_insets(self):
+        x, w = self._x(10.0, 190.0)
+        self.assertEqual(x, 10.0)
+        self.assertEqual(self.LANDSCAPE_W - (x + w), 10.0)
+
+    def test_footer_elements_still_keep_their_distance_from_the_bottom(self):
+        """The vertical half of the same problem, which must not regress."""
+        from reportlab.lib.units import mm as MM
+
+        from .pdf_canvas import _master_box
+        design = {"size": "A4", "orientation": "portrait"}
+        # Authored 17mm up from a 297mm page's bottom edge.
+        el = {"x": 90.0, "y": 275.0, "w": 30.0, "h": 5.0}
+        _, y, _, _ = _master_box(el, design, self.LANDSCAPE_W, 210.0, self.PORTRAIT_W, 297.0)
+        self.assertAlmostEqual(y / MM, 17.0)

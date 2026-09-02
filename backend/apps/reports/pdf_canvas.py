@@ -130,23 +130,54 @@ def el_box(el: dict, page_h_mm: float):
     )
 
 
-def _master_box(el: dict, design: dict, page_h_mm: float, default_h_mm: float):
-    """(x, y, w, h) in points for one master element on a page whose height may
+def _master_x(el: dict, page_w_mm: float, default_w_mm: float):
+    """Horizontal placement (x, w) in mm for a master element on a page whose
+    width differs from the one it was authored against.
+
+    Header and footer bands are laid out against the page EDGES, so an element
+    keeps whichever edge it was placed against rather than its absolute x. A
+    right-hand logo authored at x=150 on a 210mm portrait page otherwise landed
+    two-thirds of the way across a 297mm landscape one, and a centred title sat
+    left of centre — which is what "the header still thinks it's in portrait"
+    looked like (reported 2026-09-02).
+
+    Full-width rules keep both insets and simply stretch.
+    """
+    x, w = float(el["x"]), float(el["w"])
+    if abs(page_w_mm - default_w_mm) < 0.01:
+        return x, w
+    right_inset = default_w_mm - (x + w)
+    if w >= default_w_mm * 0.9:          # a full-width rule or band
+        return x, max(1.0, page_w_mm - x - right_inset)
+    centre = x + w / 2
+    if centre < default_w_mm / 3:        # anchored left
+        return x, w
+    if centre > default_w_mm * 2 / 3:    # anchored right
+        return max(0.0, page_w_mm - right_inset - w), w
+    return max(0.0, (page_w_mm - w) / 2), w   # centred stays centred
+
+
+def _master_box(el: dict, design: dict, page_w_mm: float, page_h_mm: float,
+                default_w_mm: float, default_h_mm: float):
+    """(x, y, w, h) in points for one master element on a page whose size may
     differ from the one the master was authored against.
 
     Header-band elements keep their distance from the TOP; footer-band ones
     keep their distance from the BOTTOM. Anything in between is left on its
-    authored y. See _render_page for the bug this fixes."""
+    authored y. Horizontally, see _master_x. See _render_page for the bug the
+    vertical half of this fixes."""
+    x_mm, w_mm = _master_x(el, page_w_mm, default_w_mm)
     if abs(page_h_mm - default_h_mm) < 0.01:
-        return el_box(el, page_h_mm)
+        return (x_mm * mm, (page_h_mm - float(el["y"]) - float(el["h"])) * mm,
+                w_mm * mm, float(el["h"]) * mm)
     y, h = float(el["y"]), float(el["h"])
     # "Below the midpoint of the page it was authored for" is the practical
     # test for a footer element — the master only ever holds a header band and
     # a footer band, so there's nothing ambiguous in the middle to misclassify.
     if y + h / 2 > default_h_mm / 2:
         from_bottom = default_h_mm - (y + h)
-        return (el["x"] * mm, from_bottom * mm, el["w"] * mm, h * mm)
-    return (el["x"] * mm, (page_h_mm - y - h) * mm, el["w"] * mm, h * mm)
+        return (x_mm * mm, from_bottom * mm, w_mm * mm, h * mm)
+    return (x_mm * mm, (page_h_mm - y - h) * mm, w_mm * mm, h * mm)
 
 
 def _continuation_box(el: dict, design: dict, page_w_mm: float, page_h_mm: float):
@@ -292,9 +323,10 @@ def _render_page(c, design, master_elements, inst: PageInstance, cfg, ctx, page_
         # one and simply never prints. That's why 13 landscape pages carried a
         # full running header and no page number at all, while the contents and
         # figure lists cited them by number (2026-08-30).
-        _, default_h_mm = _page_size_mm(design)
+        default_w_mm, default_h_mm = _page_size_mm(design)
         for el in sorted(master_elements, key=lambda e: e.get("z", 0)):
-            _draw_element(c, el, _master_box(el, design, page_h_mm, default_h_mm), inst, cfg, ctx)
+            box = _master_box(el, design, page_w_mm, page_h_mm, default_w_mm, default_h_mm)
+            _draw_element(c, el, box, inst, cfg, ctx)
 
     if inst.continues_element is not None:
         # A synthetic page holding only the overflow of one table — the
