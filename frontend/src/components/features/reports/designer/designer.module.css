@@ -873,11 +873,73 @@
   color: var(--text-primary);
 }
 
+/* Only once columns have actually been dragged. Fixed layout makes the
+   <colgroup> fractions authoritative — but applied unconditionally it would
+   also force every untouched table to equal columns, which the PDF's
+   per-source widths are nothing like. */
+.tableLive[data-sized="on"] {
+  table-layout: fixed;
+}
+
+.sizedCol {
+  width: var(--colW);
+}
+
+.sizedRow {
+  height: var(--rowH);
+}
+
 .tableLive th,
 .tableLive td {
   border: 1px solid var(--tableBorder);
   padding: var(--tableCellPadding) 5px;
   vertical-align: middle;
+  /* The real fix for the reported overflow: with long values allowed to break,
+     a table's min-content width collapses, so `width: 100%` actually fits the
+     element box instead of the browser sizing past it and clipping (an
+     8-column table in a 140px box measured 288px). Also stops a long word
+     spilling a cell border once fixed layout is on. */
+  overflow-wrap: anywhere;
+  /* Anchors the resize grips below. */
+  position: relative;
+}
+
+/* ── Column / row resize grips (TableSizing.tsx) ────────────────────────────
+   Invisible until hovered, like a spreadsheet's own column dividers. They sit
+   ON the cell border, half in each neighbour, so the whole boundary is a
+   target rather than a 1px line. */
+.colGrip,
+.rowGrip {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+  touch-action: none;
+}
+
+.colGrip {
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.rowGrip {
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.colGrip:hover,
+.rowGrip:hover {
+  background: var(--primary);
+}
+
+/* The gutter column holding the row handles sizes itself, not by fraction. */
+.tableHandleCol {
+  width: 16px;  /* must match .tableLiveRowHandle */
 }
 
 /* "data"/"hierarchy" header row — mirrors pdf_tables.py's _data_table and
@@ -910,7 +972,9 @@
   background: var(--tableZebra);
   text-align: right;
   font-weight: 700;
-  white-space: nowrap;
+  /* Deliberately allowed to wrap. `nowrap` relied on the browser growing the
+     column to fit, which a dragged (fixed-layout) table can't do — and the
+     PDF wraps these labels anyway, so wrapping is the honest preview. */
 }
 
 .tableLiveInfoValue {

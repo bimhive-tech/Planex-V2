@@ -7,6 +7,7 @@ No BaseDocTemplate/Frame/story here — the designer already decided where
 everything goes, so this just opens a canvas page per PageInstance and draws.
 """
 import logging
+from functools import partial
 from dataclasses import dataclass
 from io import BytesIO
 
@@ -40,8 +41,11 @@ from .pdf_charts import (
 )
 from .pdf_layout import _draw_contained_image, _period_str, draw_fitted_image
 from .pdf_tables import (
-    _data_table, _fmt_date, _hierarchy_table_flat, _info_table, _pct_or_dash, _styles,
-    _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label, table_style_override,
+    _data_table as _data_table_impl, _fmt_date,
+    _hierarchy_table_flat as _hierarchy_table_flat_impl,
+    _info_table as _info_table_impl, _pct_or_dash, _styles,
+    _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label,
+    table_style_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -972,6 +976,18 @@ def resolve_table(
     # report's own view — a row clicked on the canvas (see TablePreview.tsx).
     hidden_rows = (style or {}).get("hidden_rows") or []
     hidden_cols = (style or {}).get("hidden_cols") or []
+    # Column widths / row heights dragged on the canvas (TableSizing.tsx),
+    # passed down raw — each builder resolves them against its OWN column and
+    # row counts (see element_col_widths/element_row_heights). Bound onto the
+    # builders once here rather than threaded through every branch below, so
+    # the element's own sizing overrides each source's defaults without
+    # thirteen near-identical call sites having to know about it.
+    _sizing = {"col_widths_frac": (style or {}).get("col_widths"),
+               "row_heights_mm": (style or {}).get("row_heights"),
+               "hidden_cols": hidden_cols, "hidden_rows": hidden_rows}
+    _data_table = partial(_data_table_impl, **_sizing)
+    _info_table = partial(_info_table_impl, **_sizing)
+    _hierarchy_table_flat = partial(_hierarchy_table_flat_impl, **_sizing)
 
     if source == "item.children":
         children = (scope.get("item") or {}).get("children") or []
@@ -1218,12 +1234,12 @@ def resolve_table(
     if source == "detailed_progress":
         return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width, raw=raw,
                                                  overrides=overrides, hidden_rows=hidden_rows,
-                                                 hidden_cols=hidden_cols)
+                                                 hidden_cols=hidden_cols, sizing=_sizing)
 
     if source == "activity_schedule":
         return _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=avail_width, raw=raw,
                                                  overrides=overrides, hidden_rows=hidden_rows,
-                                                 hidden_cols=hidden_cols)
+                                                 hidden_cols=hidden_cols, sizing=_sizing)
 
     if source == "critical_path_delays":
         rows_data = ctx.get("critical_path") or []
@@ -1260,7 +1276,7 @@ def resolve_table(
 
 
 def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None,
-                                     hidden_rows=None, hidden_cols=None):
+                                     hidden_rows=None, hidden_cols=None, sizing=None):
     """Detailed activity grid — v1 scope: only the first zone's grid, only its
     first 8 columns (the legacy `_grid_section` splits wide grids across
     multiple pages/columns; reproducing that needs a 2D repeat, deferred)."""
@@ -1283,11 +1299,11 @@ def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=Fal
     apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
         return {"kind": "data", "header": header, "rows": rows}
-    return _data_table(cfg, styles, header, rows, avail_width=avail_width)
+    return _data_table_impl(cfg, styles, header, rows, avail_width=avail_width, **(sizing or {}))
 
 
 def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=False, overrides=None,
-                                     hidden_rows=None, hidden_cols=None):
+                                     hidden_rows=None, hidden_cols=None, sizing=None):
     """Every activity's P6 duration/SPI/schedule-variance columns — computed
     lazily and cached in ctx, the same pattern as the detailed-progress grid
     above, since a real project can carry tens of thousands of activities and
@@ -1326,7 +1342,7 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=Fal
     apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
         return {"kind": "data", "header": header, "rows": rows}
-    return _data_table(cfg, styles, header, rows, avail_width=avail_width)
+    return _data_table_impl(cfg, styles, header, rows, avail_width=avail_width, **(sizing or {}))
 
 
 # ── Chart binding ────────────────────────────────────────────────────────────

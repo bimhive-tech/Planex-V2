@@ -3,6 +3,7 @@ import datetime
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase
+from reportlab.lib.units import mm
 from rest_framework.test import APIClient
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
@@ -14,6 +15,7 @@ from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf, has_arabic, shape
 from .pdf_layout import cover_fit_geometry
+from .pdf_tables import element_col_widths, element_row_heights
 from .pdf_canvas import (
     build_canvas_pdf,
     el_box,
@@ -3577,3 +3579,66 @@ class TemplateInstallTests(TestCase):
                            {"company": str(self.target.id)}, format="json")
         self.assertEqual(resp.status_code, 404)
         self.assertFalse(ReportTemplate.objects.filter(company=self.target).exists())
+
+
+class TableSizingTests(SimpleTestCase):
+    """element_col_widths / element_row_heights — the PDF half of the canvas's
+    Excel-style column/row dragging (TableSizing.tsx). Both take the element's
+    props in the ORIGINAL index space and must survive hidden rows/columns."""
+
+    def test_no_sizing_leaves_every_default_alone(self):
+        self.assertIsNone(element_col_widths(None, [], 400, 3))
+        self.assertIsNone(element_col_widths([], [], 400, 3))
+        self.assertIsNone(element_row_heights(None, [], 5))
+        # All-auto is the same as none at all — don't pin anything.
+        self.assertIsNone(element_col_widths([None, None], [], 400, 2))
+        self.assertIsNone(element_row_heights([None, None], [], 2))
+
+    def test_fractions_become_points_summing_to_the_box(self):
+        widths = element_col_widths([0.5, 0.25, 0.25], [], 400, 3)
+        self.assertEqual(widths, [200, 100, 100])
+        self.assertAlmostEqual(sum(widths), 400)
+
+    def test_fractions_are_renormalised_not_trusted(self):
+        """The canvas normalises, but a hand-edited config needn't — the table
+        must still exactly fill its box rather than over/underflow it."""
+        self.assertEqual(element_col_widths([2, 1, 1], [], 400, 3), [200, 100, 100])
+
+    def test_hidden_column_hands_its_width_to_the_survivors(self):
+        # Dropping the 50% column leaves two equal ones sharing the full box,
+        # not a half-empty table with a gap where it used to be.
+        self.assertEqual(element_col_widths([0.5, 0.25, 0.25], [0], 400, 2), [200, 200])
+
+    def test_columns_without_a_width_share_what_is_left(self):
+        self.assertEqual(element_col_widths([0.5, None, None], [], 400, 3), [200, 100, 100])
+
+    def test_row_heights_are_mm_and_reserve_the_header(self):
+        heights = element_row_heights([10, None, 20], [], 3)
+        self.assertEqual(heights, [None, 10 * mm, None, 20 * mm])  # header first
+        self.assertEqual(element_row_heights([10], [], 1, header_row=False), [10 * mm])
+
+    def test_row_heights_follow_hidden_rows(self):
+        # Hiding row 0 must shift row 1's height onto the row now drawn first,
+        # not leave it stranded on a row that no longer exists.
+        self.assertEqual(element_row_heights([10, 20], [0], 1), [None, 20 * mm])
+
+    def test_col_widths_survive_a_changed_column_count(self):
+        """reportlab pads a short colWidths with its LAST width, quietly
+        drawing a table wider than its box — exactly the bug this feature
+        exists to fix. Reconcile to the real column count instead."""
+        # Two new columns appear: they take the even-share fallback and the
+        # whole list renormalises, so the table still exactly fills its box.
+        # Same fallback resolveColWidths uses, so the canvas agrees.
+        widths = element_col_widths([0.5, 0.5], [], 400, 4)
+        self.assertAlmostEqual(sum(widths), 400)
+        self.assertEqual([round(w, 1) for w in widths], [133.3, 133.3, 66.7, 66.7])
+        # A column disappears: the rest renormalise over the full box.
+        trimmed = element_col_widths([0.5, 0.25, 0.25], [], 400, 2)
+        self.assertAlmostEqual(sum(trimmed), 400)
+        self.assertEqual([round(w, 1) for w in trimmed], [266.7, 133.3])
+
+    def test_row_heights_survive_a_changed_row_count(self):
+        """A re-import can change the row count under a height list captured
+        against an older one — pad/trim instead of drawing a broken table."""
+        self.assertEqual(element_row_heights([10, 20], [], 4), [None, 10 * mm, 20 * mm, None, None])
+        self.assertEqual(element_row_heights([10, 20, 30], [], 2), [None, 10 * mm, 20 * mm])

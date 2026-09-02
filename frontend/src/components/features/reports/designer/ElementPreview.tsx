@@ -15,12 +15,13 @@ import { RichTextEditor, type RichTextEditorHandle } from "@/components/ui/RichT
 import { Skeleton } from "@/components/ui/Skeleton";
 import { CHART_SOURCES, FIELD_SOURCES, TABLE_SOURCES } from "@/lib/reportElements";
 import type {
-  ChartSvgMap, CustomTableData, LayoutElement, ReportLabels, TableDataMap, TableStyle, TocCaptionsData, TocEntry,
+  ChartSvgMap, CustomTableData, LayoutElement, ReportLabels, TableDataMap, TableDataResult, TableStyle, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CustomTableEditor } from "./CustomTableEditor";
+import { ColGroup, useColumnResize, useRowResize } from "./TableSizing";
 import { DescriptionEmbedToolbar } from "../DescriptionEmbedToolbar";
 import styles from "./designer.module.css";
 
@@ -328,9 +329,20 @@ function originalRowIndices(count: number, hiddenRows: number[] | undefined): nu
  * report's view (see TablePreview's commitHideRow) — a real table cell so it
  * lines up with the header/body rows around it, not an absolutely
  * positioned overlay. */
-function RowHideButton({ onHide }: { onHide: () => void }) {
+/** Column twin of originalRowIndices — the rendered header already has the
+ * hidden columns removed server-side, so map each shown column back to the
+ * index the overrides/hidden_cols/col_widths props are keyed by. */
+function originalColIndices(shown: number, hiddenCols: number[] | undefined): number[] {
+  const hidden = new Set(hiddenCols ?? []);
+  const out: number[] = [];
+  for (let i = 0; out.length < shown; i++) if (!hidden.has(i)) out.push(i);
+  return out;
+}
+
+function RowHideButton({ onHide, grip }: { onHide: () => void; grip?: React.ReactNode }) {
   return (
     <td className={styles.tableLiveRowHandle}>
+      {grip}
       <button
         type="button"
         className={styles.tableLiveRowHideBtn}
@@ -349,14 +361,17 @@ function RowHideButton({ onHide }: { onHide: () => void }) {
  * columns than the page can hold, and until this existed the only remedies
  * were shrinking the font or turning the page landscape (2026-08-30). */
 function HeaderCell({
-  text, onCommit, onHideColumn,
+  text, onCommit, onHideColumn, grip,
 }: {
   text: string;
   onCommit?: (v: string) => void;
   onHideColumn?: () => void;
+  /** Column-resize grip for this column's right edge (see TableSizing). */
+  grip?: React.ReactNode;
 }) {
   return (
     <th>
+      {grip}
       <div className={styles.tableLiveHeaderCell}>
         <TableCell text={text} onCommit={onCommit} />
         {onHideColumn && (
@@ -427,7 +442,7 @@ function OverflowClip({ children, note = "More rows than fit here — continues 
   );
 }
 
-function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = true, labels, onElementChange }: PreviewProps) {
+function TablePreview({ el, scale, liveData, pinnedItem, tableData, previewsReady = true, labels, onElementChange }: PreviewProps) {
   const p = el.props;
 
   // "custom" — no backend data source at all; it's built by hand or pasted
@@ -488,12 +503,18 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
   // Same idea for columns. Indices refer to the ORIGINAL column order, so
   // hiding two columns one after the other can't shift the second target.
   const hiddenCols = p.hidden_cols as number[] | undefined;
-  const originalColIndices = (shown: number) => {
-    const hidden = new Set(hiddenCols ?? []);
-    const out: number[] = [];
-    for (let i = 0; out.length < shown; i++) if (!hidden.has(i)) out.push(i);
-    return out;
-  };
+  // Column widths (fractions) and row heights (mm) live on the element, in the
+  // same ORIGINAL index space as hidden_cols/hidden_rows, and the PDF reads
+  // both back — a drag here is not a canvas-only trick.
+  const colWidths = p.col_widths as (number | null)[] | undefined;
+  const rowHeights = p.row_heights as (number | null)[] | undefined;
+  const commitColWidths = onElementChange
+    ? (w: (number | null)[]) => onElementChange({ ...el, props: { ...p, col_widths: w } })
+    : undefined;
+  const commitRowHeights = onElementChange
+    ? (h: (number | null)[]) => onElementChange({ ...el, props: { ...p, row_heights: h } })
+    : undefined;
+
   // "hierarchy" columns carry fixed meanings, so dropping one would change
   // what the rest represent — the backend ignores hidden_cols there too.
   const commitHideCol = onElementChange && live?.status === "ok" && live.kind !== "hierarchy"
@@ -507,120 +528,20 @@ function TablePreview({ el, liveData, pinnedItem, tableData, previewsReady = tru
       const name = sourceLabel(labels, TABLE_SOURCES, p.source, String(p.source ?? ""));
       return <div className={styles.chartPlaceholder}>{`${name} — no data for this project yet`}</div>;
     }
-    const vars = tableStyleVars(live.style);
-    // live.rows already has hidden rows filtered out server-side — recover
-    // each displayed row's real original index (see originalRowIndices) so
-    // overrides/hidden_rows keys stay in the same index space as the data
-    // actually came from, not the shorter post-filter list.
-    const rowIdx = originalRowIndices(live.rows.length, hiddenRows);
-    // Same recovery for columns — the header we render has hidden ones
-    // already removed server-side, so map back to original column indices.
-    const colIdx = originalColIndices(live.header?.length ?? 0);
-
-    if (live.kind === "info") {
-      return (
-        <OverflowClip>
-          <table className={styles.tableLive} data-kind="info" style={vars}>
-            <tbody>
-              {live.rows.map(([labelText, valueText], i) => {
-                const oi = rowIdx[i];
-                return (
-                  <tr key={i}>
-                    {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
-                    <td className={styles.tableLiveInfoLabel}>
-                      <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} /> •
-                    </td>
-                    <td className={styles.tableLiveInfoValue}>
-                      <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </OverflowClip>
-      );
-    }
-
-    if (live.kind === "hierarchy") {
-      return (
-        <OverflowClip>
-          <table className={styles.tableLive} data-kind="hierarchy" style={vars}>
-            <thead>
-              <tr>
-                {commitHideRow && <th className={styles.tableLiveRowHandle} />}
-                {live.header.map((h, i) => (
-                  <th key={i}><TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} /></th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {live.rows.map((row, i) => {
-                const oi = rowIdx[i];
-                return (
-                  <tr key={i} data-zone={row.level === 0 ? "on" : undefined}>
-                    {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
-                    <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
-                      <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
-                        <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} />
-                      </span>
-                    </td>
-                    <td data-align="center">
-                      <TableCell text={fmtPctOrDash(row.actual)} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
-                    </td>
-                    <td data-align="center">
-                      <TableCell text={fmtPctOrDash(row.previous)} onCommit={commitCell && ((v) => commitCell(`r${oi}c2`, v))} />
-                    </td>
-                    <td data-align="center">
-                      <TableCell text={fmtPctOrDash(row.planned)} onCommit={commitCell && ((v) => commitCell(`r${oi}c3`, v))} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </OverflowClip>
-      );
-    }
-
-    // "data" — a plain header + flat rows grid (zone_progress, milestones,
-    // invoices, etc.).
     return (
-      <OverflowClip>
-        <table className={styles.tableLive} data-kind="data" style={vars}>
-          <thead>
-            <tr>
-              {commitHideRow && <th className={styles.tableLiveRowHandle} />}
-              {live.header.map((h, i) => {
-                const oc = colIdx[i];
-                return (
-                  <HeaderCell
-                    key={i}
-                    text={h}
-                    onCommit={commitCell && ((v) => commitCell(`hc${oc}`, v))}
-                    onHideColumn={commitHideCol && (() => commitHideCol(oc))}
-                  />
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {live.rows.map((row, i) => {
-              const oi = rowIdx[i];
-              return (
-                <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined}>
-                  {commitHideRow && <RowHideButton onHide={() => commitHideRow(oi)} />}
-                  {row.map((cell, j) => (
-                    <td key={j} data-align="center">
-                      <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${oi}c${j}`, v))} />
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </OverflowClip>
+      <LiveTableBody
+        live={live}
+        scale={scale}
+        hiddenRows={hiddenRows}
+        hiddenCols={hiddenCols}
+        colWidths={colWidths}
+        rowHeights={rowHeights}
+        commitCell={commitCell}
+        commitHideRow={commitHideRow}
+        commitHideCol={commitHideCol}
+        commitColWidths={commitColWidths}
+        commitRowHeights={commitRowHeights}
+      />
     );
   }
 
@@ -1348,4 +1269,167 @@ export function ElementPreview({
     default:
       return null;
   }
+}
+
+
+
+/** The data-bound table drawn on the canvas (info / hierarchy / data kinds).
+ * Its own component so the column/row sizing hooks sit at a component's top
+ * level — TablePreview returns early several times before this point. */
+function LiveTableBody({
+  live, scale, hiddenRows, hiddenCols, colWidths, rowHeights,
+  commitCell, commitHideRow, commitHideCol, commitColWidths, commitRowHeights,
+}: {
+  live: Extract<TableDataResult, { status: "ok" }>;
+  scale: number;
+  hiddenRows: number[] | undefined;
+  hiddenCols: number[] | undefined;
+  colWidths: (number | null)[] | undefined;
+  rowHeights: (number | null)[] | undefined;
+  commitCell?: (key: string, value: string) => void;
+  commitHideRow?: (originalIndex: number) => void;
+  commitHideCol?: (originalIndex: number) => void;
+  commitColWidths?: (widths: (number | null)[]) => void;
+  commitRowHeights?: (heights: (number | null)[]) => void;
+}) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  const rowIdx = originalRowIndices(live.rows.length, hiddenRows);
+  // "info" is a fixed label/value pair and "hierarchy" has fixed column
+  // meanings, so neither honours hidden_cols — their columns map to
+  // themselves. Only "data" can have columns hidden out from under it.
+  const colIdx = live.kind === "data"
+    ? originalColIndices(live.header?.length ?? 0, hiddenCols)
+    : Array.from({ length: live.kind === "info" ? 2 : (live.header?.length ?? 0) }, (_, i) => i);
+  const cols = useColumnResize(colWidths, colIdx, commitColWidths);
+  const rows = useRowResize(rowHeights, rowIdx, scale, commitRowHeights);
+  /** Height for the row at SHOWN index `i`; the hooks map it back to the
+   * original index the props are keyed by. Dynamic, so it travels as a custom
+   * property rather than a literal inline style (CLAUDE.md §1). */
+  const rowProps = (i: number) => (rows.heights[i] > 0
+    ? { className: styles.sizedRow, style: { ["--rowH" as string]: `${rows.heights[i] * scale}px` } }
+    : {});
+  // Only pin the layout once something has actually been dragged — see ColGroup.
+  const sized = cols.widths && colWidths?.some((w) => typeof w === "number" && w > 0);
+
+  const vars = tableStyleVars(live.style);
+
+  if (live.kind === "info") {
+    return (
+      <OverflowClip>
+        <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="info" style={vars}>
+          {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+          <tbody>
+            {live.rows.map(([labelText, valueText], i) => {
+              const oi = rowIdx[i];
+              return (
+                <tr key={i} {...rowProps(i)}>
+                  {commitHideRow && (
+                    <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
+                  )}
+                  <td className={styles.tableLiveInfoLabel}>
+                    {cols.grip?.(0)}
+                    <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} /> •
+                  </td>
+                  <td className={styles.tableLiveInfoValue}>
+                    <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </OverflowClip>
+    );
+  }
+
+  if (live.kind === "hierarchy") {
+    return (
+      <OverflowClip>
+        <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="hierarchy" style={vars}>
+          {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+          <thead>
+            <tr>
+              {commitHideRow && <th className={styles.tableLiveRowHandle} />}
+              {live.header.map((h, i) => (
+                <th key={i}>
+                  {cols.grip?.(i)}
+                  <TableCell text={h} onCommit={commitCell && ((v) => commitCell(`hc${i}`, v))} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {live.rows.map((row, i) => {
+              const oi = rowIdx[i];
+              return (
+                <tr key={i} data-zone={row.level === 0 ? "on" : undefined} {...rowProps(i)}>
+                  {commitHideRow && (
+                    <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
+                  )}
+                  <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
+                    <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
+                      <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} />
+                    </span>
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.actual)} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.previous)} onCommit={commitCell && ((v) => commitCell(`r${oi}c2`, v))} />
+                  </td>
+                  <td data-align="center">
+                    <TableCell text={fmtPctOrDash(row.planned)} onCommit={commitCell && ((v) => commitCell(`r${oi}c3`, v))} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </OverflowClip>
+    );
+  }
+
+  // "data" — a plain header + flat rows grid (zone_progress, milestones,
+  // invoices, etc.).
+  return (
+    <OverflowClip>
+      <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="data" style={vars}>
+        {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+        <thead>
+          <tr>
+            {commitHideRow && <th className={styles.tableLiveRowHandle} />}
+            {live.header.map((h, i) => {
+              const oc = colIdx[i];
+              return (
+                <HeaderCell
+                  key={i}
+                  text={h}
+                  onCommit={commitCell && ((v) => commitCell(`hc${oc}`, v))}
+                  onHideColumn={commitHideCol && (() => commitHideCol(oc))}
+                  grip={cols.grip?.(i)}
+                />
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {live.rows.map((row, i) => {
+            const oi = rowIdx[i];
+            return (
+              <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined} {...rowProps(i)}>
+                {commitHideRow && (
+                  <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
+                )}
+                {row.map((cell, j) => (
+                  <td key={j} data-align="center">
+                    <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${oi}c${j}`, v))} />
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </OverflowClip>
+  );
 }

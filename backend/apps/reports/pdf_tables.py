@@ -212,7 +212,8 @@ def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None, hidde
             rows[i] = [c for j, c in enumerate(row) if j not in drop]
 
 
-def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None):
+def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None,
+                col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None):
     """Bordered 2-col table: label on the right, value on the left (RTL look).
 
     `avail_width` (the box/frame width this table will actually be drawn
@@ -271,7 +272,15 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None)
         data.append([val, lbl] if rtl else [lbl, val])
     widths = [None, label_w] if rtl else [label_w, None]
     pad = float(tcfg.get("cell_padding", 6))
-    t = Table(data, colWidths=widths)
+    col_sizes = element_col_widths(col_widths_frac, hidden_cols, avail_width, 2)
+    # Under RTL this builder emits [value, label]; the canvas always renders
+    # label-then-value, so the element's own widths (which are in canvas
+    # order) have to be mirrored or dragging the label divider would widen
+    # the value column in the PDF instead.
+    if col_sizes and rtl:
+        col_sizes = list(reversed(col_sizes))
+    t = Table(data, colWidths=col_sizes or widths,
+              rowHeights=element_row_heights(row_heights_mm, hidden_rows, len(rows), header_row=False))
     style = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         # No fill behind the label column — see label_style above.
@@ -311,7 +320,71 @@ def _auto_col_max_widths(col_widths, n_cols, avail_width):
     return [share if w is None else max(w - CELL_H_PADDING, MIN_COL_WIDTH) for w in widths]
 
 
-def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
+def element_col_widths(fractions, hidden_cols, avail_width, n_cols):
+    """The element's own column widths as reportlab `colWidths`, in points.
+
+    Stored on the element as FRACTIONS of the table width in the ORIGINAL
+    column index space (the same space as `hidden_cols`), because the same
+    table is drawn at several zoom levels on the canvas and again at page
+    width here — see TableSizing.tsx, whose resolveColWidths this mirrors.
+    Hidden columns are dropped first and the rest re-normalised, so hiding a
+    column hands its width to the survivors instead of leaving a gap.
+
+    None when the element carries no widths, which leaves every existing
+    per-source default (and the auto sizing) exactly as it was.
+    """
+    if not fractions or not avail_width or not n_cols:
+        return None
+    hidden = set(hidden_cols or [])
+    kept = [f for i, f in enumerate(fractions) if i not in hidden]
+    given = [f if isinstance(f, (int, float)) and f > 0 else None for f in kept]
+    if not any(g is not None for g in given):
+        return None
+    # A source can gain or lose a column after the widths were saved (a
+    # re-import, or a column hidden since). Reconcile to what's actually being
+    # drawn — reportlab pads a short colWidths with its LAST width, silently
+    # producing a table wider than its box, which is the very bug this
+    # feature exists to fix. Mirrors element_row_heights' pad/trim.
+    given = (given + [None] * n_cols)[:n_cols]
+    fixed = sum(g for g in given if g is not None)
+    autos = sum(1 for g in given if g is None)
+    share = max(0.0, 1.0 - fixed) / autos if autos else 0.0
+    out = [(share or 1.0 / len(given)) if g is None else g for g in given]
+    total = sum(out) or 1.0
+    return [avail_width * v / total for v in out]
+
+
+def element_row_heights(heights_mm, hidden_rows, body_rows, header_row=True):
+    """The element's own row heights as reportlab `rowHeights`, in points.
+
+    Millimetres in the ORIGINAL row index space (matching `hidden_rows`); a
+    None entry means "size this row to its content", which is also what every
+    row gets when the element carries no heights at all. `header_row` prepends
+    the auto-sized header the data builders put at index 0.
+    """
+    if not heights_mm:
+        return None
+    hidden = set(hidden_rows or [])
+    kept = [h for i, h in enumerate(heights_mm) if i not in hidden]
+    if not any(isinstance(h, (int, float)) and h > 0 for h in kept):
+        return None
+    # Pad/trim to the rows actually being drawn — a re-import can change the
+    # row count under a height list captured against an older one.
+    kept = (kept + [None] * body_rows)[:body_rows]
+    out = [h * mm if isinstance(h, (int, float)) and h > 0 else None for h in kept]
+    return ([None] + out) if header_row else out
+
+
+def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
+                col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None):
+    """Header row plus flat body rows.
+    `col_widths_frac`/`row_heights_mm` are the element's own dragged column
+    widths and row heights, still in the ORIGINAL index space (see
+    element_col_widths/element_row_heights, which reconcile them against
+    `hidden_cols`/`hidden_rows` and the real row/column counts here). When
+    present they take precedence over this builder's per-source defaults.
+    """
+    col_widths = element_col_widths(col_widths_frac, hidden_cols, avail_width, len(header)) or col_widths
     c, tcfg = cfg["colors"], cfg["table"]
     head = ParagraphStyle("th", parent=styles["body"], fontName=BOLD if tcfg.get("header_bold") else FONT_NAME,
                           textColor=hexcolor(c["table_header_text"]), alignment=TA_CENTER)
@@ -329,7 +402,8 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None):
             for i, cell in enumerate(row)
         ])
     pad = float(tcfg.get("cell_padding", 6))
-    t = Table(data, colWidths=col_widths, repeatRows=1)
+    t = Table(data, colWidths=col_widths,
+              rowHeights=element_row_heights(row_heights_mm, hidden_rows, len(rows)), repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -381,7 +455,8 @@ def _hierarchy_table(cfg, styles, rows, labels, rtl, avail_width=None):
                 Paragraph(_pct_or_dash(child["planned"]), pct_style),
             ])
 
-    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm], repeatRows=1)
+    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm],
+              repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -395,7 +470,9 @@ def _hierarchy_table(cfg, styles, rows, labels, rtl, avail_width=None):
     return t
 
 
-def _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=None):
+def _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=None,
+                          col_widths_frac=None, hidden_cols=None, row_heights_mm=None,
+                          hidden_rows=None):
     """Same visual shape as `_hierarchy_table` (zone rows bold+shaded,
     child rows indented one level), but built from the already-flattened,
     already override-applied `rows`/`header` resolve_table's raw=True mode
@@ -440,7 +517,9 @@ def _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=None):
         ])
 
     pad = float(tcfg.get("cell_padding", 5))
-    t = Table(data, colWidths=[None, 28 * mm, 28 * mm, 28 * mm], repeatRows=1)
+    t = Table(data, colWidths=element_col_widths(col_widths_frac, hidden_cols, avail_width, len(header))
+              or [None, 28 * mm, 28 * mm, 28 * mm],
+              rowHeights=element_row_heights(row_heights_mm, hidden_rows, len(rows)), repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), hexcolor(c["table_header_bg"])),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
