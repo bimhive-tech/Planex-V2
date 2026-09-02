@@ -25,7 +25,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 6 | Remove the Gantt chart page | Remove | ✅ **done** |
 | 7 | Remove the Milestones page | Remove | ✅ **done** |
 | 8 | Discipline table should show Phases, not disciplines | Wrong content | ☐ |
-| 9 | Submittals charts unreadable | Wrong content | ☐ |
+| 9 | Submittals charts unreadable | Wrong content | ✅ **done** |
 | 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
 | 11 | Missing page: Progress Sheet table | Missing | ☐ |
 | 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ☐ |
@@ -34,7 +34,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 15 | Zone-progress chart on p13 makes no sense | Wrong content | ✅ **done** (with item 2) |
 | 16 | Missing units/currencies in some tables | Polish | ☐ |
 | 17 | What does `السابق %` mean? | Question | ☑ answered |
-| 18 | Where is `تفاصيل الرسومات والمواد` in the reference? | Question | ☑ answered |
+| 18 | Where is `تفاصيل الرسومات والمواد` in the reference? | Question | ✅ **answered + page removed** |
 
 ---
 
@@ -199,9 +199,24 @@ know what they should look like or explain get what I mean?"
 categories SUBMITTED / APPROVED / REJECTED / pending, series ARCH / CIVIL / MEC /
 ELECTRICAL, the count printed inside every segment, axes to 8000 / 500.
 
-**Understood:** Ours plots a value of 1 per bar with no readable labels. It should
-carry the real counts per discipline per status with segment labels, matching the
-reference's shape.
+**Fixed 2026-09-02.** Two things were wrong, one of them not the chart's fault.
+
+The shape already matched the reference (statuses down the axis, disciplines
+stacked). What it lacked was the reference's leading **SUBMITTED** bar — the
+total each discipline has put in, which every other bar is read against. Without
+that denominator the counts carry no sense of scale. It is a total, not a status,
+so it is derived from the other three rather than imported as a fifth bucket that
+would double-count every row. Labels on segments too narrow to hold them are now
+suppressed (below 4% of the widest bar): on real data the pending counts printed
+on top of each other in a few millimetres.
+
+Verified against the client's own numbers: approved 717 / 2339 / 260 / 326 and
+rejected 735 / 1514 / 342 / 667 — exact matches.
+
+The second thing: the Mansoura project itself only carries **10** hand-entered
+submittals, so its chart legitimately plots 1s. The counts above come from the
+Saint Catherine project, where the dashboard's real matrix was imported. A chart
+can only be as readable as its data.
 
 ---
 
@@ -340,12 +355,15 @@ the refrence pdf so please tell me and thank you"
 
 **Our page:** `docs/review-2026-09-02/report-xx-submittals-detail-table.png`
 
-**Answer:** **It isn't in the reference.** It's a page we added — a row-per-submittal
-listing behind the two summary charts. The reference only ever shows the two stacked
-charts (item 9). It's also the page I removed from the Saint Catherine report,
-because that project's submittals came from the dashboard as counts only, so the
-table printed 249 pages of repeated discipline names. Recommend dropping it from the
-template unless the client wants a real per-item register.
+**Answer:** **It isn't in the reference.** It was a page we added — a
+row-per-submittal listing behind the two summary charts. The reference only ever
+shows the two stacked charts (item 9).
+
+**Removed 2026-09-02**, on the same rule as items 6 and 7 (not in the reference →
+not in the report). It was also the page that printed 249 pages of repeated
+discipline names on Saint Catherine, whose submittals came from the dashboard as
+counts with no per-item titles. The `submittals` table source stays available in
+the builder if a real per-item register is ever wanted.
 
 ---
 

@@ -133,6 +133,9 @@ DEFAULT_CONFIG = {
         "gantt": "الجدول الزمني",
         "submittals_material": "موقف المواد حسب التخصص",
         "submittals_shop_drawing": "موقف الرسومات التنفيذية حسب التخصص",
+        # The derived total bar on those two charts — the denominator the
+        # approved/rejected/pending bars are read against.
+        "submittals_total": "إجمالي المقدم",
         "hierarchy_progress": "تفصيل نسب الإنجاز",
         "discipline_progress": "الإنجاز حسب التخصص",
         "area_dashboards": "لوحات معلومات المناطق",

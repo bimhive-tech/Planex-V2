@@ -1022,6 +1022,17 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     for r in rows:
         grid[r["discipline"]][r["status_key"]] += 1
 
+    # The reference dashboard leads with a SUBMITTED bar — the total each
+    # discipline has put in — and reads the approved/rejected/pending bars
+    # against it. Without that denominator the counts carry no sense of scale,
+    # which is exactly what the client couldn't read off this chart
+    # (2026-09-02). It is a total, not a status, so it is derived here rather
+    # than imported as a fifth bucket that would double-count every row.
+    TOTAL_KEY = "_submitted_total"
+    for disc in disciplines:
+        grid[disc][TOTAL_KEY] = sum(grid[disc][sk] for sk, _ in status_order)
+    status_order = [(TOTAL_KEY, labels.get("submittals_total", "Submitted"))] + status_order
+
     height = height or 60 * mm
     d = Drawing(width, height)
     chart = HorizontalBarChart()
@@ -1029,7 +1040,8 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     # Localize the enum display labels — the same values render Arabic in
     # the submittals TABLE, so leaving the chart English put both in one
     # document (2026-08-30).
-    status_names = [shape(enum_label(cfg, label)) for _, label in status_order]
+    status_names = [shape(label if key == TOTAL_KEY else enum_label(cfg, label))
+                    for key, label in status_order]
     # YCategoryAxis labels grow leftward from the axis — reserve real width
     # for the longest one instead of a fixed guess, so "Approved with
     # comments" doesn't clip the way a small fixed margin did.
@@ -1076,7 +1088,17 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     # status with no submittals stacked its zeros on top of each other at the
     # axis origin — two or three "0" glyphs overprinting on the axis spine of
     # the executive summary (2026-08-30).
-    chart.barLabelFormat = lambda v: "" if not v else "%d" % v
+    #
+    # Segments too narrow to hold their own text are left unlabelled too: on a
+    # real project the pending bar is a handful against thousands submitted, so
+    # its four counts printed on top of each other in a few millimetres and
+    # made the whole chart unreadable (2026-09-02). The threshold is a fraction
+    # of the widest bar, which is what sets the axis, so it tracks the actual
+    # drawn width without needing the geometry.
+    widest = max((sum(grid[disc][sk] for disc in disciplines) for sk, _ in status_order),
+                 default=0)
+    min_label = widest * 0.04
+    chart.barLabelFormat = lambda v: "%d" % v if v and v >= min_label else ""
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
     d.add(chart)
