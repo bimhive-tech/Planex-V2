@@ -1931,3 +1931,71 @@ class VariationApiTests(TestCase):
     def test_schedule_variation_requires_new_finish(self):
         self.login("va@acme.com")
         self.assertEqual(self._create(kind="schedule", title="no date").status_code, 400)
+
+
+class BoqFinancialProgressTests(TestCase):
+    """The reference's "Financial Progress according to BOQ" plots two bars per
+    trade on ONE axis, so both have to share a denominator: what share of the
+    total budget the trade is, and how much of that same total has been earned
+    in it (reported 2026-09-02)."""
+
+    def _project(self):
+        from apps.accounts.models import Company
+        company = Company.objects.create(name="Acme")
+        return Company, company, Project.objects.create(
+            company=company, name="Tower", project_type="commercial")
+
+    def _activity(self, company, project, scope, phase, budget, earned):
+        from .models import Activity
+        return Activity.objects.create(
+            company=company, project=project, scope=scope, phase_name=phase,
+            name=phase, budgeted_cost=budget, earned_value_cost=earned, weight=budget)
+
+    def test_both_series_share_the_total_budget_as_denominator(self):
+        from apps.reports.services import _boq_financial_progress
+        from .models import ProjectScope
+
+        _, company, project = self._project()
+        scope = ProjectScope.objects.create(company=company, project=project, name="Z")
+        # 800 of 1000 budget in Finishes, 200 in Elec; 400 and 100 earned.
+        self._activity(company, project, scope, "Finishes", 800, 400)
+        self._activity(company, project, scope, "Elec", 200, 100)
+
+        rows = {r["name"]: r for r in _boq_financial_progress(project)}
+        self.assertEqual(rows["Finishes"]["budget_share"], 80.0)
+        self.assertEqual(rows["Elec"]["budget_share"], 20.0)
+        # 400/1000 and 100/1000 — NOT 400/800 (50%) and 100/200 (50%), which
+        # would put a 20%-budget trade level with an 80%-budget one.
+        self.assertEqual(rows["Finishes"]["financial_percent"], 40.0)
+        self.assertEqual(rows["Elec"]["financial_percent"], 10.0)
+
+    def test_budget_shares_total_100_and_actuals_total_overall_progress(self):
+        from apps.reports.services import _boq_financial_progress
+        from .models import ProjectScope
+
+        _, company, project = self._project()
+        scope = ProjectScope.objects.create(company=company, project=project, name="Z")
+        self._activity(company, project, scope, "A", 500, 250)
+        self._activity(company, project, scope, "B", 300, 150)
+        self._activity(company, project, scope, "C", 200, 100)
+
+        rows = _boq_financial_progress(project)
+        self.assertAlmostEqual(sum(r["budget_share"] for r in rows), 100.0, places=1)
+        # 500 earned of 1000 budgeted overall.
+        self.assertAlmostEqual(sum(r["financial_percent"] for r in rows), 50.0, places=1)
+
+    def test_a_trades_own_completion_is_still_recoverable(self):
+        """Dividing the two gives back the per-trade figure the old second
+        series carried, so nothing is lost by sharing the denominator."""
+        from apps.reports.services import _boq_financial_progress
+        from .models import ProjectScope
+
+        _, company, project = self._project()
+        scope = ProjectScope.objects.create(company=company, project=project, name="Z")
+        self._activity(company, project, scope, "Finishes", 800, 400)
+        self._activity(company, project, scope, "Elec", 200, 100)
+
+        rows = {r["name"]: r for r in _boq_financial_progress(project)}
+        for name in ("Finishes", "Elec"):
+            own = rows[name]["financial_percent"] / rows[name]["budget_share"] * 100
+            self.assertAlmostEqual(own, 50.0, places=1)

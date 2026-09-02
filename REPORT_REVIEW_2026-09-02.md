@@ -21,7 +21,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 2 | Planned % shows 86, Excel says 100 | Data | ✅ **done** |
 | 3 | Progress-curve "expected" line — where is it from? | Data | ✅ **answered + now from the workbook** |
 | 4 | Progress curve doesn't match the Excel curve | Data | ✅ **done** |
-| 5 | Financial Progress (BOQ) values look wrong | Data | ☐ |
+| 5 | Financial Progress (BOQ) values look wrong | Data | ✅ **done** |
 | 6 | Remove the Gantt chart page | Remove | ✅ **done** |
 | 7 | Remove the Milestones page | Remove | ✅ **done** |
 | 8 | Discipline table should show Phases, not disciplines | Wrong content | ☐ |
@@ -151,8 +151,21 @@ something different"
 **Reference:** Excel — "Financial Progress according to BOQ", budget vs actual per
 work category (أعمال الهارد سكيب 59.02% / 26.61%, أعمال الزراعات 5.53% / 0.77%, …).
 
-**Understood:** Compare our chart's numbers to the workbook's category percentages
-and find where the derivation diverges.
+**Fixed 2026-09-02.** The client was right. The two bars didn't share a
+denominator.
+
+In the reference the budget percentages sum to 100.00% and the actual ones to
+39.73% — both are shares of the SAME total budget, so the actual bar is always
+under the budget bar and the shortfall is readable at a glance. Ours plotted
+`budget_share` (correctly, over the total) against earned over the phase's OWN
+budget, which came out 86% / 91% / 96% — so a trade holding 2.9% of the budget
+drew an 87% bar next to a 2.9% one and the chart couldn't be read as a
+comparison at all.
+
+The second series is now earned over the same total. Verified on real data:
+budget shares total 100%, actuals total 87.5% — the project's overall financial
+progress. The per-trade completion figure is not lost; it is
+`financial_percent / budget_share`. 3 new tests.
 
 ---
 

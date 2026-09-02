@@ -530,15 +530,24 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
     this quietly returns nothing rather than fabricating figures for a
     project that never had cost data).
 
-    Two independently-real percentages per phase, not one fabricated
-    "progress":
-    - `budget_share`: this phase's share of the project's *total* budgeted
-      cost (how much of the whole budget this trade represents).
-    - `financial_percent`: this phase's own earned_value_cost /
-      budgeted_cost (how much of ITS OWN budget has been earned so far —
-      P6's own EVM figure, not derived from progress_percent: even a
-      100%-physically-complete activity can earn slightly under or over
-      its own budgeted_cost).
+    Two percentages per phase, BOTH over the project's total budgeted cost so
+    the pair is directly comparable on one axis, exactly as the reference
+    chart plots them:
+    - `budget_share`: this phase's share of the total budget (how much of the
+      whole this trade represents). These sum to 100%.
+    - `financial_percent`: this phase's earned_value_cost over that same
+      total (how much of the WHOLE budget has been earned in this trade).
+      These sum to the project's overall financial progress, and each one is
+      necessarily <= its own budget share, which is what makes the shortfall
+      readable at a glance.
+
+    The second figure used to be earned over the phase's OWN budget. That is a
+    real number too, but it is not what the reference plots and it does not
+    belong on the same axis: a trade holding 2.9% of the budget showed an 87%
+    bar next to a 2.9% one, so every small trade towered over the big ones and
+    the chart could not be read as a comparison at all (2026-09-02). The
+    per-phase completion figure is still recoverable as
+    financial_percent / budget_share.
 
     Sorted by budget share descending, capped at `limit` phases so a P6
     export with dozens of phases doesn't produce an unreadable chart.
@@ -563,7 +572,7 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
         out.append({
             "name": r["phase_name"],
             "budget_share": round(budget / total_budget * 100, 1),
-            "financial_percent": round(earned / budget * 100, 1) if budget else 0.0,
+            "financial_percent": round(earned / total_budget * 100, 1),
         })
     return out
 
