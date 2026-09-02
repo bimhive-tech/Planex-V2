@@ -409,7 +409,12 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
 
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     direct_w, direct_pw = {}, {}
-    for sid, weight_val, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
+    # Budgeted and earned cost per scope, for the stage dashboard's Earned
+    # Progress pie — P6's own EVM figures, summed the same way and rolled up
+    # the same subtree as progress below.
+    direct_budget, direct_earned = {}, {}
+    for sid, weight_val, prog, aid, budget, earned in activities.values_list(
+            "scope_id", "weight", "progress_percent", "id", "budgeted_cost", "earned_value_cost"):
         if not predicate(sid, aid):
             continue
         sid = str(sid)
@@ -417,6 +422,10 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
         direct_w[sid] = direct_w.get(sid, 0.0) + w
         direct_pw[sid] = direct_pw.get(sid, 0.0) + w * prog
+        if budget is not None:
+            direct_budget[sid] = direct_budget.get(sid, 0.0) + float(budget)
+        if earned is not None:
+            direct_earned[sid] = direct_earned.get(sid, 0.0) + float(earned)
 
     scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     scopes = {str(s.id): s for s in scopes_qs}
@@ -440,6 +449,15 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         w = weight.get(sid, 0.0)
         return round(pweight[sid] / w, 1) if w else None
 
+    def cost(sid):
+        """(budgeted, earned) over this scope's whole subtree."""
+        b, e = direct_budget.get(sid, 0.0), direct_earned.get(sid, 0.0)
+        for cid in children.get(sid, []):
+            cb, ce = cost(cid)
+            b += cb
+            e += ce
+        return b, e
+
     stages = sorted(
         (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.STAGE),
         key=lambda s: (s.sort_order, s.name),
@@ -461,9 +479,11 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
             })
         planned = _scope_planned_progress(stage, project, as_of, planned_map)
         actual = pct(sid)
+        budgeted, earned = cost(sid)
         rows.append({
             "id": sid, "name": stage.name, "actual": actual, "previous": prev_scopes.get(sid),
             "planned": planned, "children": kids,
+            "budgeted_cost": budgeted, "earned_value_cost": earned,
             "duration": _zone_duration(stage, project, as_of, planned_pct=planned, actual_pct=actual),
         })
     return rows

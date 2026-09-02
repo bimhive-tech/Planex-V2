@@ -26,7 +26,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 7 | Remove the Milestones page | Remove | ✅ **done** |
 | 8 | Discipline table should show Phases, not disciplines | Wrong content | ✅ **done** |
 | 9 | Submittals charts unreadable | Wrong content | ✅ **done** |
-| 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
+| 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ✅ **done** |
 | 11 | Missing page: Progress Sheet table | Missing | ✅ **done** |
 | 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ✅ **done** |
 | 13 | Landscape pages use the portrait header/footer | Layout | ✅ **done** |

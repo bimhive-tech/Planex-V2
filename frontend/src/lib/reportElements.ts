@@ -113,6 +113,8 @@ export const ITEM_CHART_SOURCES = [
   { value: "item.units", label: "Item: unit progress" },
   { value: "item.duration", label: "Item: duration & delay" },
   { value: "item.spi", label: "Item: SPI gauge" },
+  { value: "item.progress", label: "Item: planned vs actual pie" },
+  { value: "item.earned", label: "Item: earned value pie" },
 ];
 
 export const ELEMENT_CATALOG: ElementCategory[] = [

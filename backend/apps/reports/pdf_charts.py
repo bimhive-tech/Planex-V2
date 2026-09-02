@@ -462,6 +462,55 @@ def _duration_pie_for(cfg, dur, width, labels, height=None):
     return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
+def item_progress_pie(cfg, item, width, labels, height=None):
+    """Planned vs actual vs variance for one stage — the reference dashboard's
+    PROGRESS pie (its "PLANNED PROGRESS (Baseline)" / "ACTUAL PROGRESS" /
+    "Variance" panel).
+
+    Plotted as achieved-vs-shortfall so the wedges sum to the baseline: the
+    variance slice IS the gap the panel exists to show. `None` when the stage
+    has no planned figure to compare against, rather than drawing a full circle
+    that silently means "nothing known"."""
+    if not item:
+        return None
+    planned, actual = item.get("planned"), item.get("actual")
+    if planned is None or actual is None:
+        return None
+    variance = max(0.0, float(planned) - float(actual))
+    slices = [
+        (labels.get("actual", "Actual"), round(float(actual), 2), cfg["colors"]["chart_actual"]),
+        (labels.get("variance", "Variance"), round(variance, 2), cfg["colors"].get("muted", "#A5A5A5")),
+    ]
+    return _reference_pie(cfg, slices, width, height or 60 * mm, value_fmt="{:,.2f}%")
+
+
+def item_earned_pie(cfg, item, width, labels, height=None):
+    """Budgeted vs earned vs remaining value for one stage — the reference
+    dashboard's "Earned Progress" pie (PLANNED VALUE COST / EARNED VALUE COST /
+    REMAINING VALUE COST).
+
+    Straight from P6's own EVM columns, summed over the stage's whole subtree.
+    `None` when the schedule carried no cost columns, rather than drawing an
+    empty circle."""
+    if not item:
+        return None
+    budget = float(item.get("budgeted_cost") or 0)
+    earned = float(item.get("earned_value_cost") or 0)
+    if not budget:
+        return None
+    remaining = max(0.0, budget - earned)
+    palette = cfg["colors"].get("chart_palette") or []
+    slices = [
+        (labels.get("budget_planned_value", "Planned value"), round(budget, 2),
+         cfg["colors"]["chart_planned"]),
+        (labels.get("budget_earned_value", "Earned value"), round(earned, 2),
+         cfg["colors"]["chart_actual"]),
+        (labels.get("budget_remaining_value", "Remaining value"), round(remaining, 2),
+         palette[2] if len(palette) > 2 else cfg["colors"].get("muted", "#A5A5A5")),
+    ]
+    return _reference_pie(cfg, slices, width, height or 60 * mm)
+
+
 def duration_pie(cfg, ctx, width, labels, height=None):
     """Project duration vs delay days (reference duration pie)."""
     return _duration_pie_for(cfg, ctx.get("duration"), width, labels, height)

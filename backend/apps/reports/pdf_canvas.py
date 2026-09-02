@@ -30,6 +30,8 @@ from .pdf_charts import (
     duration_pie,
     gantt_chart,
     invoice_status_chart,
+    item_earned_pie,
+    item_progress_pie,
     overall_donut,
     planned_actual_chart,
     progress_comparison_chart,
@@ -1418,6 +1420,12 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     if source == "item.duration":
         item = scope.get("item") or {}
         return zone_duration_pie(cfg, item.get("duration"), w, labels, height=h)
+    if source == "item.progress":
+        item = scope.get("item") or {}
+        return item_progress_pie(cfg, item, w, labels, height=h)
+    if source == "item.earned":
+        item = scope.get("item") or {}
+        return item_earned_pie(cfg, item, w, labels, height=h)
     if source == "item.spi":
         item = scope.get("item") or {}
         value = item.get("progress") if "progress" in item else item.get("actual")
