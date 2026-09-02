@@ -2078,8 +2078,9 @@ class FinanceReportTests(TestCase):
     def test_boq_financial_progress_groups_by_phase_with_real_cost_data(self):
         """Activity IS the BOQ line-item model (see its own docstring) — a
         real P6 import fills budgeted_cost/earned_value_cost per activity;
-        this aggregates those into the two independently-real percentages
-        _boq_financial_progress's own docstring describes."""
+        this aggregates those into the two percentages
+        _boq_financial_progress's own docstring describes, BOTH over the
+        project's total budget so the pair shares one axis (2026-09-02)."""
         from apps.projects.models import Activity, ProjectScope
 
         from .services import build_report_context
@@ -2100,12 +2101,16 @@ class FinanceReportTests(TestCase):
         ctx = build_report_context(rep)
         rows = {r["name"]: r for r in ctx["boq_financial_progress"]}
         self.assertEqual(set(rows), {"Electrical", "Concrete"})
-        # Electrical: budget 1000/2000 total = 50% share; earned 600/1000 = 60% financial.
+        # Electrical: budget 1000/2000 = 50% share; earned 600/2000 = 30%.
         self.assertEqual(rows["Electrical"]["budget_share"], 50.0)
-        self.assertEqual(rows["Electrical"]["financial_percent"], 60.0)
-        # Concrete: budget 1000/2000 = 50% share; earned 500/1000 = 50% financial.
+        self.assertEqual(rows["Electrical"]["financial_percent"], 30.0)
+        # Concrete: budget 1000/2000 = 50% share; earned 500/2000 = 25%.
         self.assertEqual(rows["Concrete"]["budget_share"], 50.0)
-        self.assertEqual(rows["Concrete"]["financial_percent"], 50.0)
+        self.assertEqual(rows["Concrete"]["financial_percent"], 25.0)
+        # Both series over the same denominator: shares total 100%, actuals
+        # total the project's own financial progress (1100 earned of 2000).
+        self.assertEqual(sum(r["budget_share"] for r in rows.values()), 100.0)
+        self.assertEqual(sum(r["financial_percent"] for r in rows.values()), 55.0)
 
     def test_boq_financial_progress_empty_without_any_cost_import(self):
         from .services import build_report_context
@@ -3828,3 +3833,67 @@ class ProgressSheetLayoutTests(SimpleTestCase):
                             avail_width=265 * MM, raw=True)
         # planned, actual, this-month (actual-previous), previous, factor, variance
         self.assertEqual(raw["rows"][0][3:], ["100.0%", "96.9%", "0.3%", "96.6%", "96.9%", "-3.1%"])
+
+
+class StageAreaBarsTests(TestCase):
+    """The stage dashboard's planned-vs-actual bar chart plots one pair per
+    AREA — the buildings — not per zone. A stage's direct children are zones,
+    so the chart was showing four bars where the reference shows ~75
+    (reported 2026-09-03)."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+        self.company = Company.objects.create(name="Acme")
+        # Planned dates so _scope_planned_progress has a baseline to answer
+        # from — without one the chart legitimately falls back to actual-only.
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 6, 1))
+        stage = ProjectScope.objects.create(
+            company=self.company, project=self.project, name="PH1",
+            scope_type=ProjectScope.ScopeType.STAGE)
+        for zi, zone_name in enumerate(("Z(A)", "Z(B)")):
+            zone = ProjectScope.objects.create(
+                company=self.company, project=self.project, parent=stage, name=zone_name,
+                scope_type=ProjectScope.ScopeType.ZONE, sort_order=zi)
+            for ai in range(3):
+                area = ProjectScope.objects.create(
+                    company=self.company, project=self.project, parent=zone,
+                    name=f"Building {zi * 3 + ai + 1}",
+                    scope_type=ProjectScope.ScopeType.AREA, sort_order=ai)
+                Activity.objects.create(company=self.company, project=self.project, scope=area,
+                                        name="Work", weight=1, progress_percent=50 + ai * 10)
+
+    def _stage(self):
+        from .services import _phase_rows
+        return _phase_rows(self.project, as_of=datetime.date(2026, 4, 1))[0]
+
+    def test_the_stage_carries_its_areas_not_just_its_zones(self):
+        stage = self._stage()
+        self.assertEqual([c["name"] for c in stage["children"]], ["Z(A)", "Z(B)"])
+        self.assertEqual([a["name"] for a in stage["areas"]],
+                         ["Building 1", "Building 2", "Building 3",
+                          "Building 4", "Building 5", "Building 6"])
+
+    def test_the_chart_plots_one_bar_pair_per_area(self):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+
+        from .pdf_charts import area_units_chart
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+        drawing = area_units_chart(merged_config(default_config()), self._stage(), 400,
+                                   merged_config(default_config())["labels"], height=200)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        # Six areas, not two zones — and both series, per item 2/15.
+        self.assertEqual(len(chart.data), 2)
+        self.assertEqual(len(chart.data[1]), 6)
+
+    def test_a_zone_item_is_unchanged(self):
+        """A zone has no `areas` key; its own children already ARE the areas."""
+        from .pdf_charts import area_units_chart
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+        cfg = merged_config(default_config())
+        zone_item = {"children": [{"name": "Building 1", "actual": 50.0, "planned": 100.0}]}
+        self.assertIsNotNone(area_units_chart(cfg, zone_item, 400, cfg["labels"], height=200))
+        self.assertIsNone(area_units_chart(cfg, {"children": []}, 400, cfg["labels"], height=200))

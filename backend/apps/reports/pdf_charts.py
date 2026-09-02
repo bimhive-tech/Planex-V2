@@ -344,7 +344,14 @@ def _unit_bars(cfg, units, width, labels, height=None):
     # per series). Planned is a flat 100% across the whole chart, so labelling
     # it stacked "100%" over every bar in one colliding row along the top and
     # told the reader nothing the axis didn't already.
-    chart.barLabelFormat = [None, "%0.0f%%"] if has_planned else ["%0.0f%%"]
+    #
+    # Past a certain density no label fits either: a stage with 74 buildings
+    # printed "98989898…" as one unreadable smear along the top, and the
+    # reference's own chart at that width carries no values at all. ~11pt per
+    # category is what a two-digit percentage needs to stand clear.
+    labelled = chart.width / max(1, len(units)) >= 11
+    fmt = "%0.0f%%" if labelled else None
+    chart.barLabelFormat = [None, fmt] if has_planned else [fmt]
     d.add(chart)
     pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else [])
     pairs = pairs + [(cfg["colors"]["chart_actual"], labels["actual"])]
@@ -408,10 +415,23 @@ def _completion_histogram(cfg, children, width, labels, height=None):
 
 
 def area_units_chart(cfg, area, width, labels, height=None):
-    """A zone's sub-units visualised for its dashboard page: per-unit bars when
-    there are few enough to read, otherwise a completion histogram so the page
-    stays informative for zones with dozens/hundreds of units (the old version
-    just drew nothing in that case, leaving the page near-empty)."""
+    """The item's sub-units visualised for its dashboard page.
+
+    Prefers an explicit `areas` list when the item carries one. A STAGE's direct
+    children are zones, but the reference dashboard's planned-vs-actual chart
+    plots one pair per AREA — the buildings a level further down — so
+    `_phase_rows` collects those separately and they win here (2026-09-03). A
+    zone item has no `areas`, and its own children already ARE the areas, so it
+    falls through to them unchanged.
+
+    An explicit `areas` list is always drawn as bars, however many there are:
+    that IS the reference chart, ~75 pairs across a full-width panel with
+    thinned labels. The histogram below stays as the fallback for a zone whose
+    unit count would make individual bars unreadable — the case it was added
+    for, where the alternative was drawing nothing at all."""
+    areas = area.get("areas")
+    if areas:
+        return _unit_bars(cfg, areas, width, labels, height)
     children = area.get("children", [])
     if not children:
         return None

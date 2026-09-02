@@ -477,12 +477,28 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
                 "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
                 "planned": _scope_planned_progress(child, project, as_of, planned_map),
             })
+        # A stage's direct children are ZONES, but the reference dashboard's
+        # planned-vs-actual bar chart plots one pair per AREA — the buildings
+        # one level further down ("المرحلة الاولى (75) عمارة"). Collected
+        # separately so `children` keeps meaning "direct children" for the
+        # zone table beside it (2026-09-03).
+        areas = []
+        for zid in sorted(children.get(sid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+            for aid_ in sorted(children.get(zid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+                child = scopes[aid_]
+                if child.scope_type != ProjectScope.ScopeType.AREA or not weight.get(aid_):
+                    continue
+                areas.append({
+                    "name": child.name, "actual": pct(aid_), "previous": prev_scopes.get(aid_),
+                    "planned": _scope_planned_progress(child, project, as_of, planned_map),
+                })
+
         planned = _scope_planned_progress(stage, project, as_of, planned_map)
         actual = pct(sid)
         budgeted, earned = cost(sid)
         rows.append({
             "id": sid, "name": stage.name, "actual": actual, "previous": prev_scopes.get(sid),
-            "planned": planned, "children": kids,
+            "planned": planned, "children": kids, "areas": areas,
             "budgeted_cost": budgeted, "earned_value_cost": earned,
             "duration": _zone_duration(stage, project, as_of, planned_pct=planned, actual_pct=actual),
         })
