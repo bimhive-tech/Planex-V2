@@ -203,6 +203,15 @@ class ProgressSnapshot(TimestampedModel):
     # just at the top. Blank on snapshots taken before this existed.
     scopes = models.JSONField(default=dict, blank=True)
     source = models.CharField(max_length=200, blank=True)     # e.g. the workbook file name
+    # The schedule's OWN curve values for this month, when the source carried
+    # them (a P6 progress-curve sheet: "Cummulative Early Budget Expense %" and
+    # "Cumm Remaining Cost%"). Both are cost-loaded S-curves, so they bend the
+    # way a real programme does — unlike a straight line between two dates.
+    # Null for sources that carry no such series; the report then falls back to
+    # its own estimate (see reports.services._planned_progress and the S-curve's
+    # forecast run-out).
+    planned_progress = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    forecast_progress = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     class Meta:
         constraints = [

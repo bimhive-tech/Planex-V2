@@ -850,21 +850,35 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
         if past and len(past) < len(series):
             cut = past[-1]
 
-    if cut is None:
+    # The schedule's OWN forecast curve, when the source carried one. Only
+    # meaningful from the cut onwards — before it, the actual line is the truth.
+    stored_forecast = [p.get("forecast") for p in series]
+    has_stored_forecast = any(v is not None for v in stored_forecast)
+
+    if cut is None and not has_stored_forecast:
         data = [[p["planned"] for p in series], actual]
     else:
-        anchor = actual[cut]
+        anchor = actual[cut] if cut is not None else actual[-1]
         data = [[p["planned"] for p in series],
-                [v if i <= cut else None for i, v in enumerate(actual)]]
-        if anchor is not None:
-            # Straight run-out from today's real actual to 100% at the end of
-            # the series. Starts *at* the cut so it joins the actual line
-            # rather than floating; reportlab renders None as a gap, so only
-            # this segment is stroked.
+                [v if (cut is None or i <= cut) else None for i, v in enumerate(actual)]]
+        forecast = None
+        if has_stored_forecast:
+            # Real values, joined to the actual line at the cut so the two read
+            # as one continuous curve rather than a floating segment.
+            forecast = [v if (cut is None or i >= cut) else None
+                        for i, v in enumerate(stored_forecast)]
+            if cut is not None and forecast[cut] is None:
+                forecast[cut] = anchor
+        elif anchor is not None and cut is not None and len(series) - 1 > cut:
+            # No stored curve: a straight run-out from today's real actual to
+            # 100% at the end of the series, which is the only forecast the
+            # remaining data supports (the project stores forecast/revised
+            # *dates*, not a month-by-month projection).
             forecast = [None] * len(series)
             span = len(series) - 1 - cut
             for i in range(cut, len(series)):
                 forecast[i] = anchor + (100.0 - anchor) * ((i - cut) / span)
+        if forecast is not None:
             data.append(forecast)
             palette = cfg["colors"].get("chart_palette") or []
             forecast_color = palette[5] if len(palette) > 5 else cfg["colors"].get("gauge_warn", "#F79646")
@@ -887,6 +901,25 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
         chart.lines[i].strokeColor = hexcolor(color)
         chart.lines[i].strokeWidth = 2
     d.add(chart)
+
+    # Call out where each line ends, the way the reference's own Progress Curve
+    # does ("83.70%", "100.00%"). Reading a final value off a 10%-step axis is
+    # guesswork otherwise, and that end figure is the number the report is
+    # actually about.
+    step = chart.width / max(1, len(series) - 1)
+    for row, (color, _) in enumerate(swatches):
+        values = data[row]
+        last = next((i for i in range(len(values) - 1, -1, -1) if values[i] is not None), None)
+        if last is None:
+            continue
+        value = values[last]
+        x = chart.x + last * step
+        y = chart.y + chart.height * (min(100.0, max(0.0, value)) / 100.0)
+        # Nudge in from the right edge so a final-column label isn't clipped.
+        anchor = "end" if last >= len(values) - 1 else "start"
+        d.add(String(x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
+                     fontName=_SANS_BOLD, fontSize=6,
+                     fillColor=hexcolor(color), textAnchor=anchor))
     _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
     return d
 

@@ -19,8 +19,8 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 |---|---|---|---|
 | 1 | Web app is very slow | Performance | ⏸ parked — client reports it is no longer slow; revisit if it returns |
 | 2 | Planned % shows 86, Excel says 100 | Data | ✅ **done** |
-| 3 | Progress-curve "expected" line — where is it from? | Data | ☑ answered, decision needed |
-| 4 | Progress curve doesn't match the Excel curve | Data | ☐ |
+| 3 | Progress-curve "expected" line — where is it from? | Data | ✅ **answered + now from the workbook** |
+| 4 | Progress curve doesn't match the Excel curve | Data | ✅ **done** |
 | 5 | Financial Progress (BOQ) values look wrong | Data | ☐ |
 | 6 | Remove the Gantt chart page | Remove | ✅ **done** |
 | 7 | Remove the Milestones page | Remove | ✅ **done** |
@@ -103,8 +103,16 @@ forecast *dates*, not a month-by-month projected curve, so that was the only
 forecast the data supported at the time.
 
 **But the workbook has a real one.** The `progress curve` sheet carries
-`Cumm Remaining Cost%` (the red segment in the client's own chart). We should plot
-that series instead of interpolating.
+`Cumm Remaining Cost%` (the red segment in the client's own chart).
+
+**Fixed 2026-09-02.** `ProgressSnapshot` now stores the schedule's own
+`planned_progress` and `forecast_progress` per month, and the chart plots those
+when present. The interpolation survives only as the fallback for sources that
+carry no such curve.
+
+Caveat worth knowing: the workbook fills `Cumm Remaining Cost%` for only a
+handful of months, so the forecast segment is short. It draws what exists rather
+than inventing a run-out.
 
 ---
 
@@ -119,9 +127,16 @@ have is wrong according to the excel sheets please recheck that"
 `Cummulative Actual Cost %` (row 11), `Cumm Remaining Cost%` (row 14); months across
 row 2. End labels 83.70% and 100.00%.
 
-**Understood:** Our S-curve should mirror that chart — same series, same shape, and
-end-of-line value labels. Ties into item 3: the workbook has all four series and we
-currently plot two plus an invented forecast.
+**Fixed 2026-09-02.** The values *were* wrong, and for the same reason as item 2:
+the planned line was the elapsed-time formula — a straight ramp between two dates
+— while the workbook's is `Cummulative Early Budget Expense %`, a cost-loaded
+curve that bends the way a real programme does. Planned now comes from the stored
+curve (see item 3), so the shape matches: a slow climb to ~53% through 2024, the
+steep run to 100% by Mar-25, and actual trailing to 83.70%.
+
+End-of-line value labels added, as the reference has them — reading a final figure
+off a 10%-step axis is guesswork, and that end number is what the chart is about.
+Verified: **100.00%** and **83.70%**, the reference's own two callouts.
 
 ---
 

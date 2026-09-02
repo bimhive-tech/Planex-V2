@@ -885,7 +885,9 @@ def build_report_context(report):
         project.milestones.order_by("sort_order", "date").values("title", "date", "status")
     )
     snapshots = list(
-        project.snapshots.order_by("date").values("date", "overall_progress", "source", "zones", "scopes")
+        project.snapshots.order_by("date")
+        .values("date", "overall_progress", "source", "zones", "scopes",
+                "planned_progress", "forecast_progress")
     )
 
     # Previous actual = the most recent snapshot strictly before the report date.
@@ -982,12 +984,21 @@ def build_report_context(report):
                     for key, label in status_labels.items()],
     }
 
-    # S-curve series: actual (from snapshots) vs planned at each snapshot date.
+    # S-curve series: actual, planned and forecast at each snapshot date.
+    #
+    # Planned and forecast come from the SCHEDULE's own curve when the source
+    # carried one (a P6 progress-curve sheet). Those are cost-loaded, so they
+    # bend the way a real programme does; the date-based fallback is a straight
+    # line between two dates, which is not what the client's curve looks like
+    # and reads wrong on any front- or back-loaded job (2026-09-02).
     scurve = [
         {
             "date": s["date"],
             "actual": float(s["overall_progress"]),
-            "planned": _planned_progress(project, s["date"]),
+            "planned": (float(s["planned_progress"]) if s["planned_progress"] is not None
+                        else _planned_progress(project, s["date"])),
+            "forecast": (float(s["forecast_progress"])
+                         if s["forecast_progress"] is not None else None),
         }
         for s in snapshots if s["date"]
     ]
