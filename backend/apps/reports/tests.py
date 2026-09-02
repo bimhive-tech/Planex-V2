@@ -780,8 +780,8 @@ def _full_ctx():
                     {"name": "Area 2", "planned": 60.0, "actual": 55.0}]
     ctx["hierarchy"] = [{"name": "المنطقة الأولى", "actual": 90.0, "previous": 85.0, "planned": 92.0,
                         "children": [{"name": "Sub A", "actual": 88.0, "previous": 80.0, "planned": 90.0}]}]
-    ctx["discipline"] = [{"name": "Zone A", "concrete": 90.0, "architecture": 70.0,
-                          "electrical": 50.0, "mechanical": 40.0, "other": None}]
+    ctx["discipline_columns"] = ["Internal Finishes", "ELEC", "Snag list"]
+    ctx["discipline"] = [{"name": "Zone A", "values": [90.0, 70.0, None]}]
     ctx["duration"] = {"total": 400, "elapsed": 200, "remaining": 200, "delay": 15}
     ctx["cashflow"] = [
         {"month": datetime.date(2026, 1, 1), "planned": 100.0, "actual": 90.0,
@@ -1756,8 +1756,9 @@ class PlannedProgressOverrideTests(TestCase):
 
 
 class DisciplineRowsTests(TestCase):
-    """`_discipline_rows` splits one unit's progress by trade, using each
-    activity's phase's discipline tag (a phase's direct parent is the unit)."""
+    """`_discipline_rows` splits one unit's progress by PHASE — the schedule's
+    own work packages, whether or not they carry a discipline tag (a phase's
+    direct parent is the unit)."""
 
     def setUp(self):
         from apps.projects.models import Activity, ProjectScope
@@ -1784,17 +1785,17 @@ class DisciplineRowsTests(TestCase):
         Activity.objects.create(company=self.company, project=self.project, scope=untagged_phase,
                                 name="Other work", weight=1, progress_percent=100)
 
-    def test_splits_progress_by_phase_discipline(self):
+    def test_splits_progress_by_phase(self):
         from .services import _discipline_rows
 
-        rows = _discipline_rows(self.project)
+        columns, rows = _discipline_rows(self.project)
+        # Every phase gets a column, including the untagged one — its work used
+        # to be dropped entirely for want of a discipline tag.
+        self.assertEqual(columns, ["Concrete works", "Electrical works", "Misc"])
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row["name"], "Building 1")
-        self.assertEqual(row["concrete"], 80.0)
-        self.assertEqual(row["electrical"], 20.0)
-        self.assertIsNone(row["architecture"])
-        self.assertIsNone(row["mechanical"])  # untagged phase's work isn't guessed into a column
+        self.assertEqual(row["values"], [80.0, 20.0, 100.0])
 
 
 class AreaDashboardsTests(TestCase):
@@ -3733,3 +3734,52 @@ class MoneyUnitsTests(TestCase):
         raw = resolve_table("invoices", cfg, ctx, {"item": None}, avail_width=160 * MM, raw=True)
         self.assertEqual(raw["rows"][0][1], "1,000,000.50 EGP")
         self.assertEqual(raw["rows"][-1][1], "1,000,000.50 EGP")   # the Total row too
+
+
+class PhaseProgressTableTests(TestCase):
+    """Client review item 8: the per-unit progress table's columns must be the
+    schedule's OWN phases, not five fixed trade buckets. On a schedule with
+    eight phases per building, two of the five columns were permanently empty
+    and the other three merged unrelated work packages (2026-09-02)."""
+
+    def setUp(self):
+        from apps.projects.models import Activity, ProjectScope
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+        unit = ProjectScope.objects.create(
+            company=self.company, project=self.project, name="Building 6",
+            scope_type=ProjectScope.ScopeType.AREA, sort_order=1)
+        # Deliberately created out of order: columns must follow sort_order.
+        for order, (name, pct) in enumerate([("Snag list", 60.0), ("Internal Finishes", 90.0)]):
+            phase = ProjectScope.objects.create(
+                company=self.company, project=self.project, parent=unit, name=name,
+                scope_type=ProjectScope.ScopeType.PHASE, sort_order=10 - order)
+            Activity.objects.create(company=self.company, project=self.project, scope=phase,
+                                    name=name, progress_percent=pct, weight=1)
+
+    def test_columns_are_the_schedules_own_phase_names(self):
+        from .services import _discipline_rows
+        columns, rows = _discipline_rows(self.project)
+        # sort_order 9 (Internal Finishes) before 10 (Snag list).
+        self.assertEqual(columns, ["Internal Finishes", "Snag list"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "Building 6")
+        self.assertEqual(rows[0]["values"], [90.0, 60.0])
+
+    def test_untagged_phases_are_included(self):
+        """The old version required a discipline tag, so half this schedule's
+        phases were dropped before they could be shown at all."""
+        from apps.projects.models import ProjectScope
+        self.assertFalse(
+            ProjectScope.objects.filter(project=self.project,
+                                        scope_type=ProjectScope.ScopeType.PHASE)
+            .exclude(discipline="").exists())
+        columns, rows = __import__("apps.reports.services", fromlist=["x"])._discipline_rows(self.project)
+        self.assertEqual(len(columns), 2)
+
+    def test_no_phases_returns_empty_pair(self):
+        from .services import _discipline_rows
+        blank = Project.objects.create(
+            company=self.company, name="Empty", project_type=Project.ProjectType.COMMERCIAL)
+        self.assertEqual(_discipline_rows(blank), ([], []))

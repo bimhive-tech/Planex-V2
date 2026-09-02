@@ -56,6 +56,7 @@ from .pdf_tables import (
     _info_table,
     _pct_or_dash,
     _styles,
+    enum_label,
 )
 
 
@@ -648,12 +649,11 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
 
     if sections.get("discipline_progress") and ctx.get("discipline"):
         story += major(labels["discipline_progress"])
-        disc_header = [labels["col_unit"], labels["col_concrete"], labels["col_architecture"],
-                       labels["col_electrical"], labels["col_mechanical"], labels["col_other"]]
-        disc_rows = [
-            [r["name"]] + [_pct_or_dash(r.get(d)) for d in ("concrete", "architecture", "electrical", "mechanical", "other")]
-            for r in ctx["discipline"]
-        ]
+        # Columns are the schedule's own phase names now, not five fixed trade
+        # headings — see reports.services._discipline_rows.
+        disc_header = [labels["col_unit"]] + [
+            enum_label(cfg, c) for c in (ctx.get("discipline_columns") or [])]
+        disc_rows = [[r["name"]] + [_pct_or_dash(v) for v in r["values"]] for r in ctx["discipline"]]
         story.append(_data_table(cfg, styles, disc_header, disc_rows, avail_width=fw))
 
     if sections.get("area_dashboards") and ctx.get("area_dashboards"):

@@ -24,7 +24,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 5 | Financial Progress (BOQ) values look wrong | Data | ✅ **done** |
 | 6 | Remove the Gantt chart page | Remove | ✅ **done** |
 | 7 | Remove the Milestones page | Remove | ✅ **done** |
-| 8 | Discipline table should show Phases, not disciplines | Wrong content | ☐ |
+| 8 | Discipline table should show Phases, not disciplines | Wrong content | ✅ **done** |
 | 9 | Submittals charts unreadable | Wrong content | ✅ **done** |
 | 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
 | 11 | Missing page: Progress Sheet table | Missing | ☐ |

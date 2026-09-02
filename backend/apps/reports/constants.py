@@ -137,7 +137,8 @@ DEFAULT_CONFIG = {
         # approved/rejected/pending bars are read against.
         "submittals_total": "إجمالي المقدم",
         "hierarchy_progress": "تفصيل نسب الإنجاز",
-        "discipline_progress": "الإنجاز حسب التخصص",
+        # Columns are the schedule's own phases now, not trade buckets.
+        "discipline_progress": "الإنجاز حسب المرحلة",
         "area_dashboards": "لوحات معلومات المناطق",
         "gantt_schedule": "الجدول الزمني للمشروع",
         "gantt_revised": "النهاية المعدلة",

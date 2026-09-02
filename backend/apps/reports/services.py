@@ -578,38 +578,54 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
 
 
 def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=None):
-    """Per-unit (subzone/building) progress split by trade — Concrete /
-    Architecture / Electrical / Mechanical — using each activity's *phase*
-    discipline tag (a zone-tracker phase is usually one trade's work package,
-    and a phase's direct parent is the unit, so no deep tree walk is needed).
-    Units with no tagged phases are omitted; untagged work is simply left out
-    of the trade columns rather than guessed at. `schedule_import` pins the
-    batch — see build_report_context's own resolution of it."""
+    """Per-unit (subzone/building) progress, one column per PHASE.
+
+    Returns `(columns, rows)` — the phase names actually present in this
+    schedule, and one row per unit carrying that unit's progress in each.
+
+    The columns are the schedule's own phases ("Internal Finishes", "ELEC",
+    "F.Fighting", "Snag list", …), not the four fixed discipline tags this used
+    to bucket them into. Those tags are a coarse classification of a phase, so
+    every project ended up with the same five columns whatever its real work
+    breakdown was — on a schedule with eight phases per building, two of the
+    five columns were permanently empty and the other three merged unrelated
+    work packages. The client asked for the tree's own phases instead, which is
+    also what their scope tree shows under each unit (2026-09-02).
+
+    Units with no phases are omitted. `schedule_import` pins the batch — see
+    build_report_context's own resolution of it."""
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
-    disciplines = [d for d in ProjectScope.Discipline.values]
 
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     phases = {
-        str(s.id): s for s in scopes.filter(
-            scope_type=ProjectScope.ScopeType.PHASE).exclude(discipline="")
+        str(s.id): s for s in scopes.filter(scope_type=ProjectScope.ScopeType.PHASE)
     }
     if not phases:
-        return []
+        return [], []
 
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     unit_w, unit_pw = {}, {}
+    # Column order follows the schedule's own ordering, not first-seen or
+    # alphabetical, so the columns read in the sequence the work happens.
+    seen_order = {}
     for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         sid = str(sid)
         phase = phases.get(sid)
         if not phase or phase.parent_id is None or not predicate(sid, aid):
             continue
+        key = phase.label or phase.name
+        seen_order.setdefault(key, (phase.sort_order, key))
         unit_id = str(phase.parent_id)
         w = float(weight)
         prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
-        unit_w.setdefault(unit_id, {}).setdefault(phase.discipline, 0.0)
-        unit_pw.setdefault(unit_id, {}).setdefault(phase.discipline, 0.0)
-        unit_w[unit_id][phase.discipline] += w
-        unit_pw[unit_id][phase.discipline] += w * prog
+        unit_w.setdefault(unit_id, {}).setdefault(key, 0.0)
+        unit_pw.setdefault(unit_id, {}).setdefault(key, 0.0)
+        unit_w[unit_id][key] += w
+        unit_pw[unit_id][key] += w * prog
+
+    if not unit_w:
+        return [], []
+    columns = [k for _, k in sorted(seen_order.values())]
 
     units = {str(s.id): s for s in scopes.filter(id__in=unit_w.keys())}
     # A building name repeats across zones ("Building 30" exists under several),
@@ -618,13 +634,13 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     # disambiguation `_hierarchy_rows` already applies to its zones.
     unit_display = _disambiguated_names((u.id, u.name, u.parent_id) for u in units.values())
     rows = []
-    for uid, by_disc in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
-        row = {"name": unit_display.get(uid, units[uid].name)}
-        for d in disciplines:
-            w = by_disc.get(d, 0.0)
-            row[d] = round(unit_pw[uid][d] / w, 1) if w else None
+    for uid, by_phase in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
+        row = {"name": unit_display.get(uid, units[uid].name), "values": []}
+        for key in columns:
+            w = by_phase.get(key, 0.0)
+            row["values"].append(round(unit_pw[uid][key] / w, 1) if w else None)
         rows.append(row)
-    return rows
+    return columns, rows
 
 
 def _subtree_ids(project, root_id, schedule_import=None):
@@ -929,7 +945,7 @@ def build_report_context(report):
     # area-level planned/actual bar chart.
     areas = [{"name": c["name"], "planned": c["planned"], "actual": c["actual"]}
              for z in hierarchy for c in z["children"]]
-    discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
+    discipline_columns, discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
     boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
     financial_percent_complete = _financial_percent_complete(project, schedule_import)
     area_dashboards = _area_dashboards(project, hierarchy, as_of, schedule_import)
@@ -1099,6 +1115,7 @@ def build_report_context(report):
         "areas": areas,
         "hierarchy": hierarchy,
         "discipline": discipline,
+        "discipline_columns": discipline_columns,
         "boq_financial_progress": boq_financial_progress,
         "financial_percent_complete": financial_percent_complete,
         "area_dashboards": area_dashboards,

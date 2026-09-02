@@ -1178,13 +1178,14 @@ def resolve_table(
 
     if source == "discipline_progress":
         discipline = ctx.get("discipline") or []
-        if not discipline:
+        columns = ctx.get("discipline_columns") or []
+        if not discipline or not columns:
             return None
-        header = [labels["col_unit"], labels["col_concrete"], labels["col_architecture"],
-                  labels["col_electrical"], labels["col_mechanical"], labels["col_other"]]
-        rows = [[r["name"]] + [_pct_or_dash(r.get(d)) for d in
-                               ("concrete", "architecture", "electrical", "mechanical", "other")]
-                for r in discipline]
+        # Columns are the schedule's OWN phase names, so they're translated
+        # through enum_label like any other imported value rather than being
+        # five fixed trade headings the data may not fit (2026-09-02).
+        header = [labels["col_unit"]] + [enum_label(cfg, c) for c in columns]
+        rows = [[r["name"]] + [_pct_or_dash(v) for v in r["values"]] for r in discipline]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
