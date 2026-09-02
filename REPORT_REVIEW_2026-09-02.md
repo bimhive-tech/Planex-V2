@@ -28,7 +28,7 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 9 | Submittals charts unreadable | Wrong content | ✅ **done** |
 | 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
 | 11 | Missing page: Progress Sheet table | Missing | ☐ |
-| 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ☐ |
+| 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ✅ **done** |
 | 13 | Landscape pages use the portrait header/footer | Layout | ✅ **done** |
 | 14 | Why are some rows coloured? | Question | ☐ |
 | 15 | Zone-progress chart on p13 makes no sense | Wrong content | ✅ **done** (with item 2) |
@@ -281,9 +281,16 @@ shown by the image I sent"
 with both cumulative lines, end values called out (2,434,402,771 planned /
 1,889,559,271 actual).
 
-**Understood:** Three changes to one page — merge the two charts into a single
-combined bar+line chart, make the page landscape, and print the final cumulative
-value at the end of each line.
+**Fixed 2026-09-02.** The merge had already happened in the chart code —
+`cashflow_chart` draws the monthly bars AND both cumulative lines on one shared
+value axis, which is the reference's single panel. The page simply still carried
+a second `cashflow_cumulative` element re-plotting the cumulative half on its own.
+Dropped it, turned the page landscape, and gave the remaining chart the full
+265mm content width (capped at 110mm tall so its caption clears the footer band).
+
+Final cumulative values are now called out at the end of each line, as the
+reference does — that total is the number the panel exists to state, and reading
+it off a thousands-formatted axis is guesswork.
 
 ---
 

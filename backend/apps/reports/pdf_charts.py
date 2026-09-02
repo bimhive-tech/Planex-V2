@@ -986,6 +986,20 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     curve.lines[0].strokeWidth = curve.lines[1].strokeWidth = 1.6
     d.add(curve)
 
+    # Where each cumulative line ends, called out the way the reference's own
+    # Cash flow panel does ("2,434,402,771" / "1,889,559,271"). That final
+    # total is the number the panel exists to state, and reading it off a
+    # thousands-formatted axis is guesswork (2026-09-02).
+    if rows:
+        step = plot_w / max(1, len(rows) - 1)
+        for row, key in ((0, "cum_planned"), (1, "cum_actual")):
+            value = rows[-1].get(key) or 0
+            colour = cfg["colors"]["chart_planned" if row == 0 else "chart_actual"]
+            y = plot_y + plot_h * (min(top, max(0.0, float(value))) / top if top else 0)
+            d.add(String(plot_x + (len(rows) - 1) * step - 2, y + 3, f"{value:,.0f}",
+                         fontName=_SANS_BOLD, fontSize=6,
+                         fillColor=hexcolor(colour), textAnchor="end"))
+
     _draw_wrapped_legend(d, [
         (cfg["colors"]["chart_planned"], labels.get("cashflow_planned_monthly", labels["planned"])),
         (cfg["colors"]["chart_actual"], labels.get("cashflow_actual_monthly", labels["actual"])),
