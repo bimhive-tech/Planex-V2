@@ -30,9 +30,9 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 11 | Missing page: Progress Sheet table | Missing | ☐ |
 | 12 | Cashflow: 2 charts should be 1, landscape, label the end | Layout | ✅ **done** |
 | 13 | Landscape pages use the portrait header/footer | Layout | ✅ **done** |
-| 14 | Why are some rows coloured? | Question | ☐ |
+| 14 | Why are some rows coloured? | Question | ✅ **answered — intentional, matches your dashboard** |
 | 15 | Zone-progress chart on p13 makes no sense | Wrong content | ✅ **done** (with item 2) |
-| 16 | Missing units/currencies in some tables | Polish | ☐ |
+| 16 | Missing units/currencies in some tables | Polish | ✅ **done** |
 | 17 | What does `السابق %` mean? | Question | ☑ answered |
 | 18 | Where is `تفاصيل الرسومات والمواد` in the reference? | Question | ✅ **answered + page removed** |
 
@@ -341,9 +341,15 @@ right edge, footer spanning the full width. 6 new tests.
 **Our page:** `docs/review-2026-09-02/report-13-project-info-colored-rows.png` —
 «معلومات عن المشروع», with النهاية المتوقعة / التأخير (يوم) shaded.
 
-**Understood:** Explain the rule — I believe it deliberately highlights the
-forecast/delay rows (the reference dashboard highlights the same figures) — then
-confirm whether the client wants it kept.
+**Answer: it's deliberate, and it copies your own dashboard.** Exactly four rows
+are tinted — Forecast finish, Delay, and the two Part equivalents — because those
+are the schedule-risk figures. Your Dashboard sheet highlights the same two
+(`FORECASTED COMPLETION DATE` and `DELAY IN CALENDAR WORKING DAYS`) in the same
+beige, which is where the convention came from.
+
+Nothing else in the table is tinted, and the rule reads the row labels from the
+template's own `labels`, so it still works if a template renames them. Say the
+word if you'd rather it went away.
 
 ---
 
@@ -375,8 +381,18 @@ The orphaned `planned_overdue_note` label was removed too.
 
 **Client:** "in some tables you forgot the units for example currencies"
 
-**Understood:** Sweep every money and quantity column and append the unit (EGP, م²,
-يوم). Need to enumerate which tables are affected.
+**Fixed 2026-09-02.** Swept every numeric column in the canvas renderer. Exactly
+one was bare: the **invoices** table, which printed `600,000,000.00` with no
+currency while every other amount in the report carried its code. Invoices have no
+per-row currency of their own, so they take the project's.
+
+`format_money` gained a `decimals` argument in the process. The contract KPIs stay
+whole (a billion-pound figure gains nothing from `.00` and loses column width) but
+an invoice extract is an exact amount whose cents are part of the record, so that
+caller asks for 2 — `1,545,531,221.48 EGP`.
+
+Everything else already had units: `size_sqm` carries م², durations carry يوم, and
+the project-info money rows all go through `format_money`. 2 new tests.
 
 ---
 

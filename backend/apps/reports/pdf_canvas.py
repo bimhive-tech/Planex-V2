@@ -1221,8 +1221,14 @@ def resolve_table(
         invoices = ctx.get("invoices") or []
         if not invoices:
             return None
-        rows = [[i["name"], f"{i['value']:,.2f}", _fmt_date(i["date"]) if i["date"] else "—"] for i in invoices]
-        rows.append([labels.get("col_total", "Total"), f"{ctx.get('invoices_total', 0):,.2f}", ""])
+        # Money carries its currency, like every other amount in the report —
+        # a bare "600,000,000.00" doesn't say what it is (2026-09-02). Invoices
+        # have no per-row currency of their own, so they take the project's.
+        cur = p.get("currency")
+        rows = [[i["name"], format_money(i["value"], cur, decimals=2), _fmt_date(i["date"]) if i["date"] else "—"]
+                for i in invoices]
+        rows.append([labels.get("col_total", "Total"),
+                     format_money(ctx.get("invoices_total", 0), cur, decimals=2), ""])
         header = [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:

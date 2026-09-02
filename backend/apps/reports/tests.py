@@ -3692,3 +3692,44 @@ class MasterLandscapeTests(SimpleTestCase):
         el = {"x": 90.0, "y": 275.0, "w": 30.0, "h": 5.0}
         _, y, _, _ = _master_box(el, design, self.LANDSCAPE_W, 210.0, self.PORTRAIT_W, 297.0)
         self.assertAlmostEqual(y / MM, 17.0)
+
+
+class MoneyUnitsTests(TestCase):
+    """Client review item 16: money columns must say what currency they are.
+    The invoices table printed bare numbers ("600,000,000.00") while every
+    other amount in the report carried its code (2026-09-02)."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            currency="EGP")
+
+    def test_format_money_keeps_cents_only_when_asked(self):
+        from .pdf_base import format_money
+        # Contract KPIs: a billion-pound figure gains nothing from ".00".
+        self.assertEqual(format_money(5_632_996_242, "EGP"), "5,632,996,242 EGP")
+        # An invoice extract is an exact amount; its cents are part of the record.
+        self.assertEqual(format_money(1_545_531_221.48, "EGP", decimals=2), "1,545,531,221.48 EGP")
+        self.assertEqual(format_money(None, "EGP", decimals=2), "")
+
+    def test_invoice_rows_carry_the_projects_currency(self):
+        import datetime
+
+        from reportlab.lib.units import mm as MM
+
+        from apps.projects.models import Invoice
+        from .pdf_canvas import resolve_table
+
+        Invoice.objects.create(company=self.company, project=self.project, name="IPC 1",
+                               value="1000000.50", date=datetime.date(2026, 1, 31))
+        cfg = merged_config(default_config())
+        ctx = {
+            "arabic": False,
+            "project": {"currency": "EGP"},
+            "invoices": [{"name": "IPC 1", "value": 1_000_000.50, "date": datetime.date(2026, 1, 31)}],
+            "invoices_total": 1_000_000.50,
+        }
+        raw = resolve_table("invoices", cfg, ctx, {"item": None}, avail_width=160 * MM, raw=True)
+        self.assertEqual(raw["rows"][0][1], "1,000,000.50 EGP")
+        self.assertEqual(raw["rows"][-1][1], "1,000,000.50 EGP")   # the Total row too

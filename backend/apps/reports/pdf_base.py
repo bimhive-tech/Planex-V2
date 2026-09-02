@@ -90,8 +90,13 @@ def shape(text) -> str:
     return get_display(arabic_reshaper.reshape(_pin_ltr_runs(text))).replace(_LRM, "")
 
 
-def format_money(value, currency: str | None) -> str:
-    """A money value with its own currency code, e.g. "2,433,242,562.77 EGP".
+def format_money(value, currency: str | None, decimals: int = 0) -> str:
+    """A money value with its own currency code, e.g. "2,433,242,562 EGP".
+
+    `decimals` is 0 for the contract KPIs — a billion-pound contract value
+    gains nothing from two decimal places and loses column width — but an
+    invoice extract is a real, exact amount whose cents are part of the record,
+    so that caller asks for 2.
 
     Each contract-KPI field (budget/advance payment/contract/approved/
     forecast) carries its OWN currency on Project — a real project can
@@ -103,7 +108,7 @@ def format_money(value, currency: str | None) -> str:
     implementations" note) call this the same way so the two can't drift."""
     if not value:
         return ""
-    return f"{value:,.0f} {currency or ''}".strip()
+    return f"{value:,.{decimals}f} {currency or ''}".strip()
 
 
 def hexcolor(value, fallback="#000000"):
