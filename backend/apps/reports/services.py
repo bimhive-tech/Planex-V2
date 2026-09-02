@@ -356,6 +356,13 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     # See _disambiguated_names's docstring — the same "Z(A)" repeated under
     # different stages/buildings gets a disambiguating parent prefix here too.
     zone_display_name = _disambiguated_names((z.id, z.name, z.parent_id) for z in zones)
+    # The zone's own parent (its stage), kept separately as well as folded into
+    # the display name: the reference Progress Sheet puts the stage in its own
+    # "Unit" column beside the zone, rather than prefixing it (2026-09-02).
+    stage_names = dict(
+        ProjectScope.objects.filter(id__in={z.parent_id for z in zones if z.parent_id})
+        .values_list("id", "name")
+    )
 
     rows = []
     for zone in zones:
@@ -375,6 +382,8 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         rows.append({
             "id": zid, "name": zone_display_name[zid], "actual": pct(zid), "previous": prev_scopes.get(zid),
             "planned": _scope_planned_progress(zone, project, as_of, planned_map),
+            "stage": stage_names.get(zone.parent_id) or "",
+            "zone": zone.name,
             "children": sub_rows,
         })
     return rows

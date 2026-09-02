@@ -212,6 +212,8 @@ DEFAULT_CONFIG = {
         "col_actual_this": "الفعلي التراكمي (هذا الشهر)",
         "col_this_month": "إنجاز هذا الشهر",
         "col_performance_factor": "معامل الأداء",
+        "col_index": "م",
+        "col_stage": "المرحلة",
         "col_variance": "الانحراف",
         "col_unit": "الوحدة",
         "col_concrete": "الخرسانة",

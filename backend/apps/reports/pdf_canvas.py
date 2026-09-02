@@ -1149,6 +1149,7 @@ def resolve_table(
         if scope_zone_id:
             hierarchy = [z for z in hierarchy if z.get("id") == scope_zone_id]
         rows = []
+        last_stage = None
         for zone in hierarchy:
             planned, actual, previous = zone.get("planned"), zone.get("actual"), zone.get("previous")
             if actual is None:
@@ -1156,8 +1157,15 @@ def resolve_table(
             this_month = actual - previous if previous is not None else None
             factor = (actual / planned * 100) if planned else None
             variance = actual - planned if planned is not None else None
+            # Stage and zone in their own columns, and a row number, matching
+            # the reference sheet's own "Unit" / "Trade" layout. The stage is
+            # printed only when it changes, the way the reference merges it
+            # down its group of rows (2026-09-02).
+            stage = zone.get("stage") or ""
             rows.append([
-                zone["name"],
+                str(len(rows) + 1),
+                stage if stage != last_stage else "",
+                zone.get("zone") or zone["name"],
                 _pct_or_dash(planned),
                 _pct_or_dash(actual),
                 _pct_or_dash(this_month),
@@ -1165,9 +1173,12 @@ def resolve_table(
                 _pct_or_dash(factor),
                 _pct_or_dash(variance),
             ])
+            last_stage = stage
         if not rows:
             return None
-        header = [labels["col_zone"], labels["col_planned"], labels.get("col_actual_this", labels["col_actual"]),
+        header = [labels.get("col_index", "#"), labels.get("col_stage", "Unit"),
+                  labels["col_zone"], labels["col_planned"],
+                  labels.get("col_actual_this", labels["col_actual"]),
                   labels.get("col_this_month", "This month %"), labels["col_previous"],
                   labels.get("col_performance_factor", "Performance factor %"),
                   labels.get("col_variance", "Variance %")]

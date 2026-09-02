@@ -3783,3 +3783,48 @@ class PhaseProgressTableTests(TestCase):
         blank = Project.objects.create(
             company=self.company, name="Empty", project_type=Project.ProjectType.COMMERCIAL)
         self.assertEqual(_discipline_rows(blank), ([], []))
+
+
+class ProgressSheetLayoutTests(SimpleTestCase):
+    """Client review item 11: the Progress Sheet must match the reference's own
+    layout — a row number, the stage and the zone in separate columns, then the
+    six figures. Ours merged stage and zone into one label (2026-09-02)."""
+
+    def _ctx(self):
+        return {
+            "arabic": False,
+            "hierarchy": [
+                {"id": "1", "name": "PH1 - Z(A)", "stage": "PH1", "zone": "Z(A)",
+                 "planned": 100.0, "actual": 96.9, "previous": 96.6, "children": []},
+                {"id": "2", "name": "PH1 - Z(E)", "stage": "PH1", "zone": "Z(E)",
+                 "planned": 100.0, "actual": 99.1, "previous": 99.1, "children": []},
+                {"id": "3", "name": "PH2 - Z(A)", "stage": "PH2", "zone": "Z(A)",
+                 "planned": 100.0, "actual": 97.4, "previous": 96.5, "children": []},
+            ],
+        }
+
+    def test_stage_and_zone_get_their_own_columns_with_a_row_number(self):
+        from reportlab.lib.units import mm as MM
+        cfg = merged_config(default_config())
+        raw = resolve_table("progress_sheet", cfg, self._ctx(), {"item": None},
+                            avail_width=265 * MM, raw=True)
+        self.assertEqual(len(raw["header"]), 9)
+        self.assertEqual([r[0] for r in raw["rows"]], ["1", "2", "3"])
+        self.assertEqual([r[2] for r in raw["rows"]], ["Z(A)", "Z(E)", "Z(A)"])
+
+    def test_the_stage_prints_once_per_group(self):
+        """The reference merges the stage down its group of rows; repeating it
+        on every line is noise."""
+        from reportlab.lib.units import mm as MM
+        cfg = merged_config(default_config())
+        raw = resolve_table("progress_sheet", cfg, self._ctx(), {"item": None},
+                            avail_width=265 * MM, raw=True)
+        self.assertEqual([r[1] for r in raw["rows"]], ["PH1", "", "PH2"])
+
+    def test_the_derived_figures_still_line_up(self):
+        from reportlab.lib.units import mm as MM
+        cfg = merged_config(default_config())
+        raw = resolve_table("progress_sheet", cfg, self._ctx(), {"item": None},
+                            avail_width=265 * MM, raw=True)
+        # planned, actual, this-month (actual-previous), previous, factor, variance
+        self.assertEqual(raw["rows"][0][3:], ["100.0%", "96.9%", "0.3%", "96.6%", "96.9%", "-3.1%"])
