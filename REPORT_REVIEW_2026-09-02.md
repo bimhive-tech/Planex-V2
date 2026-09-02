@@ -22,8 +22,8 @@ Where I already know the answer (the "why" questions), it's under **Answer**.
 | 3 | Progress-curve "expected" line — where is it from? | Data | ☑ answered, decision needed |
 | 4 | Progress curve doesn't match the Excel curve | Data | ☐ |
 | 5 | Financial Progress (BOQ) values look wrong | Data | ☐ |
-| 6 | Remove the Gantt chart page | Remove | ☐ |
-| 7 | Remove the Milestones page | Remove | ☐ |
+| 6 | Remove the Gantt chart page | Remove | ✅ **done** |
+| 7 | Remove the Milestones page | Remove | ✅ **done** |
 | 8 | Discipline table should show Phases, not disciplines | Wrong content | ☐ |
 | 9 | Submittals charts unreadable | Wrong content | ☐ |
 | 10 | Missing page: 3 pies + planned/actual bar + table | Missing | ☐ |
@@ -148,7 +148,10 @@ and find where the derivation diverges.
 **Our page:** `docs/review-2026-09-02/report-01-gantt.png` — «الجدول الزمني»,
 landscape, zone-level bars.
 
-**Understood:** Delete this page from the template.
+**Fixed 2026-09-02.** Removed from both monthly templates (27 -> 25 pages) and
+from the two reports that already carried their own copy in `layout_override`.
+The `gantt` chart source stays available in the builder — this removes a page
+from one report design, it does not delete a feature.
 
 ---
 
@@ -160,7 +163,8 @@ the refrence pdf so please remove that and thank you"
 **Our page:** `docs/review-2026-09-02/report-04-milestones.png` — «المعالم الرئيسية»,
 a table of milestone / date / status rows.
 
-**Understood:** Not in the client's reference report, so drop the page.
+**Fixed 2026-09-02.** Removed alongside item 6, same treatment; the `milestones`
+table source remains available in the builder.
 
 ---
 
