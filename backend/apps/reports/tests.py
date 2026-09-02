@@ -3897,3 +3897,35 @@ class StageAreaBarsTests(TestCase):
         zone_item = {"children": [{"name": "Building 1", "actual": 50.0, "planned": 100.0}]}
         self.assertIsNotNone(area_units_chart(cfg, zone_item, 400, cfg["labels"], height=200))
         self.assertIsNone(area_units_chart(cfg, {"children": []}, 400, cfg["labels"], height=200))
+
+
+class VerticalAxisLabelTests(SimpleTestCase):
+    """A category label rotated a full 90 degrees runs DOWN the page, so it
+    occupies only its own line height across the axis — not its length. Charging
+    it by character count dropped 60 of a stage's 74 building names from a chart
+    with room for every one (reported 2026-09-03)."""
+
+    NAMES = [f"Building {i}" for i in range(1, 75)]
+
+    def _shown(self, width, **kw):
+        from .pdf_charts import _thinned_labels
+        return sum(1 for n in _thinned_labels(self.NAMES, width, **kw) if n)
+
+    def test_vertical_labels_are_budgeted_per_label_not_per_character(self):
+        # 265mm of chart (750pt) fits all 74 at ~9pt each.
+        self.assertEqual(self._shown(750, vertical=True), 74)
+        # The old per-character budget managed a fraction of that.
+        self.assertLess(self._shown(750), 74)
+
+    def test_vertical_labels_still_thin_when_they_genuinely_do_not_fit(self):
+        """The guard is a real measurement, not a way of always saying yes."""
+        shown = self._shown(200, vertical=True)
+        self.assertLess(shown, 74)
+        self.assertGreater(shown, 0)
+
+    def test_thinning_keeps_every_nth_label_and_never_reorders(self):
+        from .pdf_charts import _thinned_labels
+        out = _thinned_labels(self.NAMES, 200, vertical=True)
+        self.assertEqual(len(out), len(self.NAMES))
+        kept = [(i, n) for i, n in enumerate(out) if n]
+        self.assertTrue(all(n == self.NAMES[i] for i, n in kept))

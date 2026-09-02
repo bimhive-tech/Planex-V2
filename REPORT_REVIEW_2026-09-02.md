@@ -270,6 +270,32 @@ chart per Area within a Stage + the info table, all on one page, per stage.
 
 ---
 
+### Follow-ups on item 10 (2026-09-03)
+
+**The bar chart was plotting zones, not areas.** A stage's direct `children` are
+its zones; the areas (buildings) are one level further down — which is what the
+reference plots, 74 of them for PH1, matching its own "(75) عمارة".
+`_phase_rows` now collects the area-level descendants as `areas` alongside
+`children`, and the chart prefers them. A zone item has no `areas` and its own
+children already ARE areas, so that path is untouched.
+
+**Every building is now named, and the page is full-bleed.** Two things were in
+the way. `_thinned_labels` charged each label by its character count, but these
+are rotated a full 90° — such a label occupies only its line height across the
+axis, whatever it says. Fixing that budget took the chart from 14 names to 37;
+the rest needed width. The bar chart now spans the full 265mm on its own row,
+which only fits once the page drops the running header — as the client suggested,
+and as their own dashboard page does (no logos, no header, just content). The
+page number is kept by placing a `page.number` field on the page itself, so the
+list of figures still cites a number the reader can see. The info table is
+tightened (6pt, 1.5mm padding) to fit the top row beside the pies.
+
+Value labels drop out once bars are denser than ~11pt apart: at 74 buildings they
+printed as one unreadable "98989898…" smear, and the reference carries no values
+on that chart either.
+
+---
+
 ## 11. Missing page — the Progress Sheet table
 
 **Client:** "and image 6 too you did not add this in the reprot so please add this"

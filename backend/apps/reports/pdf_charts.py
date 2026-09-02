@@ -73,19 +73,28 @@ def _grid(value_axis, cfg):
     value_axis.gridStrokeWidth = 0.4
 
 
-def _thinned_labels(names, avail_width, font_size=7, angled=True):
+def _thinned_labels(names, avail_width, font_size=7, angled=True, vertical=False):
     """Blank out category-axis labels beyond what `avail_width` can legibly
     fit, keeping every Nth one — a long monthly series (e.g. a multi-year
     S-curve with 50+ points) otherwise draws a label at every single point
     and they overlap into a solid, unreadable smear. Ticks still mark every
     data point; only the text on the skipped ones is left blank. Angled
     (rotated ~30 degrees) labels overlap far less per pixel of width than
-    horizontal ones, so they get a smaller per-label budget."""
+    horizontal ones, so they get a smaller per-label budget.
+
+    `vertical` is for labels rotated a full 90 degrees, where the text runs
+    DOWN the page: such a label occupies only its own line height across the
+    axis, whatever it says, so the budget is per-label rather than per-
+    character. Charging them by length dropped 60 of a stage's 74 building
+    names on a chart with room for every one (2026-09-03)."""
     if not names:
         return names
-    avg_chars = max(1.0, sum(len(n) for n in names) / len(names))
-    per_char = font_size * (0.42 if angled else 0.62)
-    max_labels = max(1, int(avail_width / (avg_chars * per_char)))
+    if vertical:
+        per_label = font_size * 1.25          # line height, plus a little air
+    else:
+        avg_chars = max(1.0, sum(len(n) for n in names) / len(names))
+        per_label = avg_chars * font_size * (0.42 if angled else 0.62)
+    max_labels = max(1, int(avail_width / per_label))
     if len(names) <= max_labels:
         return names
     step = -(-len(names) // max_labels)  # ceil division
@@ -211,7 +220,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.y = _vertical_label_inset(names)
     chart.width, chart.height = width - 44, height - chart.y - 24
     chart.data = [[round(z["progress"], 1) for z in zones]]
-    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     # 90 degrees and 10% steps, matching the reference report's own per-unit
@@ -266,7 +275,7 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
         [round(z["planned"], 1) for z in zones],
         [round(z["progress"], 1) for z in zones],
     ]
-    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     # 90 degrees and 10% steps, matching the reference report's own per-unit
@@ -316,7 +325,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
                       [round(u["actual"], 1) for u in units]]
     else:
         chart.data = [[round(u["actual"], 1) for u in units]]
-    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
+    chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     # 90 degrees and 10% steps, matching the reference report's own per-unit
