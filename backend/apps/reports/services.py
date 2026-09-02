@@ -9,7 +9,9 @@ import datetime
 from django.db.models import Sum
 
 from apps.projects.models import ProjectImage, ProjectScope, Submittal, Variation
-from apps.projects.services import activity_progress_as_of, latest_schedule_import, project_overall_progress
+from apps.projects.services import (
+    activity_progress_as_of, latest_schedule_import, project_overall_progress, scope_planned_map,
+)
 
 from .models import ReportImage
 
@@ -269,9 +271,27 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
     return rows
 
 
-def _scope_planned_progress(scope, project, as_of):
-    """Time-based planned % for one scope's own dates, falling back to the
-    project's when the scope doesn't carry its own (most don't, yet)."""
+def _scope_planned_progress(scope, project, as_of, planned_map=None):
+    """Planned % for one scope.
+
+    Prefers the SCHEDULE's own figure when the import carried one — P6's
+    "Schedule % Complete", rolled up per scope by
+    projects.services.scope_planned_map. That is what the client's reports
+    quote as planned ("cumulative Plan Performance%"), and it is baseline-
+    derived: a scope whose baseline finish has passed reads 100% no matter how
+    far the live schedule has since slipped.
+
+    The date-based fallback below is only for sources carrying no such column
+    (zone trackers, older exports). On its own it was wrong on exactly the
+    projects that matter: scope.planned_start/finish come from the P6
+    Start/Finish columns, which are the CURRENT schedule, so elapsed time
+    against them showed ~87% planned on a project whose baseline says 100% and
+    which is over a year late (reported 2026-09-02).
+    """
+    if planned_map:
+        from_schedule = planned_map.get(str(scope.id))
+        if from_schedule is not None:
+            return from_schedule
     start = scope.planned_start or project.planned_start
     finish = scope.planned_finish or project.planned_finish
     if not (start and finish and as_of and finish > start):
@@ -289,6 +309,10 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     pins the batch — see build_report_context's own resolution of it."""
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
     prev_scopes = prev_scopes or {}
+    # Baseline-derived planned %, keyed by scope id; empty for sources carrying
+    # no such column, in which case _scope_planned_progress falls back to its
+    # own date estimate exactly as before.
+    planned_map = scope_planned_map(project, schedule_import)
 
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     direct_w, direct_pw = {}, {}
@@ -346,11 +370,11 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
             child = scopes[cid]
             sub_rows.append({
                 "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
-                "planned": _scope_planned_progress(child, project, as_of),
+                "planned": _scope_planned_progress(child, project, as_of, planned_map),
             })
         rows.append({
             "id": zid, "name": zone_display_name[zid], "actual": pct(zid), "previous": prev_scopes.get(zid),
-            "planned": _scope_planned_progress(zone, project, as_of),
+            "planned": _scope_planned_progress(zone, project, as_of, planned_map),
             "children": sub_rows,
         })
     return rows
@@ -369,6 +393,10 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
     nothing else in the report."""
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
     prev_scopes = prev_scopes or {}
+    # Baseline-derived planned %, keyed by scope id; empty for sources carrying
+    # no such column, in which case _scope_planned_progress falls back to its
+    # own date estimate exactly as before.
+    planned_map = scope_planned_map(project, schedule_import)
 
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     direct_w, direct_pw = {}, {}
@@ -420,9 +448,9 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
             child = scopes[cid]
             kids.append({
                 "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
-                "planned": _scope_planned_progress(child, project, as_of),
+                "planned": _scope_planned_progress(child, project, as_of, planned_map),
             })
-        planned = _scope_planned_progress(stage, project, as_of)
+        planned = _scope_planned_progress(stage, project, as_of, planned_map)
         actual = pct(sid)
         rows.append({
             "id": sid, "name": stage.name, "actual": actual, "previous": prev_scopes.get(sid),

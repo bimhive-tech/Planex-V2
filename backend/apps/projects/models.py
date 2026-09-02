@@ -569,6 +569,13 @@ class Activity(TimestampedModel):
     baseline_duration = models.IntegerField(null=True, blank=True)  # P6 "BL Project Duration"
     actual_duration = models.IntegerField(null=True, blank=True)
     schedule_performance_index = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
+    # P6 "Schedule % Complete" — how much of this activity the BASELINE says
+    # should be done by the data date. This is the planned figure the client's
+    # reports quote ("cumulative Plan Performance%"), and it is not the same as
+    # elapsed calendar time: an activity whose baseline finish has passed reads
+    # 100% however far behind the live schedule has since slipped. Null when the
+    # source carried no such column (zone trackers, older P6 exports).
+    schedule_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     @property
     def is_critical(self) -> bool:

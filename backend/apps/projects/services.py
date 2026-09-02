@@ -254,6 +254,60 @@ def breakdown_from_map(project, value_map, schedule_import=None) -> dict:
             "in_progress": total - completed - not_started}
 
 
+def scope_planned_map(project, schedule_import=None) -> dict:
+    """Map of scope_id -> weighted PLANNED % over the scope's whole subtree.
+
+    The same rollup as scope_progress_map, over each activity's own
+    `schedule_percent` (P6's "Schedule % Complete") instead of its actual
+    progress. Only scopes with at least one activity carrying that column get
+    an entry — callers fall back to their own estimate for the rest, so a zone
+    tracker with no such column behaves exactly as it did before.
+
+    This exists because planned % must come from the BASELINE, not from elapsed
+    calendar time against the live schedule: the live dates have already
+    absorbed every delay, so time-elapsed against them showed ~87% planned on a
+    project whose baseline says 100% and which is over a year late (2026-09-02).
+    """
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    direct_w, direct_pw = {}, {}
+    for sid, w, sp in activities.exclude(schedule_percent=None).values_list(
+            "scope_id", "weight", "schedule_percent"):
+        w = float(w)
+        direct_w[sid] = direct_w.get(sid, 0.0) + w
+        direct_pw[sid] = direct_pw.get(sid, 0.0) + w * float(sp)
+    if not direct_w:
+        return {}
+
+    scopes = (project.scopes.filter(schedule_import=schedule_import)
+              if schedule_import else project.scopes.all())
+    children, all_ids, roots = {}, [], []
+    for sid, pid in scopes.values_list("id", "parent_id"):
+        all_ids.append(sid)
+        (roots if pid is None else children.setdefault(pid, [])).append(sid)
+
+    sub_w, sub_pw = {}, {}
+
+    def agg(sid):
+        w, pw = direct_w.get(sid, 0.0), direct_pw.get(sid, 0.0)
+        for child in children.get(sid, []):
+            cw, cpw = agg(child)
+            w += cw
+            pw += cpw
+        sub_w[sid], sub_pw[sid] = w, pw
+        return w, pw
+
+    for r in roots:
+        agg(r)
+
+    # No entry (rather than 0.0) for a scope whose subtree carried none of the
+    # column — 0% planned and "unknown" are very different things on a report.
+    return {str(sid): round(sub_pw[sid] / sub_w[sid], 1)
+            for sid in all_ids if sub_w.get(sid)}
+
+
 def scope_progress_map(project, progress=None, schedule_import=None) -> dict:
     """Map of scope_id -> weighted progress rolled up over the scope's *whole
     subtree*. Computed on the backend so the tree shows real progress without

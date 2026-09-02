@@ -434,6 +434,7 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
                 schedule_variance=task.get("schedule_variance"),
                 baseline_duration=task.get("baseline_duration"), actual_duration=task.get("actual_duration"),
                 schedule_performance_index=task.get("spi"),
+                schedule_percent=task.get("schedule_pct"),
                 row_index=row_index, sort_order=row_counter[0],
                 subzone_index=col_index, subzone_code=col_name,
                 progress_type=Activity.ProgressType.PERCENTAGE,
@@ -460,6 +461,17 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     schedule_import.save(update_fields=["activity_count", "updated_at"])
 
     milestones = _record_milestones(project, milestone_tasks)
+
+    # The Planex-code scheme builds its tree from the code column, so the
+    # project-title row (which carries no code) never becomes a root and can't
+    # supply these. Fall back to the weighted mean over the activities, which is
+    # the same aggregation the client's own reports quote.
+    if project_schedule_pct is None:
+        sched_w = sum(float(a.weight) for a in activities if a.schedule_percent is not None)
+        if sched_w:
+            project_schedule_pct = round(sum(
+                float(a.weight) * float(a.schedule_percent)
+                for a in activities if a.schedule_percent is not None) / sched_w, 2)
 
     project.imported_progress_percent = Decimal(str(project_pct)) if project_pct is not None else None
     project.imported_planned_progress_percent = (

@@ -233,7 +233,6 @@ DEFAULT_CONFIG = {
         "activities": "activities",
         "planned": "Planned",
         "actual": "Actual",
-        "planned_overdue_note": "الخطة: 100% (تجاوز الموعد التعاقدي الأصلي)",
         "dashboard": "Executive Dashboard",
         "progress_report": "Project Progress Report",
         "duration_section": "Duration & Delay",

@@ -238,14 +238,13 @@ def zone_progress_chart(cfg, ctx, width, height=None):
 def planned_actual_chart(cfg, ctx, width, labels, height=None):
     """Grouped planned-vs-actual bars per zone (reference progress charts).
 
-    `planned` is a project-wide, time-based figure clamped to 100% once the
-    project is past its *original* contract finish date (see
-    `services._planned_progress`'s own docstring — deliberate, matches the
-    reference). On a badly overdue project every zone's planned bar ends up
-    identical at 100%, which carries zero comparative information and just
-    crowds out the actual bars that *do* vary between zones. When that's the
-    case for every zone shown, draw actual-only instead, with a text note
-    explaining the 100% rather than a wall of duplicate planned bars."""
+    `planned` comes from the schedule's own baseline figure (P6 "Schedule %
+    Complete"; see `services._scope_planned_progress`), so on an overdue
+    project every zone reads 100%. Both series are drawn anyway: the client's
+    own dashboard plots the flat 100% planned bar beside each actual one, and
+    the gap between them IS the message. An earlier version collapsed this to
+    actual-only with a note, which hid the comparison the chart exists to make
+    (reported 2026-09-02)."""
     # Every zone, uncapped. This used to take the first 10, which on this
     # project silently dropped zones 11-15 — and those included the THREE
     # WORST in the whole job (54%, 61%, 67%). A truncated bar chart on the
@@ -256,7 +255,6 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     zones = [z for z in ctx["zones"] if z.get("planned") is not None]
     if not zones:
         return zone_progress_chart(cfg, ctx, width, height)
-    all_overdue = all(z["planned"] >= 100 for z in zones)
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
@@ -264,13 +262,10 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     chart.x = 24
     chart.y = _vertical_label_inset(names)  # room for the 90-degree labels
     chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
-    if all_overdue:
-        chart.data = [[round(z["progress"], 1) for z in zones]]
-    else:
-        chart.data = [
-            [round(z["planned"], 1) for z in zones],
-            [round(z["progress"], 1) for z in zones],
-        ]
+    chart.data = [
+        [round(z["planned"], 1) for z in zones],
+        [round(z["progress"], 1) for z in zones],
+    ]
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
@@ -285,26 +280,17 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress Area"
-    if all_overdue:
-        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-        chart.bars[0].strokeColor = None
-    else:
-        chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-        chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
-        chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
+    chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
+    chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
-    chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
+    # See _unit_bars: planned is flat, so only actual gets a printed value.
+    chart.barLabelFormat = [None, "%0.0f%%"]
     d.add(chart)
-    if all_overdue:
-        note = labels.get("planned_overdue_note", "Planned: 100% (past original finish date)")
-        d.add(String(width / 2, height - 10, shape(note), fontName=FONT_NAME, fontSize=7,
-                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
-        d.add(_legend([(cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 40, height - 22))
-    else:
-        d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
-                       (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
+    d.add(_legend([(cfg["colors"]["chart_planned"], labels["planned"]),
+                   (cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 95, height - 12))
     return d
 
 
@@ -312,10 +298,12 @@ def _unit_bars(cfg, units, width, labels, height=None):
     """Per-unit bars within a zone: grouped planned/actual when a baseline
     exists, else actual-only (most projects carry no per-unit dates yet, so the
     old version drew nothing — now it still shows where each unit stands).
-    Same "every unit pinned at 100% planned" collapse as
-    `planned_actual_chart` — see its docstring."""
+
+    Both series are drawn whenever a baseline exists, even when every unit sits
+    at 100% planned: that is exactly the client's own dashboard chart
+    («مقارنة بين نسب الانجاز المخططة والفعلية»), where the flat planned bar beside
+    each actual one is what shows the shortfall (2026-09-02)."""
     has_planned = any(u.get("planned") is not None for u in units)
-    all_overdue = has_planned and all((u.get("planned") or 0) >= 100 for u in units if u.get("planned") is not None)
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
@@ -323,7 +311,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.x = 24
     chart.y = _vertical_label_inset(names)  # room for the 90-degree labels
     chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
-    if has_planned and not all_overdue:
+    if has_planned:
         chart.data = [[round(u.get("planned") or 0, 1) for u in units],
                       [round(u["actual"], 1) for u in units]]
     else:
@@ -343,7 +331,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress (Unit)"
     chart.bars[0].strokeColor = None
-    if has_planned and not all_overdue:
+    if has_planned:
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
         chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
         chart.bars[1].strokeColor = None
@@ -351,18 +339,16 @@ def _unit_bars(cfg, units, width, labels, height=None):
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
-    chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
+    # Only the ACTUAL bars carry a printed value (reportlab takes one format
+    # per series). Planned is a flat 100% across the whole chart, so labelling
+    # it stacked "100%" over every bar in one colliding row along the top and
+    # told the reader nothing the axis didn't already.
+    chart.barLabelFormat = [None, "%0.0f%%"] if has_planned else ["%0.0f%%"]
     d.add(chart)
-    if all_overdue:
-        note = labels.get("planned_overdue_note", "Planned: 100% (past original finish date)")
-        d.add(String(width / 2, height - 10, shape(note), fontName=FONT_NAME, fontSize=7,
-                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
-        d.add(_legend([(cfg["colors"]["chart_actual"], labels["actual"])], width / 2 - 40, height - 22))
-    else:
-        pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else []) + \
-            [(cfg["colors"]["chart_actual"], labels["actual"])]
-        d.add(_legend(pairs, width / 2 - 95, height - 12))
+    pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else [])
+    pairs = pairs + [(cfg["colors"]["chart_actual"], labels["actual"])]
+    d.add(_legend(pairs, width / 2 - 95, height - 12))
     return d
 
 

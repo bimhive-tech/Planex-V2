@@ -255,6 +255,12 @@ def parse_id_schedule_sheets(wb):
         bl_dur_c = cols.get("bl project duration")
         actual_dur_c = cols.get("actual duration")
         spi_c = cols.get("schedule performance index")
+        # The BASELINE's own view of how far along this should be — the figure
+        # the client's reports quote as planned %. Read here rather than
+        # recomputed from dates: the Start/Finish columns are the CURRENT
+        # schedule, which has already absorbed the delay, so elapsed time
+        # against them can never show a project as behind (2026-09-02).
+        sched_pct_c = cols.get("schedule % complete")
 
         by_path: dict[tuple, dict] = {}
         roots: list[dict] = []
@@ -333,6 +339,8 @@ def parse_id_schedule_sheets(wb):
                 "schedule_variance": _num(row, variance_c),
                 "baseline_duration": _int(row, bl_dur_c), "actual_duration": _int(row, actual_dur_c),
                 "spi": _num(row, spi_c),
+                "schedule_pct": _to_pct_optional(row[sched_pct_c]) if sched_pct_c is not None
+                                and sched_pct_c < len(row) else None,
             }
             node_for(path)["activities"].append(task)
             _label_ancestors(by_path, path, heading_stack)

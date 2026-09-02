@@ -380,3 +380,97 @@ class IdScheduleImportTests(TestCase):
         result = import_workbook(project, buf, source="legacy.xlsx")
         self.assertEqual(result["source_kind"], "p6_schedule")
         self.assertTrue(ProjectScope.objects.filter(project=project, name="Construction Phase").exists())
+
+
+class ScheduleCompletePlannedTests(TestCase):
+    """P6's "Schedule % Complete" is the BASELINE's own view of how far along
+    the work should be — the figure the client's reports quote as planned
+    ("cumulative Plan Performance%"). It must be read from the file rather than
+    re-derived from Start/Finish, which are the CURRENT schedule and have
+    already absorbed every delay (reported 2026-09-02)."""
+
+    HEADER = ["Planex Code", "Activity ID", "Activity Name", "BL Project Duration",
+              "Original Duration", "Actual Duration", "Remaining Duration", "Start", "Finish",
+              "Total Float", "Activity % Complete", "Performance % Complete", "Schedule % Complete",
+              "Schedule Performance Index", "Budgeted Total Cost", "Earned Value Cost",
+              "Schedule Variance"]
+
+    def _book(self, rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(self.HEADER)
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def _row(self, code, activity_id, name, sched_pct, cost, pct=0.5):
+        d = datetime.date
+        # Start/Finish deliberately run well past the as-of date: a date-based
+        # planned estimate would read far below 100% here, which is the bug.
+        return [code, activity_id, name, 12, 12, 6, 6, d(2026, 1, 1), d(2030, 1, 1),
+                None, pct, pct, sched_pct, 1.0, cost, 0, 0]
+
+    def _import(self, rows):
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._book(rows), source="planex_code.xlsx")
+        return project
+
+    def test_schedule_percent_is_captured_on_the_activity(self):
+        project = self._import([
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Seal", 1, 1000),
+        ])
+        self.assertEqual(float(Activity.objects.get(project=project, code="A-1").schedule_percent), 100.0)
+
+    def test_scope_planned_map_rolls_up_weighted_by_cost(self):
+        """A zone's planned % is the cost-weighted mean of its activities', the
+        same rollup scope_progress_map does for actual progress."""
+        from .services import scope_planned_map
+
+        project = self._import([
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Cheap", 1, 1000),
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-2", "A-2", "Dear", 0.5, 3000),
+        ])
+        zone = ProjectScope.objects.get(project=project, name="Z(A)")
+        # (1000 x 100% + 3000 x 50%) / 4000
+        self.assertEqual(scope_planned_map(project)[str(zone.id)], 62.5)
+
+    def test_planned_comes_from_the_baseline_not_elapsed_time(self):
+        """The regression this exists for: every activity's baseline says 100%
+        while the live schedule runs to 2030, so a date-based estimate would
+        report a fraction. The report must quote 100%."""
+        from apps.reports.services import _scope_planned_progress
+        from .services import scope_planned_map
+
+        project = self._import([
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Seal", 1, 1000),
+        ])
+        zone = ProjectScope.objects.get(project=project, name="Z(A)")
+        as_of = datetime.date(2026, 6, 1)
+        self.assertEqual(_scope_planned_progress(zone, project, as_of, scope_planned_map(project)), 100.0)
+        # Without the map it falls back to elapsed time, which is the old,
+        # wrong answer — kept only for sources carrying no such column.
+        self.assertLess(_scope_planned_progress(zone, project, as_of), 100.0)
+
+    def test_project_planned_falls_back_to_the_weighted_activities(self):
+        """The Planex-code tree is built from the code column, so the project
+        title row never becomes a root and can't supply the project figure."""
+        project = self._import([
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Cheap", 1, 1000),
+            self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-2", "A-2", "Dear", 0.5, 3000),
+        ])
+        project.refresh_from_db()
+        self.assertEqual(float(project.imported_planned_progress_percent), 62.5)
+
+    def test_a_source_without_the_column_is_unchanged(self):
+        """Zone trackers and older exports carry no Schedule % Complete; they
+        must keep their date-based estimate rather than losing planned %."""
+        from .services import scope_planned_map
+
+        rows = [self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Seal", None, 1000)]
+        project = self._import(rows)
+        self.assertIsNone(Activity.objects.get(project=project, code="A-1").schedule_percent)
+        self.assertEqual(scope_planned_map(project), {})
