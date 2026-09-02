@@ -1,7 +1,10 @@
 # Report Review — 2026-09-02
 
-Client feedback on the exported PDF, broken into one item per issue so we can work
-through them **one at a time**. Nothing here is fixed yet.
+Client feedback on the exported PDF, broken into one item per issue.
+
+**All 18 items are closed.** Each was committed and pushed on its own so the
+history reads one item at a time; the commit for each is named in its section.
+Item 1 is parked rather than fixed — see below.
 
 Each item records the client's own words first, then what I understood from them.
 Where I already know the answer (the "why" questions), it's under **Answer**.
