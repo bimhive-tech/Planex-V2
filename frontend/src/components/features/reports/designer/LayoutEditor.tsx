@@ -129,15 +129,6 @@ export function LayoutEditor({
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Runs once, on this fresh mount (see initialScrollToBottom's docstring —
-  // a page change is a full remount via the parent's `key`, so "on mount"
-  // is exactly "right after navigating to this page").
-  useEffect(() => {
-    if (initialScrollToBottom && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   // Margin/header/footer guides help while laying out a template, but on a
   // report (liveData present) they're just chrome between you and seeing
   // the page as its final, real self — off by default there, still
@@ -145,11 +136,34 @@ export function LayoutEditor({
   const [showGuides, setShowGuides] = useState(!liveData);
   const scale = BASE_SCALE * zoom;
 
-  // Undo/redo history for this editor instance (Page Designer's master
-  // elements and each Report Configuration page each get their own — a page
-  // switch remounts LayoutEditor, so history doesn't follow you across pages).
+  // Undo/redo history for this editor instance. Report Configuration hands
+  // down a document-level `history` instead (see the prop); these local
+  // stacks are the fallback for Page Designer's master elements, and are
+  // cleared per page by the reset effect below.
   const undoStack = useRef<LayoutElement[][]>([]);
   const redoStack = useRef<LayoutElement[][]>([]);
+
+  /* Reset when the thing being edited changes — a different page, or the
+   * switch between page content and the header/footer.
+   *
+   * Both used to remount this whole component (the parent keyed it), which
+   * tore down the left column holding the page list — so clicking page 30
+   * scrolled you back to page 1, and a look at the header lost your zoom and
+   * guides (reported 2026-09-01). The editor now survives both and resets
+   * only what genuinely belongs to the old target, leaving the surrounding
+   * chrome and its scroll position alone. Zoom and guides deliberately carry
+   * over, the way they do in every other canvas tool.
+   *
+   * Also covers the first mount, which is what initialScrollToBottom means:
+   * arriving at a page by paging backwards should land at its bottom. */
+  useEffect(() => {
+    setSelectedIds([]);
+    undoStack.current = [];
+    redoStack.current = [];
+    const node = scrollRef.current;
+    if (node) node.scrollTop = initialScrollToBottom ? node.scrollHeight : 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyPageId ?? ownPageId]);
   const elementsRef = useRef(elements);
   elementsRef.current = elements;
   // Stacks are refs (mutated without a re-render, by design — see `commit`),
@@ -423,6 +437,20 @@ export function LayoutEditor({
       const atTop = node!.scrollTop <= 0;
       if (e.deltaY > 0 && !atBottom) return; // still real room to pan down first
       if (e.deltaY < 0 && !atTop) return; // still real room to pan up first
+      // Never page away from something the user is typing into, or from a
+      // panel with its own scrollbar. Wheel events bubble, so a scroll inside
+      // the description editor reached this handler; once the canvas was at
+      // its limit (which it always is at 100% zoom, where atTop and atBottom
+      // are both true) the very first tick navigated away and took the
+      // uncommitted draft with it (reported 2026-09-01). Checked last: it
+      // walks the ancestor chain, so it should only run on the rare tick
+      // that is actually about to navigate, not on every scroll.
+      for (let t = e.target as HTMLElement | null; t && t !== node; t = t.parentElement) {
+        if (t.isContentEditable) return;
+        const scrolls = /(auto|scroll)/.test(getComputedStyle(t).overflowY)
+          && t.scrollHeight > t.clientHeight + 1;
+        if (scrolls) return;
+      }
       e.preventDefault();
       if (Date.now() < cooldownUntil) return;
       cooldownUntil = Date.now() + 400;

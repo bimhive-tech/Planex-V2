@@ -159,10 +159,13 @@ export function ReportLayoutEditor({
     );
   }
 
-  // Block the editor until the report's live project data has loaded once —
+  // Block the editor until the report's live project data has loaded ONCE —
   // editing against generic placeholder content is confusing and every
-  // element needs liveData to show its real look.
-  if (liveDataLoading) {
+  // element needs liveData to show its real look. Only the first load, though:
+  // a later background refetch (after a save) would otherwise unmount the
+  // whole editor for 30s+ and lose the page you were on, your undo stacks and
+  // your zoom, just for saving (reported 2026-09-01).
+  if (liveDataLoading && !liveData) {
     return (
       <section className={styles.tabPanel}>
         <StateView loading error={null} isEmpty={false}>{null}</StateView>

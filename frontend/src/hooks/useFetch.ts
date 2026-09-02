@@ -18,20 +18,33 @@ export function useFetch<T>(fetcher: () => Promise<T>, deps: unknown[]) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const run = useCallback(fetcher, deps);
 
-  const load = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
+  const load = useCallback(async (quiet: boolean) => {
+    if (!quiet) setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const data = await run();
       setState({ data, loading: false, error: null });
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Something went wrong.";
-      setState({ data: null, loading: false, error: message });
+      // A background refresh that fails leaves what's on screen alone — the
+      // caller that triggered it (a save, say) reports its own failure, and
+      // blanking good data behind an error banner would be worse than stale.
+      setState((s) => (quiet ? { ...s, loading: false } : { data: null, loading: false, error: message }));
     }
   }, [run]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  /** Refetch with the loading state — callers render a spinner in place of
+   * the content. Safe to pass straight to an onClick; it ignores arguments. */
+  const reload = useCallback(() => load(false), [load]);
 
-  return { ...state, reload: load };
+  /** Refetch WITHOUT flipping `loading`, so whatever is rendered stays
+   * mounted. Use after a save: flipping `loading` unmounts the subtree, and
+   * anything holding local state there (the layout editor's current page,
+   * undo stacks, zoom) is destroyed just for saving (reported 2026-09-01). */
+  const refresh = useCallback(() => load(true), [load]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { ...state, reload, refresh };
 }

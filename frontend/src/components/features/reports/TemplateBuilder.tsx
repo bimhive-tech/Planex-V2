@@ -6,7 +6,7 @@
 //   • Content & Labels      — the per-section toggles and wording that drive
 //     the generated PDF today; kept because the renderer still reads them.
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -41,6 +41,9 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
   const [isDefault, setIsDefault] = useState(false);
   const [config, setConfig] = useState<ReportConfig>({});
   const [mode, setMode] = useState<Mode>("design");
+  // Latches on the first visit to the layout tab; see the render below.
+  const layoutOpened = useRef(false);
+  if (mode === "layout") layoutOpened.current = true;
   const [activeKey, setActiveKey] = useState(BUILDER_SECTIONS[0].key);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -160,8 +163,16 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
       <StateView loading={loading} error={error} isEmpty={false} onRetry={reload}>
         {mode === "design" && <PageDesigner design={design} onChange={setDesign} />}
 
-        {mode === "layout" && (
-          <>
+        {/* Mounted once and hidden thereafter, not conditionally rendered.
+            ReportConfigurator holds which page you're on, the edit mode and
+            the document-level undo/redo stacks in local state — the same
+            stacks that were lifted out of LayoutEditor precisely so they'd
+            survive a page switch — and unmounting on every mode click threw
+            all of it away (2026-09-01). Same treatment as the report's
+            Customize tab; still not mounted until first opened, so a
+            template you only skim doesn't pay for the editor. */}
+        {layoutOpened.current && (
+          <div hidden={mode !== "layout"}>
             {canvasIsEmpty && (
               <div className={styles.seedBanner}>
                 <p>
@@ -174,7 +185,7 @@ export function TemplateBuilder({ templateId }: { templateId: string }) {
               </div>
             )}
             <ReportConfigurator design={design} pages={pages} onChange={setPages} />
-          </>
+          </div>
         )}
 
         {mode === "content" && (

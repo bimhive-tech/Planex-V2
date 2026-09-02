@@ -1108,7 +1108,13 @@ function DescriptionPreview({
 
   useEffect(() => {
     if (!editing) return;
+    // Idempotent: the normal exit path sets `editing` false, which re-runs
+    // this effect's cleanup — without the latch that committed the same text
+    // twice and burned two undo entries for one edit.
+    let committed = false;
     function commitAndExit() {
+      if (committed) return;
+      committed = true;
       setEditing(false);
       const { draft: d, html: h, el: e, onElementChange: change } = latest.current;
       if (d !== h) change?.({ ...e, props: { ...e.props, html: d } });
@@ -1124,6 +1130,12 @@ function DescriptionPreview({
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      // Belt and braces: commit whatever is in the draft however this editor
+      // goes away — a page change, a tab switch, a re-render that swaps the
+      // element out. Committing on outside-click alone meant anything that
+      // unmounted mid-edit silently threw the typing away, with no undo entry
+      // to get it back (reported 2026-09-01). No-op if we already committed.
+      commitAndExit();
     };
   }, [editing]);
 

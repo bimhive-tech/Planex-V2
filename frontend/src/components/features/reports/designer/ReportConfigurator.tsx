@@ -541,11 +541,12 @@ export function ReportConfigurator({
 
   return (
     <LayoutEditor
-      // Mode is part of the key (not just the page) — switching between
-      // "Page content" and "Header & footer" is a different editable set
-      // entirely, so it should get its own fresh undo history rather than
-      // inheriting the page's.
-      key={`${active.id}-${editMode}`}
+      // Deliberately unkeyed. Remounting tore down the left column this
+      // page list lives in, sending its scroll back to page 1 on every page
+      // click (reported 2026-09-01) — and did the same to zoom and guides
+      // whenever you looked at the header and came back, including on an
+      // undo that crosses into header history. LayoutEditor resets exactly
+      // the per-edit-target state itself instead; see its reset effect.
       design={effectiveDesign}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
       // A synthetic continuation page (see buildOverflowPages) has no

@@ -28,6 +28,43 @@ def _gauge_font(text, bold=False):
     return _SANS_BOLD if bold else _SANS
 
 
+# Bar thickness, in the reference workbook's own terms.
+#
+# Excel sizes bars with `gapWidth`: the gap between category slots as a
+# percentage of ONE bar's width. gapWidth=150 therefore means the bar is
+# 1/(1+1.5) = 40% of its slot. `overlap` does the same job inside a cluster,
+# and a negative value pushes the series apart by that percentage.
+#
+# reportlab reads barWidth/groupSpacing/barSpacing as relative weights and
+# scales them to fill the axis (unless useAbsolute is set), so the workbook's
+# ratios transfer across unchanged -- which is why these are expressed against
+# a nominal bar width rather than in points. Its defaults (barWidth 10,
+# groupSpacing 5) leave a stacked bar filling 67% of its slot; the reference
+# never goes above 50%, which is what made our bars read as fat next to it.
+_BAR_UNIT = 10.0
+
+# gapWidth/overlap as read out of "Dashboard template 02-08-2026.xlsx", per
+# panel. Named rather than inlined so a chart says which reference panel it is
+# copying, and so the two clustered families stay distinguishable.
+GAP_STACKED = 150       # MATERIAL SUBMITTALS / SHOP DRAWING / Time Performance
+GAP_CLUSTERED = 100     # Progress Comparison, Project Tracking
+GAP_WIDE = 219          # Project Progress Area, Financial Progress (BOQ), Cash flow
+OVERLAP_CLUSTERED = -24
+OVERLAP_WIDE = -27
+
+
+def _bar_geometry(chart, gap_width=GAP_CLUSTERED, overlap=0):
+    """Size `chart`'s bars the way the reference workbook sizes its own.
+
+    `gap_width`/`overlap` are Excel's units (see above) so the call site can
+    quote the reference panel it matches. A positive `overlap` (stacked bars
+    ride on top of each other) needs no in-cluster spacing at all.
+    """
+    chart.barWidth = _BAR_UNIT
+    chart.groupSpacing = _BAR_UNIT * gap_width / 100.0
+    chart.barSpacing = _BAR_UNIT * max(0.0, -overlap) / 100.0
+
+
 def _grid(value_axis, cfg):
     """Faint horizontal gridlines behind bars/lines, matching the reference
     dashboard's own charts (all of which grid at every value-axis tick)."""
@@ -187,7 +224,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.barWidth = 8
+    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress Area"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[0].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
@@ -247,8 +284,7 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 8
-    chart.barSpacing = 1
+    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress Area"
     if all_overdue:
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
         chart.bars[0].strokeColor = None
@@ -305,8 +341,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 8
-    chart.barSpacing = 1
+    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress (Unit)"
     chart.bars[0].strokeColor = None
     if has_planned and not all_overdue:
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
@@ -375,7 +410,7 @@ def _completion_histogram(cfg, children, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.barWidth = 14
+    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[0].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
@@ -518,8 +553,7 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 8
-    chart.barSpacing = 1
+    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Financial Progress according to BOQ"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
@@ -576,15 +610,7 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    # barWidth/groupSpacing are RELATIVE weights unless useAbsolute is set —
-    # reportlab scales them to fill chart.width. groupSpacing=0 therefore made
-    # each bar swallow its whole category slot, so the three bars rendered as
-    # one edge-to-edge block with no gaps (found 2026-08-30 against the
-    # client's reference "Progress Comparison", whose bars are narrow and
-    # clearly separated). Weighting the gap above the bar keeps them ~45% of
-    # the slot at any panel width.
-    chart.barWidth = 18
-    chart.groupSpacing = 22
+    _bar_geometry(chart, GAP_CLUSTERED, OVERLAP_CLUSTERED)  # "Progress Comparison"
     for i, s in enumerate(series):
         chart.bars[(0, i)].fillColor = hexcolor(s[3])
         chart.bars[(0, i)].strokeColor = None
@@ -633,8 +659,7 @@ def progress_tracking_chart(cfg, ctx, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 8
-    chart.barSpacing = 1
+    _bar_geometry(chart, GAP_CLUSTERED, OVERLAP_CLUSTERED)  # "Project Tracking"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
@@ -920,8 +945,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 6
     _grid(chart.valueAxis, cfg)
-    chart.groupSpacing = 4
-    chart.barSpacing = 0.5
+    _bar_geometry(chart, GAP_WIDE)  # "Cash flow - Tentative Records"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
@@ -1051,6 +1075,7 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None):
     chart.data = [[grid[disc][sk] for sk, _ in status_order] for disc in disciplines]
     chart.categoryAxis.categoryNames = status_names
     chart.categoryAxis.style = "stacked"
+    _bar_geometry(chart, GAP_STACKED, 100)  # "MATERIAL SUBMITTALS" / "SHOP DRAWING"
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.valueAxis.labels.fontName = FONT_NAME

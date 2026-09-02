@@ -10,6 +10,7 @@
 // control stops pointerdown propagation — without it, a click here would
 // also bubble up to CanvasElementView's onStartMove and drag the whole
 // table element instead of (or as well as) hitting the control.
+import { DraftInput } from "@/components/ui/DraftInput";
 import { Button } from "@/components/ui/Button";
 import type { CustomTableData } from "@/lib/reportLayout";
 import styles from "./designer.module.css";
@@ -128,9 +129,13 @@ export function CustomTableEditor({ data, onChange }: Props) {
                           control target and selects without starting a drag —
                           see its own comment). Swallowing it left the table
                           unselectable, and its whole Properties panel with it. */}
-                      <input
+                      {/* One undo entry per cell, not per keystroke — see
+                          DraftInput. Typing a 40-character header used to
+                          push 40 history entries and evict the real edits
+                          before it. */}
+                      <DraftInput
                         value={cell}
-                        onChange={(e) => setCell(r, c, e.target.value)}
+                        onCommit={(v) => setCell(r, c, v)}
                         onPaste={(e) => {
                           e.preventDefault();
                           pasteAt(r, c, e.clipboardData.getData("text/plain"));

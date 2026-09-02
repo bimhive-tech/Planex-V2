@@ -8,7 +8,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -93,6 +93,15 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     if (tab === "layout") setLayoutOpened(true);
   }, [tab]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Which render is on screen, which one is being fetched, and the blob URL
+  // showing it — all owned outside the preview effect so a tab change neither
+  // refetches nor revokes.
+  const loadedKeyRef = useRef("");
+  const inflightKeyRef = useRef("");
+  // Latches on the first visit to the Scope tab; see its render below.
+  const scopeOpened = useRef(false);
+  const previewUrlRef = useRef("");
+  if (tab === "scope") scopeOpened.current = true;
   const [data, setData] = useState<ReportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -104,7 +113,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedOverride, setSavedOverride] = useState<ReportLayoutOverride | null>(null);
 
-  const { loading, error, reload } = useFetch(async () => {
+  const { loading, error, reload, refresh } = useFetch(async () => {
     const [r, ps, ts] = await Promise.all([
       api.get<ReportRow>(`/reports/${reportId}/`),
       api.get<Paginated<ProjectListRow>>("/projects/?status=all"),
@@ -147,10 +156,17 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
   // detailGridFull branch below), and its canvas already renders live from
   // real project data (see ElementPreview), so there's nothing there that
   // needs this render at all.
+  //
+  // `tab` is a dependency only so leaving Customize can start the render this
+  // effect skipped — NOT a reason to render again. The backend exempts /pdf/
+  // from its context cache (see views.py), so every run is a full uncached
+  // document build; keying off what's already on screen turned seven tab
+  // clicks into seven of them (reported 2026-09-01).
   useEffect(() => {
     if (tab === "layout") return;
-    let revoked = false;
-    let objectUrl = "";
+    const key = `${pdfUrl}|${refreshKey}`;
+    if (loadedKeyRef.current === key || inflightKeyRef.current === key) return;
+    inflightKeyRef.current = key;
     setPreviewLoading(true);
     fetch(pdfUrl, { credentials: "include" })
       .then((r) => {
@@ -159,11 +175,34 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
         if (hdr) { try { setSectionPages(JSON.parse(hdr)); } catch { /* ignore */ } }
         return r.blob();
       })
-      .then((blob) => { if (!revoked) { objectUrl = URL.createObjectURL(blob); setPreviewUrl(objectUrl); } })
-      .catch(() => setPreviewUrl(""))
-      .finally(() => !revoked && setPreviewLoading(false));
-    return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+      .then((blob) => {
+        // Stale response — we've since asked for a different render.
+        if (inflightKeyRef.current !== key) return;
+        // The URL outlives this effect run now, so it's revoked when its
+        // replacement arrives (and on unmount) rather than on every re-run.
+        const url = URL.createObjectURL(blob);
+        if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = url;
+        loadedKeyRef.current = key;
+        setPreviewUrl(url);
+      })
+      .catch(() => { if (inflightKeyRef.current === key) setPreviewUrl(""); })
+      .finally(() => {
+        if (inflightKeyRef.current !== key) return;
+        inflightKeyRef.current = "";  // failed keys stay retryable
+        setPreviewLoading(false);
+      });
+    // No cancellation flag on purpose. In development React mounts effects
+    // twice, so a flag set by the discarded first run threw away the very
+    // response the second run was waiting on — the preview sat on
+    // "Generating…" forever. Requests are deduped and superseded by key
+    // instead, which handles both the double-mount and a real overtake.
   }, [pdfUrl, refreshKey, tab]);
+
+  // Release the last blob URL when the page goes away.
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
 
   const save = useCallback(async () => {
     if (!form) return;
@@ -279,8 +318,12 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   </section>
                 )}
 
-                {tab === "scope" && (
-                  <section className={styles.tabPanel}>
+                {/* Mounted once, then hidden: every ScopeNode keeps its own
+                    expanded flag and lazily-fetched children locally, so a
+                    conditional render collapsed the whole tree and re-fetched
+                    it level by level on any tab click (2026-09-01). */}
+                {scopeOpened.current && (
+                  <section className={styles.tabPanel} hidden={tab !== "scope"}>
                     <h2 className={styles.panelTitle}>What to include</h2>
                     <p className={styles.hint}>Tick zones, subzones, phases, or tasks. Ticking a node includes everything under it. Leave all unticked to include the whole project.</p>
                     {form.project && (
@@ -370,7 +413,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     liveData={data}
                     liveDataLoading={dataLoading}
                     canManage={canManage}
-                    onSaved={() => { reload(); bump(); }}
+                    onSaved={() => { refresh(); bump(); }}
                   />
                   </div>
                 )}

@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { DraftInput } from "@/components/ui/DraftInput";
 import { api, ApiError } from "@/lib/api";
 import {
   CHART_SOURCES, CHART_TYPES, FIELD_SOURCES, ITEM_CHART_SOURCES, ITEM_FIELD_SOURCES,
@@ -197,6 +198,10 @@ interface Props {
   liveData?: ReportData | null;
 }
 
+/** Commit only real numbers — an empty or half-typed box ("", "12.") must
+ * leave the element where it is rather than snapping it to 0. */
+const isFiniteNumber = (v: string) => v.trim() !== "" && Number.isFinite(Number(v));
+
 export function ElementInspector({
   el, onChange, repeating = false, reportId, selectedCount = 0, onDeleteSelection, liveData,
 }: Props) {
@@ -282,21 +287,23 @@ export function ElementInspector({
         {(["x", "y", "w", "h"] as const).map((k) => (
           <label key={k} className={styles.geomField}>
             <span>{k.toUpperCase()} (mm)</span>
-            <input
+            <DraftInput
               type="number"
               step={1}
               value={el[k]}
-              onChange={(e) => setGeom(k, Number(e.target.value))}
+              validate={isFiniteNumber}
+              onCommit={(v) => setGeom(k, Number(v))}
             />
           </label>
         ))}
         <label className={styles.geomField}>
           <span>Rotation (°)</span>
-          <input
+          <DraftInput
             type="number"
             step={1}
             value={el.rotation ?? 0}
-            onChange={(e) => setRotation(Number(e.target.value))}
+            validate={isFiniteNumber}
+            onCommit={(v) => setRotation(Number(v))}
           />
         </label>
       </div>
@@ -469,17 +476,18 @@ export function ElementInspector({
                   onChange={(e) => setProp(f.path, e.target.value)}
                 />
               ) : f.kind === "number" ? (
-                <input
+                <DraftInput
                   type="number"
                   step={f.step ?? 1}
                   value={Number(value ?? 0)}
-                  onChange={(e) => setProp(f.path, Number(e.target.value))}
+                  validate={isFiniteNumber}
+                  onCommit={(v) => setProp(f.path, Number(v))}
                 />
               ) : (
-                <input
+                <DraftInput
                   type="text"
                   value={String(value ?? "")}
-                  onChange={(e) => setProp(f.path, e.target.value)}
+                  onCommit={(v) => setProp(f.path, v)}
                 />
               )}
             </label>
