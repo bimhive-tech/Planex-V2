@@ -3874,7 +3874,8 @@ class StageAreaBarsTests(TestCase):
         # Labelled by zone + building number (see _zone_area_label): the bare
         # area name repeats across zones and would name two different bars.
         self.assertEqual([a["name"] for a in stage["areas"]],
-                         ["A1", "A2", "A3", "B4", "B5", "B6"])
+                         ["Building (A1)", "Building (A2)", "Building (A3)",
+                          "Building (B4)", "Building (B5)", "Building (B6)"])
         # The raw names stay available alongside the chart label.
         self.assertEqual([a["area_name"] for a in stage["areas"]],
                          ["Building 1", "Building 2", "Building 3",
@@ -3948,22 +3949,27 @@ class ZoneAreaLabelTests(SimpleTestCase):
         from .services import _zone_area_label
         return _zone_area_label(zone, area)
 
-    def test_zone_letter_joins_the_building_number(self):
-        self.assertEqual(self._label("Z(A)", "Building 6"), "A6")
-        self.assertEqual(self._label("Z(E)", "Building 10"), "E10")
-        self.assertEqual(self._label("Z(C)", "Building 30"), "C30")
+    def test_the_areas_own_word_is_kept_with_the_zone_code(self):
+        self.assertEqual(self._label("Z(A)", "Building 6"), "Building (A6)")
+        self.assertEqual(self._label("Z(E)", "Building 10"), "Building (E10)")
+
+    def test_the_word_comes_from_the_data_not_from_us(self):
+        """An Arabic project keeps its own wording rather than having
+        "Building" imposed on it — «عمارة (C30)» is the client's own format."""
+        self.assertEqual(self._label("Z(C)", "عمارة 30"), "عمارة (C30)")
+        self.assertEqual(self._label("Zone [B]", "Villa 4"), "Villa (B4)")
 
     def test_the_two_ambiguous_buildings_now_differ(self):
         self.assertNotEqual(self._label("Z(A)", "Building 6"),
                             self._label("Z(E)", "Building 6"))
 
-    def test_square_brackets_work_too(self):
-        self.assertEqual(self._label("Zone [B]", "Building 7"), "B7")
+    def test_a_bare_number_gives_just_the_code(self):
+        self.assertEqual(self._label("Z(D)", "19"), "(D19)")
 
     def test_a_long_zone_name_falls_back_rather_than_running_words_together(self):
         """"Northern Precinct6" would read as one nonsense token."""
         self.assertEqual(self._label("Northern Precinct", "Building 6"),
-                         "Northern Precinct - 6")
+                         "Northern Precinct - Building 6")
 
     def test_an_unnumbered_area_keeps_its_own_name(self):
         self.assertEqual(self._label("Z(A)", "Clubhouse"), "A - Clubhouse")

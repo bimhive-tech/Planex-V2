@@ -297,11 +297,14 @@ on that chart either.
 **Labelled by zone, on the client's follow-up.** The chart spans a whole stage, so
 a bare building name doesn't say which zone a bar belongs to — and the numbers
 genuinely recur: "Building 6" exists under both Z(A) and Z(E), so it was naming two
-different bars. Labels are now the zone's letter plus the building's number —
-`A6`, `E10`, `C30` — which is exactly how the client's own dashboard writes them,
-and short enough that all 74 still print. `_zone_area_label` is tolerant of other
-schemes: a long zone name or an unnumbered area falls back to "zone - area" rather
-than running words together. The raw `area_name`/`zone_name` stay on each row.
+different bars. Labels keep the area's own descriptive word and add the zone code —
+`Building (A6)`, `Building (E10)`, `Building (C30)` — the same shape as the
+client's own «عمارة (C30)». The word is taken from the source data rather than
+supplied by us, so an Arabic project reads «عمارة (C30)» and a villa scheme reads
+`Villa (B4)`; nothing has "Building" imposed on it. `_zone_area_label` is tolerant
+of other schemes: a long zone name or an unnumbered area falls back to
+"zone - area" rather than running words together. The raw `area_name`/`zone_name`
+stay on each row.
 
 **Taller, on the client's follow-up.** The bar chart takes whatever the rows above
 don't need, so height came from tightening them: the project block measures ~48mm

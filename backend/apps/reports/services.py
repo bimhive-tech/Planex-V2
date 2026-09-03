@@ -211,20 +211,23 @@ def _scope_context(project, scope_ids, schedule_import=None):
 
 
 def _zone_area_label(zone_name: str, area_name: str) -> str:
-    """A compact "which zone, which building" label: "Z(A)" + "Building 6" -> "A6".
+    """A "which zone, which building" label: "Z(A)" + "Building 6" -> "Building (A6)".
 
     The stage dashboard's bar chart carries every building in the stage, and the
     same building number genuinely recurs under different zones ("Building 6"
     exists under both Z(A) and Z(E)), so the bare area name names two different
-    bars. The client's own dashboard labels these "(A6)", "(E7)", "(C30)" — the
-    zone's letter followed by the building's number — which is both unambiguous
-    and far shorter than "Z(A) - Building 6", and short labels are what let a
-    74-bar chart print every one of them (2026-09-03).
+    bars. The client's own dashboard writes these as «عمارة (C30)» — the area's
+    own word, then the zone's letter joined to the building's number — so the
+    label says both what the thing is and which zone it sits in (2026-09-03).
+
+    The descriptive word is taken from the area's own name rather than supplied
+    here, so a project whose areas are called «عمارة 30» or "Villa 4" keeps its
+    own wording instead of having "Building" imposed on it.
 
     Deliberately tolerant of other naming schemes: the zone token is whatever
-    sits inside its trailing brackets (or the name itself), the area token is its
-    trailing number (or the name itself), and anything that doesn't reduce to a
-    short pair falls back to "zone - area" rather than inventing a format.
+    sits inside its trailing brackets (or the name itself), and anything that
+    doesn't reduce to a short zone token plus a numbered area falls back to
+    "zone - area" rather than inventing a format.
     """
     zone_name, area_name = (zone_name or "").strip(), (area_name or "").strip()
     if not zone_name:
@@ -235,15 +238,13 @@ def _zone_area_label(zone_name: str, area_name: str) -> str:
     bracketed = re.search(r"[(\[]([^)\]]+)[)\]]\s*$", zone_name)
     zone_token = (bracketed.group(1) if bracketed else zone_name).strip()
 
-    trailing_number = re.search(r"(\d+)\s*$", area_name)
-    area_token = trailing_number.group(1) if trailing_number else area_name.strip()
-
-    joined = f"{zone_token}{area_token}"
-    # Only worth joining when the result still reads as one short token; a zone
-    # called "Northern Precinct" would otherwise produce "Northern Precinct6".
-    if len(zone_token) <= 3 and trailing_number and len(joined) <= 8:
-        return joined
-    return f"{zone_token} - {area_token}"
+    # "Building 6" -> ("Building", "6"); «عمارة 30» -> («عمارة», "30").
+    split = re.match(r"^(.*?)[\s\-_]*(\d+)\s*$", area_name)
+    if len(zone_token) <= 3 and split:
+        word, number = split.group(1).strip(), split.group(2)
+        code = f"({zone_token}{number})"
+        return f"{word} {code}" if word else code
+    return f"{zone_token} - {area_name}"
 
 
 def _disambiguated_names(scopes):
