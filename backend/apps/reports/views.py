@@ -569,7 +569,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         """
         from .pdf_canvas import (
             _collect_captions, _expand_description_overflow, _expand_table_overflow, _expand_toc_overflow,
-            expand_pages,
+            _index_toc_context, expand_pages,
         )
 
         report = self.get_object()
@@ -583,12 +583,20 @@ class ReportViewSet(viewsets.ModelViewSet):
         instances = expand_pages(cfg, ctx, report)
         instances = _expand_description_overflow(instances, cfg, ctx, design)
         instances = _expand_table_overflow(instances, cfg, ctx, design)
+        # Needed before _expand_toc_overflow: a "contents" toc element's own
+        # row count (how many pages the report has) only exists once this has
+        # run — skipping it left the real download's own "Contents" page
+        # overflow un-simulated here, so this endpoint's page count and
+        # every caption's page number silently drifted from the PDF's own
+        # (build_canvas_pdf runs the identical pass — see _index_toc_context).
+        _index_toc_context(ctx, instances)
         _collect_captions(instances, cfg, ctx)
         # A captioned list can itself run past its own box (see
         # pdf_canvas._expand_toc_overflow) — splicing continuation pages in
-        # shifts numbering for everything after them, so the caption pass
-        # runs again on the final, renumbered instances.
+        # shifts numbering for everything after them, so both passes run
+        # again on the final, renumbered instances.
         instances = _expand_toc_overflow(instances, cfg, ctx, design)
+        _index_toc_context(ctx, instances)
         _collect_captions(instances, cfg, ctx)
 
         def rows(key):

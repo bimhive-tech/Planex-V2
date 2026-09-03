@@ -247,21 +247,6 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     instances = _expand_description_overflow(instances, cfg, ctx, design)
     instances = _expand_table_overflow(instances, cfg, ctx, design)
 
-    def _index_toc_context(instances):
-        # One row per distinct page id (a repeat page's many clones collapse
-        # to its first — a table's continuation pages share their original
-        # page's id too, so they collapse the same way and never get their
-        # own TOC row).
-        toc_map, toc_order, seen = {}, [], set()
-        for inst in instances:
-            pid = inst.page.get("id")
-            if pid not in toc_map:
-                toc_map[pid] = inst.number
-            if pid not in seen:
-                seen.add(pid)
-                toc_order.append((pid, inst.page.get("name") or ""))
-        ctx["_toc_map"], ctx["_toc_order"] = toc_map, toc_order
-
     # First pass: real row COUNTS for every "toc" element (both the
     # "contents" page list and the captioned-tables/figures/images variants
     # — see _collect_captions) so _expand_toc_overflow below can tell
@@ -270,10 +255,10 @@ def build_canvas_pdf(report, ctx, *, cfg=None, out_pages=None) -> bytes:
     # pages shifts numbering for everything after them, so both indexes are
     # rebuilt below on the final, renumbered instances before anything
     # actually draws.
-    _index_toc_context(instances)
+    _index_toc_context(ctx, instances)
     _collect_captions(instances, cfg, ctx)
     instances = _expand_toc_overflow(instances, cfg, ctx, design)
-    _index_toc_context(instances)
+    _index_toc_context(ctx, instances)
     _collect_captions(instances, cfg, ctx)
 
     for inst in instances:
@@ -1778,6 +1763,31 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
     for i, inst in enumerate(out, start=1):
         inst.number = i
     return out
+
+
+def _index_toc_context(ctx: dict, instances: list) -> None:
+    """Populate ctx["_toc_map"]/"_toc_order" — the real page NUMBER and
+    ordered NAME list every "contents"-variant `toc` element reads (see
+    _toc_rows). Shared by build_canvas_pdf and the `toc-entries` action
+    (views.py) so a captioned list's page count matches the real PDF: without
+    this, the endpoint's simulated `_expand_toc_overflow` pass saw the
+    contents page as always exactly one page (0 rows, since nothing had told
+    it how many pages the report has), so it never spliced in the same
+    continuation pages the real PDF does — the whole document coming out one
+    page short and every caption after it numbered low (found 2026-09-03).
+
+    One row per distinct page id (a repeat page's many clones collapse to its
+    first — a table's continuation pages share their original page's id too,
+    so they collapse the same way and never get their own TOC row)."""
+    toc_map, toc_order, seen = {}, [], set()
+    for inst in instances:
+        pid = inst.page.get("id")
+        if pid not in toc_map:
+            toc_map[pid] = inst.number
+        if pid not in seen:
+            seen.add(pid)
+            toc_order.append((pid, inst.page.get("name") or ""))
+    ctx["_toc_map"], ctx["_toc_order"] = toc_map, toc_order
 
 
 def _expand_toc_overflow(instances: list, cfg: dict, ctx: dict, design: dict) -> list:

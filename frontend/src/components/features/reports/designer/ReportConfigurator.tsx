@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
+import { buildTocOverflowPages, tocEntriesFor } from "@/lib/reportToc";
 import type {
   ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, ReportLabels, TableDataMap,
   TableOverflowMap, TocCaptionsData, TocEntry,
@@ -80,15 +81,21 @@ export function ReportConfigurator({
   // directly; only the page LIST and the active-page lookup use this
   // expanded view, so a synthetic page is fully viewable but never
   // accidentally edited, saved, or duplicated as if it were real.
-  const displayPages = tableOverflow ? buildOverflowPages(pages, tableOverflow) : pages;
+  const withTables = tableOverflow ? buildOverflowPages(pages, tableOverflow) : pages;
   const overflowData = tableOverflow ? overflowTableData(tableOverflow) : undefined;
   const mergedTableData = overflowData ? { ...tableData, ...overflowData } : tableData;
+  // Two passes, in build_canvas_pdf's own order: number the pages the tables
+  // produced, use those numbers to decide how a long contents list paginates,
+  // then re-number — because splicing a TOC continuation page shifts every
+  // page after it, and the first pass is what says whether there is one.
+  const displayPages = buildTocOverflowPages(withTables, tocEntriesFor(withTables), tocCaptions);
   // Every page's real name + real page number, for any "toc" element on the
   // canvas — mirrors apps/reports/pdf_canvas.py's build_canvas_pdf toc_map/
-  // toc_order exactly (1-based position in this exact page sequence).
+  // toc_order exactly (1-based position in the sequence the PDF PRINTS, so
+  // continuation pages count toward the numbering without listing themselves).
   // Needs only the page list, so it's available in both the report
   // Customize tab and the project-agnostic Template Builder.
-  const tocEntries: TocEntry[] = pages.map((p, i) => ({ id: p.id, name: p.name, number: i + 1 }));
+  const tocEntries: TocEntry[] = tocEntriesFor(displayPages);
 
   const [activeId, setActiveId] = useState<string>(pages[0]?.id ?? "");
   // Page being dragged in the list, and the row it's currently hovering over

@@ -18,6 +18,7 @@ import type {
   ChartSvgMap, CustomTableData, LayoutElement, ReportLabels, TableDataMap, TableDataResult, TableStyle, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
+import { tocCapacity, tocChunkIndex } from "@/lib/reportToc";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CustomTableEditor } from "./CustomTableEditor";
@@ -839,6 +840,13 @@ function TocPreview({ el, liveData, tocEntries, tocCaptions, ownPageId, onElemen
   // — the same report is either Arabic or not, regardless of which TOC list
   // is being shown.
   const rtl = liveData?.arabic ?? false;
+  // Only this page's own slice of a list too long for the box — the real PDF
+  // draws exactly `tocCapacity` rows and continues the rest onto extra pages
+  // (see buildTocOverflowPages, which synthesizes the matching ones here).
+  // Without it the canvas drew all 67 rows into a 26-row box and clipped.
+  const capacity = tocCapacity(el);
+  const chunk = tocChunkIndex(el.id);
+  const page = <T,>(all: T[]) => all.slice(chunk * capacity, (chunk + 1) * capacity);
 
   // "Tables"/"Figures"/"Images" variants list every OTHER captioned element
   // in the template, in final PDF page order — numbering that depends on
@@ -865,7 +873,7 @@ function TocPreview({ el, liveData, tocEntries, tocCaptions, ownPageId, onElemen
     }
     return (
       <div className={styles.tocPreview} dir={rtl ? "rtl" : "ltr"} style={{ fontSize: `${size}px`, color }}>
-        {rows.map((row, i) => (
+        {page(rows).map((row, i) => (
           <div key={i} className={styles.tocPreviewRow}>
             <span>{row.text}</span>
             <span className={styles.tocPreviewDots} />
@@ -901,7 +909,7 @@ function TocPreview({ el, liveData, tocEntries, tocCaptions, ownPageId, onElemen
 
   return (
     <div className={styles.tocPreview} dir={rtl ? "rtl" : "ltr"} style={{ fontSize: `${size}px`, color }}>
-      {rows.map((row) => (
+      {page(rows).map((row) => (
         <div key={row.id} className={styles.tocPreviewRow}>
           <InlineEditableText
             value={nameOverrides[row.id] ?? row.name}

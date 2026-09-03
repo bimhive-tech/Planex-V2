@@ -3146,6 +3146,84 @@ class ReportsApiTests(TestCase):
         res = self.client.post(f"/api/report-templates/{template.id}/seed-layout/")
         self.assertEqual(res.status_code, 403)
 
+    def test_toc_entries_action_agrees_with_the_downloaded_pdf_on_page_numbers(self):
+        """The toc-entries action (the Customize canvas's live "List of
+        Tables"/"Figures"/"Images" preview) computes its own page numbers by
+        re-running build_canvas_pdf's own pagination passes. One of those —
+        `_index_toc_context`, which tells `_expand_toc_overflow` how many
+        rows a "contents"-variant toc element actually has — used to be a
+        closure private to build_canvas_pdf, so this action silently skipped
+        it: with no row count, a Contents page too long for its own box
+        never got the continuation pages the real PDF gives it, and every
+        page number after it (including every caption this action returns)
+        came out short by however many pages that omission cost (found
+        2026-09-03). This report is built so the Contents page is FORCED to
+        overflow (row_height huge relative to its box), and checks the
+        table's caption page number the action returns against the page the
+        downloaded PDF actually prints that same table's caption on."""
+        import fitz
+
+        from .pdf_base import ensure_fonts
+        ensure_fonts()   # a bare test process hasn't drawn a PDF yet to register them
+
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(
+            "/api/reports/",
+            {"project": str(self.project.id), "title": "Monthly", "report_number": "1"},
+            format="json")
+        report_id = res.data["id"]
+
+        draft_override = {
+            "page_design": {
+                "size": "A4", "orientation": "portrait", "margin_mm": 10,
+                "header_mm": 0, "footer_mm": 0, "show_header": False, "show_footer": False,
+                "show_border": True, "background": "#ffffff", "master_elements": [],
+            },
+            "layout": {"pages": [
+                {"id": "cover", "name": "Cover", "elements": []},
+                {"id": "contents", "name": "Contents", "elements": [
+                    # row_height 100mm in a 100mm box: capacity is exactly 1
+                    # row (verified against pdf_canvas._toc_capacity directly,
+                    # 2026-09-03), so with 2 other real pages this always
+                    # overflows into a continuation.
+                    {"id": "toc1", "type": "toc", "x": 10, "y": 10, "w": 190, "h": 100, "z": 0,
+                     "props": {"variant": "contents", "size": 11, "row_height": 100, "exclude_cover": False}},
+                ]},
+                {"id": "data", "name": "Data Page", "elements": [
+                    # project_info always resolves (built from Project's own
+                    # fields, not scope/activity data a bare test project
+                    # has none of) — unlike zone_progress, which needs real
+                    # zones and would silently draw nothing here.
+                    {"id": "tbl", "type": "table", "x": 10, "y": 10, "w": 100, "h": 60, "z": 0,
+                     "props": {"source": "project_info", "show_caption": True, "caption": "Zone Table"}},
+                ]},
+            ]},
+        }
+        resp = self.client.post(
+            f"/api/reports/{report_id}/toc-entries/", {"layout_override": draft_override}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        table_rows = resp.data["tables"]
+        self.assertEqual(len(table_rows), 1)
+        action_page = table_rows[0]["page"]
+
+        # /pdf/ (unlike toc-entries) always renders the report's SAVED
+        # layout_override, not one passed inline — save it first, the same
+        # way the real "Save custom layout" button does before a download.
+        patch = self.client.patch(f"/api/reports/{report_id}/", {"layout_override": draft_override}, format="json")
+        self.assertEqual(patch.status_code, 200, patch.data)
+
+        pdf = self.client.get(f"/api/reports/{report_id}/pdf/?engine=canvas")
+        self.assertEqual(pdf.status_code, 200, getattr(pdf, "data", None) or pdf.content[:500])
+        content = b"".join(pdf.streaming_content) if hasattr(pdf, "streaming_content") else pdf.content
+        doc = fitz.open(stream=content, filetype="pdf")
+        # The Contents page really did overflow — proves this scenario
+        # exercises the bug rather than happening to dodge it.
+        # cover, contents, contents-continuation, data = 4 real pages if the
+        # Contents overflow this test relies on actually happened; 3 if not.
+        self.assertEqual(doc.page_count, 4, "fixture didn't force Contents to overflow")
+        pdf_page = next(i + 1 for i, page in enumerate(doc) if "Zone Table" in page.get_text())
+        self.assertEqual(action_page, pdf_page)
+
 
 class ArabicWrapTests(SimpleTestCase):
     """A long Arabic value in a narrow table column used to garble: the whole
