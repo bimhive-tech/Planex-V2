@@ -60,11 +60,18 @@ export function ReportLayoutEditor({
   // already matches the real page count instead of the template's raw types.
   const startingPages = liveData ? expandRepeatingPages(templatePages, liveData) : templatePages;
   const isCustomized = Boolean(savedOverride?.layout?.pages?.length);
+  // A saved layout goes through the same expansion. Pages it already expanded
+  // carry `repeat.pin_index` and pass straight through; one that is still
+  // abstract gets expanded now, so the editor's page list matches the PDF
+  // rather than showing a single page where the PDF renders one per item.
+  const savedPages = isCustomized && liveData
+    ? expandRepeatingPages(savedOverride!.layout!.pages, liveData)
+    : savedOverride?.layout?.pages ?? [];
 
   // Keyed by reportId at the call site (see ReportDetail) so switching reports
   // remounts this with a fresh starting state instead of carrying over edits.
   const [pages, setPages] = useState<LayoutPage[]>(
-    isCustomized ? savedOverride!.layout!.pages : startingPages,
+    isCustomized ? savedPages : startingPages,
   );
   const [masterElements, setMasterElements] = useState<LayoutElement[]>(
     savedOverride?.page_design?.master_elements ?? design?.master_elements ?? [],

@@ -81,16 +81,31 @@ export interface TableStyle {
   header_text: string;
   border_color: string;
   zebra_color: string;
+  /** Shade for a summary row — pdf_tables.py's `table_summary_bg`. */
+  summary_bg: string;
   border: boolean;
   zebra: boolean;
   header_bold: boolean;
   font_size: number;
   cell_padding: number;
 }
+/** The column proportions the REAL PDF draws this table with, as fractions of
+ * the element's width summing to 1 (see pdf_canvas.TABLE_COL_WIDTHS_MM). The
+ * browser sizes columns by content, which is nothing like reportlab's pinned
+ * millimetre widths — a delays table gives its first column 48% in the PDF and
+ * the canvas was drawing it at 20%. Absent when the source pins nothing, in
+ * which case both renderers size by content and already agree. */
+export type TableColWidths = number[] | null;
+
+/** Body rows the PDF shades and bolds as summaries of the rows beneath them
+ * (the stage/zone heading rows on a per-unit table). Indices into `rows` as
+ * shipped, i.e. hidden rows already removed. */
+export type TableTintRows = number[];
+
 export type TableDataResult =
-  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle }
-  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle }
-  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle }
+  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
+  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
+  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
   | { status: "no_data"; style: TableStyle };
 export type TableDataMap = Record<string, TableDataResult>;
 

@@ -68,6 +68,14 @@ export interface ReportAreaDashboard {
   children: { name: string; actual: number | null; planned: number | null }[];
   duration: { total: number; elapsed: number; remaining: number; delay: number } | null;
 }
+/** One STAGE-typed scope ("Phase 1..5"), the source a stage-dashboard page
+ * repeats over — see apps/reports/services.py's _phase_rows. */
+export interface ReportPhaseDashboard {
+  name: string; actual: number | null; previous: number | null; planned: number | null;
+  children: { name: string; actual: number | null; planned: number | null }[];
+  areas: { name: string; actual: number | null; planned: number | null }[];
+  duration: { total: number; elapsed: number; remaining: number; delay: number } | null;
+}
 export interface ReportData {
   report: {
     title: string; number: string; date: string | null;
@@ -111,6 +119,7 @@ export interface ReportData {
   // "one per zone" page needs (item.duration/item.units/item.children),
   // minus its own nested per-zone photos.
   area_dashboards: ReportAreaDashboard[];
+  phase_dashboards: ReportPhaseDashboard[];
   cashflow: { month: string; planned: number; actual: number; cum_planned: number; cum_actual: number }[];
   cashflow_totals: { planned: number; actual: number };
   invoices: { name: string; value: number; date: string | null }[];

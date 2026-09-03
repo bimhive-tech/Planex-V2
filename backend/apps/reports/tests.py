@@ -969,7 +969,9 @@ class ResolveTableTests(SimpleTestCase):
         # element's own props.custom_data via the `style` param, not ctx.
         style = {"custom_data": {"columns": ["A", "B"], "rows": [["1", "2"], ["3", "4"]]}}
         grid = resolve_table("custom", default_config(), _full_ctx(), {"item": None}, raw=True, style=style)
-        self.assertEqual(grid, {"kind": "data", "header": ["A", "B"], "rows": [["1", "2"], ["3", "4"]]})
+        self.assertEqual(grid, {"kind": "data", "header": ["A", "B"], "rows": [["1", "2"], ["3", "4"]],
+                                # a custom table pins nothing: both renderers size by content
+                                "col_widths": None})
 
     def test_custom_source_builds_a_real_pdf_table(self):
         style = {"custom_data": {"columns": ["A", "B"], "rows": [["1", "2"]]}}
@@ -3742,6 +3744,114 @@ class MoneyUnitsTests(TestCase):
         raw = resolve_table("invoices", cfg, ctx, {"item": None}, avail_width=160 * MM, raw=True)
         self.assertEqual(raw["rows"][0][1], "1,000,000.50 EGP")
         self.assertEqual(raw["rows"][-1][1], "1,000,000.50 EGP")   # the Total row too
+
+
+class CanvasColumnWidthParityTests(TestCase):
+    """The Customize canvas must draw a table with the column proportions the
+    downloaded PDF gives it.
+
+    The browser sizes columns by content; reportlab sizes them from the
+    millimetre widths pdf_canvas pins per source. On `critical_path_delays`
+    that put the first column at 48% of the table in the PDF and 20% on the
+    canvas, so the preview looked nothing like the page it was previewing
+    (2026-09-03). raw=True now ships those same widths as fractions, and this
+    pins them to what reportlab ACTUALLY resolves rather than to a literal.
+    """
+
+    def setUp(self):
+        from .pdf_base import ensure_fonts
+        ensure_fonts()   # building a real Table needs the Amiri family registered
+
+    def _fractions_reportlab_uses(self, table, avail_width):
+        """The real Table's own resolved column widths, as fractions."""
+        table.wrap(avail_width, 10_000)
+        total = sum(table._colWidths)
+        return [round(w / total, 6) for w in table._colWidths]
+
+    def test_raw_col_widths_match_the_rendered_pdf_table(self):
+        from reportlab.lib.units import mm as MM
+
+        from .pdf_canvas import TABLE_COL_WIDTHS_MM, resolve_table
+
+        cfg = merged_config(default_config())
+        avail = 178 * MM
+        day = datetime.date(2026, 1, 31)
+        ctx = {
+            "arabic": False,
+            "project": {"currency": "EGP"},
+            "zones": [{"id": "z1", "name": "Zone A", "progress": 42.0,
+                       "planned": 50.0, "previous": 30.0}],
+            "milestones": [{"title": "Handover", "date": day, "status": "on_track"}],
+            "invoices": [{"name": "IPC 1", "value": 1_000_000.5, "date": day}],
+            "invoices_total": 1_000_000.5,
+            "delays": [{"title": "Rain", "impact_days": 31, "status": "open"}],
+            "critical_path": [{"name": "Foundations", "planned_finish": day,
+                               "forecast_finish": day, "delay_days": 31}],
+        }
+        scope = {"item": {"name": "Zone A", "stage": "Structure", "zone": "Zone A",
+                          "actual": 42.0, "planned": 50.0,
+                          "stage_actual": 40.0, "stage_planned": 45.0,
+                          "children": [{"name": "Building (A6)", "actual": 42.0, "planned": 50.0}]}}
+        checked = set()
+        for source in TABLE_COL_WIDTHS_MM:
+            raw = resolve_table(source, cfg, ctx, scope, avail_width=avail, raw=True)
+            self.assertIsNotNone(raw, f"{source} has no data — this test can't compare it")
+            table = resolve_table(source, cfg, ctx, scope, avail_width=avail)
+            expected = self._fractions_reportlab_uses(table, avail)
+            self.assertEqual(len(raw["col_widths"]), len(expected), source)
+            for canvas_w, pdf_w in zip(raw["col_widths"], expected):
+                # a tenth of a percent — below what a pixel on screen can show
+                self.assertAlmostEqual(canvas_w, pdf_w, places=3, msg=source)
+            checked.add(source)
+        self.assertEqual(checked, set(TABLE_COL_WIDTHS_MM))
+
+    def test_summary_rows_are_flagged_for_the_canvas(self):
+        """The PDF shades and bolds a per-unit table's stage/zone heading rows;
+        the canvas has to be told which they are or the preview loses them."""
+        from reportlab.lib.units import mm as MM
+
+        from .pdf_canvas import resolve_table
+
+        cfg = merged_config(default_config())
+        item = {"stage": "Structure", "zone": "Zone A", "actual": 42.0, "planned": 50.0,
+                "stage_actual": 40.0, "stage_planned": 45.0,
+                "children": [{"name": "Building (A6)", "actual": 42.0, "planned": 50.0}]}
+        ctx = {"arabic": False, "project": {}}
+        raw = resolve_table("item.children", cfg, ctx, {"item": item},
+                            avail_width=178 * MM, raw=True)
+        self.assertEqual(raw["tint_rows"], [0, 1])           # the stage and zone rows
+        self.assertTrue(raw["rows"][0][0].endswith("Structure"))
+        self.assertEqual(raw["rows"][0][1], "40.0%")         # carrying its own figures
+
+        # Hiding the stage row must move the tint with it, not leave it on the
+        # unit row that slid up into its place.
+        cut = resolve_table("item.children", cfg, ctx, {"item": item}, avail_width=178 * MM,
+                            raw=True, style={"hidden_rows": [0]})
+        self.assertEqual(cut["tint_rows"], [0])
+        self.assertTrue(cut["rows"][0][0].endswith("Zone A"))
+
+    def test_hidden_column_is_dropped_from_the_shipped_widths(self):
+        """The rows travel with hidden columns already stripped, so the widths
+        must be too — otherwise every column takes its neighbour's size."""
+        from reportlab.lib.units import mm as MM
+
+        from .pdf_canvas import _source_col_fractions
+
+        avail = 178 * MM
+        full = _source_col_fractions("critical_path_delays", avail)
+        cut = _source_col_fractions("critical_path_delays", avail, [1])
+        self.assertEqual(len(cut), len(full) - 1)
+        self.assertAlmostEqual(sum(cut), 1.0, places=5)
+        # The dropped column's width goes to the auto column, not to nobody.
+        self.assertGreater(cut[0], full[0])
+
+    def test_unpinned_source_ships_no_widths(self):
+        """Where the PDF sizes by content the canvas already agrees, so it must
+        be left alone rather than forced to equal columns."""
+        from .pdf_canvas import TABLE_COL_WIDTHS_MM, _source_col_fractions
+
+        self.assertNotIn("custom", TABLE_COL_WIDTHS_MM)
+        self.assertIsNone(_source_col_fractions("custom", 178))
 
 
 class PhaseProgressTableTests(TestCase):

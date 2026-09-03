@@ -54,10 +54,8 @@ export function resolveColWidths(widths: Sizes, count: number): number[] {
 export function ColGroup({ widths, count, leadingHandle }: {
   widths: Sizes; count: number; leadingHandle?: boolean;
 }) {
-  // Nothing dragged yet: stay out of the way entirely. Pinning equal columns
-  // here would contradict the PDF, whose per-source defaults are nothing like
-  // equal (a name column is typically half the table) — and that divergence
-  // would hit every existing report, not just tables someone has resized.
+  // Nothing to pin — neither a drag nor a PDF default. Forcing equal columns
+  // here would contradict the PDF, whose widths are nothing like equal.
   if (!widths?.some((w) => typeof w === "number" && w > 0)) return null;
   const resolved = resolveColWidths(widths, count);
   return (
@@ -151,9 +149,17 @@ function useResizeDrag(
 
 /** Column-edge grips, one per boundary, rendered inside the header cells.
  * `indexMap` maps each shown column to its original index (see pick). */
-export function useColumnResize(widths: Sizes, indexMap: number[], commit?: (w: (number | null)[]) => void) {
+export function useColumnResize(
+  widths: Sizes, indexMap: number[], commit?: (w: (number | null)[]) => void, defaults?: number[] | null,
+) {
   const count = indexMap.length;
-  const resolved = resolveColWidths(pick(widths, indexMap), count);
+  // A column nobody has dragged falls back to the width the PDF gives it, so
+  // an untouched table previews at the real page's proportions instead of the
+  // browser's content-based guess. `defaults` already has hidden columns
+  // dropped server-side, so it is in SHOWN index space like `picked`.
+  const picked = pick(widths, indexMap).map((w, i) => w ?? defaults?.[i] ?? null);
+  const pinned = picked.some((w) => typeof w === "number" && w > 0);
+  const resolved = resolveColWidths(picked, count);
   const { live, start, dragging } = useResizeDrag(
     (sizes) => commit?.(writeBack(widths, indexMap, sizes)),
     "x",
@@ -182,7 +188,7 @@ export function useColumnResize(widths: Sizes, indexMap: number[], commit?: (w: 
         />
       )
     : undefined;
-  return { widths: current, grip, dragging };
+  return { widths: current, pinned, grip, dragging };
 }
 
 /** Row-edge grips. Heights are millimetres; `scale` converts to canvas px. */

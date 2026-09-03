@@ -406,6 +406,7 @@ function tableStyleVars(style: TableStyle | null | undefined): React.CSSProperti
     "--tableHeaderBg": style?.header_bg ?? "#1F4E79",
     "--tableHeaderText": style?.header_text ?? "#ffffff",
     "--tableZebra": style?.zebra_color ?? "#eef3f8",
+    "--tableSummary": style?.summary_bg ?? "#dce6f1",
     "--tableFontSize": `${style?.font_size ?? 8}px`,
     "--tableCellPadding": `${style?.cell_padding ?? 3}px`,
   } as React.CSSProperties;
@@ -1300,7 +1301,7 @@ function LiveTableBody({
   const colIdx = live.kind === "data"
     ? originalColIndices(live.header?.length ?? 0, hiddenCols)
     : Array.from({ length: live.kind === "info" ? 2 : (live.header?.length ?? 0) }, (_, i) => i);
-  const cols = useColumnResize(colWidths, colIdx, commitColWidths);
+  const cols = useColumnResize(colWidths, colIdx, commitColWidths, live.col_widths);
   const rows = useRowResize(rowHeights, rowIdx, scale, commitRowHeights);
   /** Height for the row at SHOWN index `i`; the hooks map it back to the
    * original index the props are keyed by. Dynamic, so it travels as a custom
@@ -1308,10 +1309,12 @@ function LiveTableBody({
   const rowProps = (i: number) => (rows.heights[i] > 0
     ? { className: styles.sizedRow, style: { ["--rowH" as string]: `${rows.heights[i] * scale}px` } }
     : {});
-  // Only pin the layout once something has actually been dragged — see ColGroup.
-  const sized = cols.widths && colWidths?.some((w) => typeof w === "number" && w > 0);
+  // Pin the layout whenever there are widths to pin — a drag, or the widths
+  // the PDF itself uses for this table's source.
+  const sized = cols.pinned;
 
   const vars = tableStyleVars(live.style);
+  const tint = new Set(live.tint_rows ?? []);
 
   if (live.kind === "info") {
     return (
@@ -1415,8 +1418,13 @@ function LiveTableBody({
         <tbody>
           {live.rows.map((row, i) => {
             const oi = rowIdx[i];
+            // A summary row's shade replaces the zebra rather than stacking
+            // with it — exactly what _data_table does (it skips tinted rows
+            // when laying the zebra down).
+            const tinted = tint.has(i);
             return (
-              <tr key={i} data-zebra={live.style.zebra && i % 2 === 1 ? "on" : undefined} {...rowProps(i)}>
+              <tr key={i} data-tint={tinted ? "on" : undefined}
+                  data-zebra={live.style.zebra && !tinted && i % 2 === 1 ? "on" : undefined} {...rowProps(i)}>
                 {commitHideRow && (
                   <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
                 )}

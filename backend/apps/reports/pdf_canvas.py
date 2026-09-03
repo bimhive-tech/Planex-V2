@@ -958,6 +958,61 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 
 # ── Table binding ────────────────────────────────────────────────────────────
 
+# Column widths the real PDF pins, per table source, in millimetres. `None` is
+# "size me to my content, from whatever the fixed columns leave over".
+#
+# Declared here rather than inline at each branch so the Customize canvas can be
+# given the SAME numbers: the browser sizes every column by content, so a table
+# whose PDF gives its first column 48% of the width was drawing it at 20% on the
+# canvas, and every data table in the report looked materially different from the
+# page it was previewing (2026-09-03). Sources absent from this map are all-auto
+# in the PDF too, where content sizing is what both renderers already do.
+TABLE_COL_WIDTHS_MM = {
+    "item.children": [None, 30, 30],
+    "zone_progress": [None, 40],
+    "progress_compare": [None, 28, 28, 28],
+    "milestones": [None, 32, 34],
+    "invoices": [None, 36, 30],
+    "delays": [None, 28, 28],
+    "critical_path_delays": [None, 32, 32, 28],
+}
+
+
+def _source_col_widths(source, avail_width):
+    """`TABLE_COL_WIDTHS_MM` as reportlab points for `source`, or None."""
+    mm_widths = TABLE_COL_WIDTHS_MM.get(source)
+    if not mm_widths:
+        return None
+    return [None if w is None else w * mm for w in mm_widths]
+
+
+def _source_col_fractions(source, avail_width, hidden_cols=None):
+    """The same widths as fractions of `avail_width`, for the canvas.
+
+    Auto columns share whatever the pinned ones leave, which is exactly how
+    reportlab resolves a `None` entry, so the two renderers land on the same
+    proportions rather than merely similar ones.
+
+    `hidden_cols` are dropped first and the rest re-normalised, because the raw
+    rows this travels with have already had those columns removed — leaving them
+    in would shift every remaining column onto its neighbour's width.
+    """
+    mm_widths = TABLE_COL_WIDTHS_MM.get(source)
+    if not mm_widths or not avail_width:
+        return None
+    hidden = set(hidden_cols or [])
+    kept = [w for i, w in enumerate(mm_widths) if i not in hidden]
+    if not kept:
+        return None
+    avail_mm = avail_width / mm
+    fixed = sum(w for w in kept if w is not None)
+    autos = sum(1 for w in kept if w is None)
+    share = max(0.0, avail_mm - fixed) / autos if autos else 0.0
+    out = [(share if w is None else w) for w in kept]
+    total = sum(out) or 1.0
+    return [round(v / total, 6) for v in out]
+
+
 def resolve_table(
     source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None, raw: bool = False,
     overrides: dict | None = None, style: dict | None = None, scope_zone_id: str | None = None,
@@ -1050,12 +1105,22 @@ def resolve_table(
             summary.append(_summary_row(labels["col_zone"], item["zone"],
                                         item.get("actual"), item.get("planned")))
         rows = summary + rows
-        tint = set(range(len(summary)))
+        # In SHOWN row space: apply_table_overrides strips hidden rows below,
+        # so a hidden summary row would otherwise leave the tint on whatever
+        # slid up into its place.
+        hidden = set(hidden_rows)
+        tint = {shown for shown, original in
+                enumerate(i for i in range(len(rows)) if i not in hidden)
+                if original < len(summary)}
         header = [labels.get("col_unit", "Unit"), labels["col_actual"], labels["col_planned"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 30 * mm, 30 * mm],
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols),
+                    # The canvas shades these too, or the preview loses the one
+                    # thing that marks a summary row as a summary.
+                    "tint_rows": sorted(tint)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("item.children", avail_width),
                            avail_width=avail_width, tint_rows=tint)
     if source.startswith("item."):
         return None  # no other item-scoped table source defined
@@ -1120,7 +1185,8 @@ def resolve_table(
             return None
         apply_table_overrides("info", None, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "info", "header": None, "rows": rows}
+            return {"kind": "info", "header": None, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _info_table(cfg, styles, rows, rtl, avail_width=avail_width)
 
     if source == "zone_progress":
@@ -1133,8 +1199,9 @@ def resolve_table(
         header = [labels["col_zone"], labels["col_progress"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 40 * mm], avail_width=avail_width)
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("zone_progress", avail_width), avail_width=avail_width)
 
     if source == "hierarchy_progress":
         hierarchy = ctx.get("hierarchy") or []
@@ -1152,7 +1219,8 @@ def resolve_table(
                              "planned": child["planned"], "level": 1})
         apply_table_overrides("hierarchy", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "hierarchy", "header": header, "rows": rows}
+            return {"kind": "hierarchy", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=avail_width)
 
     if source == "progress_sheet":
@@ -1201,7 +1269,8 @@ def resolve_table(
                   labels.get("col_variance", "Variance %")]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "discipline_progress":
@@ -1216,7 +1285,8 @@ def resolve_table(
         rows = [[r["name"]] + [_pct_or_dash(v) for v in r["values"]] for r in discipline]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "progress_compare":
@@ -1230,8 +1300,9 @@ def resolve_table(
         header = [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm, 28 * mm],
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("progress_compare", avail_width),
                             avail_width=avail_width)
 
     if source == "milestones":
@@ -1243,8 +1314,9 @@ def resolve_table(
         header = [labels["col_milestone"], labels["col_date"], labels["col_status"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 34 * mm], avail_width=avail_width)
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("milestones", avail_width), avail_width=avail_width)
 
     if source == "invoices":
         invoices = ctx.get("invoices") or []
@@ -1261,8 +1333,9 @@ def resolve_table(
         header = [labels.get("col_invoice", "Item"), labels.get("col_value", "Value"), labels["col_date"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 36 * mm, 30 * mm], avail_width=avail_width)
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("invoices", avail_width), avail_width=avail_width)
 
     if source == "submittals":
         sub_rows = (ctx.get("submittals") or {}).get("rows") or []
@@ -1274,7 +1347,8 @@ def resolve_table(
                  enum_label(cfg, r["status"])] for r in sub_rows]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     if source == "delays":
@@ -1295,8 +1369,9 @@ def resolve_table(
         header = [labels["col_delay"], labels["col_impact"], labels["col_status"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 28 * mm, 28 * mm], avail_width=avail_width)
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("delays", avail_width), avail_width=avail_width)
 
     if source == "detailed_progress":
         return _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=avail_width, raw=raw,
@@ -1317,8 +1392,9 @@ def resolve_table(
         header = [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 32 * mm, 32 * mm, 28 * mm],
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
+        return _data_table(cfg, styles, header, rows, col_widths=_source_col_widths("critical_path_delays", avail_width),
                             avail_width=avail_width)
 
     if source == "custom":
@@ -1336,7 +1412,8 @@ def resolve_table(
         rows = [[str(cell) for cell in row] for row in (custom.get("rows") or [])]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
-            return {"kind": "data", "header": header, "rows": rows}
+            return {"kind": "data", "header": header, "rows": rows,
+                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
         return _data_table(cfg, styles, header, rows, avail_width=avail_width)
 
     return None
@@ -1365,7 +1442,8 @@ def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=Fal
     rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
     apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
-        return {"kind": "data", "header": header, "rows": rows}
+        return {"kind": "data", "header": header, "rows": rows,
+                "col_widths": _source_col_fractions("detailed_progress", avail_width, hidden_cols)}
     return _data_table_impl(cfg, styles, header, rows, avail_width=avail_width, **(sizing or {}))
 
 
@@ -1408,7 +1486,8 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=Fal
     ]
     apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
-        return {"kind": "data", "header": header, "rows": rows}
+        return {"kind": "data", "header": header, "rows": rows,
+                "col_widths": _source_col_fractions("activity_schedule", avail_width, hidden_cols)}
     return _data_table_impl(cfg, styles, header, rows, avail_width=avail_width, **(sizing or {}))
 
 

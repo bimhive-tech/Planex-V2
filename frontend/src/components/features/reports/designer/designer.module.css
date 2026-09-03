@@ -881,6 +881,11 @@
   table-layout: fixed;
 }
 
+/* A plain percentage, deliberately — `calc()` mixing a percentage with the
+   row-handle gutter's 16px is silently ignored on a <col> (Chrome falls back
+   to equal columns; measured 2026-09-03). It isn't needed anyway: the
+   percentages sum to 100% and the gutter is extra, so the table scales them
+   into the space the gutter leaves, which is the proportion we want. */
 .sizedCol {
   width: var(--colW);
 }
@@ -962,6 +967,13 @@
    table unconditionally. */
 .tableLive[data-kind="data"] tr[data-zebra="on"] td {
   background: var(--tableZebra);
+}
+
+/* Summary rows (a per-unit table's stage/zone heading rows) — mirrors
+   _data_table's tint_rows: table_summary_bg plus bold, and no zebra under it. */
+.tableLive[data-kind="data"] tr[data-tint="on"] td {
+  background: var(--tableSummary);
+  font-weight: 700;
 }
 
 /* "info" (project_info) — mirrors pdf_tables.py's _info_table: the label

@@ -414,6 +414,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
                 "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
                 "header_bold": bool(tcfg.get("header_bold")),
+                "summary_bg": c.get("table_summary_bg", "#DCE6F1"),
                 "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
             }
 
@@ -482,6 +483,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
                 "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
                 "header_bold": bool(tcfg.get("header_bold")),
+                "summary_bg": c.get("table_summary_bg", "#DCE6F1"),
                 "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
             }
 
@@ -534,6 +536,9 @@ class ReportViewSet(viewsets.ModelViewSet):
                         chunks.append({
                             "status": "ok", "kind": grid["kind"], "header": grid["header"],
                             "rows": rows[offset:offset + count], "style": style,
+                            # Continuation pages are the same table, so they
+                            # must keep its column proportions.
+                            "col_widths": grid.get("col_widths"),
                         })
                         offset += count
                     continuations[el_id] = chunks

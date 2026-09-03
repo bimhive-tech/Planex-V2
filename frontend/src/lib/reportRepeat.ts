@@ -17,6 +17,7 @@ function itemsFor(source: RepeatSource, data: ReportData): RepeatItem[] {
     case "zones": return data.zones as unknown as RepeatItem[];
     case "areas": return data.areas as unknown as RepeatItem[];
     case "area_dashboards": return data.area_dashboards as unknown as RepeatItem[];
+    case "phase_dashboards": return data.phase_dashboards as unknown as RepeatItem[];
     case "photos": return data.photos as unknown as RepeatItem[];
     case "attachments": return data.attachments as unknown as RepeatItem[];
     default: return [];
@@ -43,7 +44,13 @@ export function expandRepeatingPages(pages: LayoutPage[], data: ReportData): Lay
   const out: LayoutPage[] = [];
   for (const page of pages) {
     const rep = page.repeat;
-    if (!rep) {
+    // Already expanded (it carries the item it's pinned to) — pass it through
+    // untouched, so this can run over a SAVED layout without re-cloning the
+    // pages someone has since edited. That matters because a saved override
+    // can still hold an un-expanded repeating page (one whose source the
+    // editor couldn't expand when it was written), which otherwise shows as
+    // a single page here while the PDF renders one per item (2026-09-03).
+    if (!rep || rep.pin_index != null) {
       out.push(page);
       continue;
     }
