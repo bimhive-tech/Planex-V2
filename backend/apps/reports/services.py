@@ -5,6 +5,7 @@ Planned %, previous %, duration and delay are *derived* from data we already
 hold (project dates + dated snapshots) — no extra manual entry needed."""
 import copy
 import datetime
+import re
 
 from django.db.models import Sum
 
@@ -207,6 +208,42 @@ def _scope_context(project, scope_ids, schedule_import=None):
         return str(scope_id) in covered or str(activity_id) in selected_tasks
 
     return predicate, scope_to_zone
+
+
+def _zone_area_label(zone_name: str, area_name: str) -> str:
+    """A compact "which zone, which building" label: "Z(A)" + "Building 6" -> "A6".
+
+    The stage dashboard's bar chart carries every building in the stage, and the
+    same building number genuinely recurs under different zones ("Building 6"
+    exists under both Z(A) and Z(E)), so the bare area name names two different
+    bars. The client's own dashboard labels these "(A6)", "(E7)", "(C30)" — the
+    zone's letter followed by the building's number — which is both unambiguous
+    and far shorter than "Z(A) - Building 6", and short labels are what let a
+    74-bar chart print every one of them (2026-09-03).
+
+    Deliberately tolerant of other naming schemes: the zone token is whatever
+    sits inside its trailing brackets (or the name itself), the area token is its
+    trailing number (or the name itself), and anything that doesn't reduce to a
+    short pair falls back to "zone - area" rather than inventing a format.
+    """
+    zone_name, area_name = (zone_name or "").strip(), (area_name or "").strip()
+    if not zone_name:
+        return area_name
+    if not area_name:
+        return zone_name
+
+    bracketed = re.search(r"[(\[]([^)\]]+)[)\]]\s*$", zone_name)
+    zone_token = (bracketed.group(1) if bracketed else zone_name).strip()
+
+    trailing_number = re.search(r"(\d+)\s*$", area_name)
+    area_token = trailing_number.group(1) if trailing_number else area_name.strip()
+
+    joined = f"{zone_token}{area_token}"
+    # Only worth joining when the result still reads as one short token; a zone
+    # called "Northern Precinct" would otherwise produce "Northern Precinct6".
+    if len(zone_token) <= 3 and trailing_number and len(joined) <= 8:
+        return joined
+    return f"{zone_token} - {area_token}"
 
 
 def _disambiguated_names(scopes):
@@ -489,7 +526,11 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
                 if child.scope_type != ProjectScope.ScopeType.AREA or not weight.get(aid_):
                     continue
                 areas.append({
-                    "name": child.name, "actual": pct(aid_), "previous": prev_scopes.get(aid_),
+                    # Labelled with its zone, not just its own name — see
+                    # _zone_area_label; "Building 6" alone names two bars.
+                    "name": _zone_area_label(scopes[zid].name, child.name),
+                    "area_name": child.name, "zone_name": scopes[zid].name,
+                    "actual": pct(aid_), "previous": prev_scopes.get(aid_),
                     "planned": _scope_planned_progress(child, project, as_of, planned_map),
                 })
 

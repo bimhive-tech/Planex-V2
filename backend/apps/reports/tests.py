@@ -3871,9 +3871,16 @@ class StageAreaBarsTests(TestCase):
     def test_the_stage_carries_its_areas_not_just_its_zones(self):
         stage = self._stage()
         self.assertEqual([c["name"] for c in stage["children"]], ["Z(A)", "Z(B)"])
+        # Labelled by zone + building number (see _zone_area_label): the bare
+        # area name repeats across zones and would name two different bars.
         self.assertEqual([a["name"] for a in stage["areas"]],
+                         ["A1", "A2", "A3", "B4", "B5", "B6"])
+        # The raw names stay available alongside the chart label.
+        self.assertEqual([a["area_name"] for a in stage["areas"]],
                          ["Building 1", "Building 2", "Building 3",
                           "Building 4", "Building 5", "Building 6"])
+        self.assertEqual([a["zone_name"] for a in stage["areas"]],
+                         ["Z(A)", "Z(A)", "Z(A)", "Z(B)", "Z(B)", "Z(B)"])
 
     def test_the_chart_plots_one_bar_pair_per_area(self):
         from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -3929,3 +3936,39 @@ class VerticalAxisLabelTests(SimpleTestCase):
         self.assertEqual(len(out), len(self.NAMES))
         kept = [(i, n) for i, n in enumerate(out) if n]
         self.assertTrue(all(n == self.NAMES[i] for i, n in kept))
+
+
+class ZoneAreaLabelTests(SimpleTestCase):
+    """The stage chart carries every building in the stage, and the same
+    building number recurs under different zones — "Building 6" exists under
+    both Z(A) and Z(E), so the bare name labels two different bars. The client's
+    own dashboard writes these as "(A6)" / "(E7)" / "(C30)" (2026-09-03)."""
+
+    def _label(self, zone, area):
+        from .services import _zone_area_label
+        return _zone_area_label(zone, area)
+
+    def test_zone_letter_joins_the_building_number(self):
+        self.assertEqual(self._label("Z(A)", "Building 6"), "A6")
+        self.assertEqual(self._label("Z(E)", "Building 10"), "E10")
+        self.assertEqual(self._label("Z(C)", "Building 30"), "C30")
+
+    def test_the_two_ambiguous_buildings_now_differ(self):
+        self.assertNotEqual(self._label("Z(A)", "Building 6"),
+                            self._label("Z(E)", "Building 6"))
+
+    def test_square_brackets_work_too(self):
+        self.assertEqual(self._label("Zone [B]", "Building 7"), "B7")
+
+    def test_a_long_zone_name_falls_back_rather_than_running_words_together(self):
+        """"Northern Precinct6" would read as one nonsense token."""
+        self.assertEqual(self._label("Northern Precinct", "Building 6"),
+                         "Northern Precinct - 6")
+
+    def test_an_unnumbered_area_keeps_its_own_name(self):
+        self.assertEqual(self._label("Z(A)", "Clubhouse"), "A - Clubhouse")
+
+    def test_a_missing_half_is_returned_alone(self):
+        self.assertEqual(self._label("", "Building 6"), "Building 6")
+        self.assertEqual(self._label("Z(A)", ""), "Z(A)")
+        self.assertEqual(self._label(None, "Building 6"), "Building 6")
