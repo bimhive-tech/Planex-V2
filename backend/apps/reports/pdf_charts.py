@@ -368,59 +368,35 @@ def _unit_bars(cfg, units, width, labels, height=None):
     return d
 
 
-AREA_CHART_MAX = 15  # a grouped bar chart stops being readable past ~15 bars
+# Above this many areas a project-wide bar chart is a wall of hairlines, so the
+# summary chart rolls the areas up to their zones instead of plotting them.
+AREA_CHART_MAX = 40
 
 
 def area_progress_chart(cfg, ctx, width, labels, height=None):
-    """Planned-vs-actual bars one level below zones (the areas / subzones). Same
-    look as the zone chart; capped so it stays legible with many areas."""
+    """Planned-vs-actual bars one level below zones, over the WHOLE project.
+
+    This used to plot `areas[:15]` — the first fifteen of 251 buildings, which
+    on a real project are all in one zone of one stage. Nothing on the page said
+    so, so a summary chart claiming to show the project actually showed 6% of
+    it, and always the same 6% (reported 2026-09-03).
+
+    Every area is now covered. Past `AREA_CHART_MAX` a per-building chart is a
+    wall of hairlines, so the areas are rolled up to their zones — still the
+    whole project, at the granularity the page can actually carry. Below that
+    threshold the buildings are plotted individually.
+    """
     areas = ctx.get("areas") or []
     if not areas:
         return None
-    return _unit_bars(cfg, areas[:AREA_CHART_MAX], width, labels, height)
-
-
-def _completion_histogram(cfg, children, width, labels, height=None):
-    """How a zone's sub-units are spread across completion bands — readable at
-    any unit count (a per-unit bar chart isn't, past ~15 units). Bar height is
-    the number of units in each band; the value label prints that count."""
-    bands = [0, 0, 0, 0, 0]  # 0% | 1-49 | 50-74 | 75-99 | 100%
-    for u in children:
-        p = float(u.get("actual") or 0)
-        if p <= 0:
-            bands[0] += 1
-        elif p < 50:
-            bands[1] += 1
-        elif p < 75:
-            bands[2] += 1
-        elif p < 100:
-            bands[3] += 1
-        else:
-            bands[4] += 1
-    height = height or 70 * mm
-    d = Drawing(width, height)
-    chart = VerticalBarChart()
-    chart.x, chart.y = 26, 24
-    chart.width, chart.height = width - 52, height - 42
-    chart.data = [bands]
-    chart.categoryAxis.categoryNames = ["0%", "1-49%", "50-74%", "75-99%", "100%"]
-    chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 8
-    top = max(bands) or 1
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax = 0, top
-    chart.valueAxis.valueStep = max(1, -(-top // 5))  # ceil(top/5)
-    chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
-    _grid(chart.valueAxis, cfg)
-    _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)
-    chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
-    chart.bars[0].strokeColor = None
-    chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 8
-    chart.barLabelFormat = "%d"
-    chart.barLabels.nudge = 7
-    d.add(chart)
-    return d
+    if len(areas) <= AREA_CHART_MAX:
+        return _unit_bars(cfg, areas, width, labels, height)
+    zones = [z for z in (ctx.get("zones") or []) if z.get("planned") is not None]
+    if not zones:
+        return None
+    rolled = [{"name": z["name"], "planned": z["planned"], "actual": z["progress"]}
+              for z in zones]
+    return _unit_bars(cfg, rolled, width, labels, height)
 
 
 def area_units_chart(cfg, area, width, labels, height=None):
@@ -433,20 +409,19 @@ def area_units_chart(cfg, area, width, labels, height=None):
     zone item has no `areas`, and its own children already ARE the areas, so it
     falls through to them unchanged.
 
-    An explicit `areas` list is always drawn as bars, however many there are:
-    that IS the reference chart, ~75 pairs across a full-width panel with
-    thinned labels. The histogram below stays as the fallback for a zone whose
-    unit count would make individual bars unreadable — the case it was added
-    for, where the alternative was drawing nothing at all."""
-    areas = area.get("areas")
-    if areas:
-        return _unit_bars(cfg, areas, width, labels, height)
-    children = area.get("children", [])
+    Always drawn as per-unit bars. The old 15-unit cap fell back to a
+    completion histogram, which on a real zone said only "33 buildings are
+    75-99% done" — every unit in one bucket, telling the reader nothing about
+    which building is behind (the client couldn't read it, 2026-09-03). It
+    existed because the axis could only label a handful of bars; now that a
+    90-degree label is budgeted by its line height rather than its length
+    (see _thinned_labels) a zone's units label and read fine, and the
+    histogram has nothing left to solve, so it is gone rather than left as
+    dead code."""
+    children = area.get("areas") or area.get("children") or []
     if not children:
         return None
-    if len(children) <= 15:
-        return _unit_bars(cfg, children, width, labels, height)
-    return _completion_histogram(cfg, children, width, labels, height)
+    return _unit_bars(cfg, children, width, labels, height)
 
 
 def _duration_pie_for(cfg, dur, width, labels, height=None):

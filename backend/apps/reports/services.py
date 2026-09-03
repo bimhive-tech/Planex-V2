@@ -866,6 +866,10 @@ def _area_dashboards(project, hierarchy, as_of, schedule_import=None):
         own_schedule = bool(zone.planned_start and zone.planned_finish)
         out.append({
             "name": z["name"], "actual": z["actual"], "planned": z["planned"],
+            # Carried through so the page's table can head itself with which
+            # stage and zone it covers — the repeat page's title alone left the
+            # table looking unattributed (2026-09-03).
+            "stage": z.get("stage") or "", "zone": z.get("zone") or z["name"],
             "children": z["children"],
             "duration": _zone_duration(zone, project, as_of, planned_pct=z["planned"], actual_pct=z["actual"])
             if own_schedule else None,
@@ -1030,7 +1034,12 @@ def build_report_context(report):
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
     # Flat list of areas (the subzones under every zone) for the optional
     # area-level planned/actual bar chart.
-    areas = [{"name": c["name"], "planned": c["planned"], "actual": c["actual"]}
+    # Labelled with the zone they sit under, like the stage dashboard's own bar
+    # chart: the same building number recurs under different zones, so the bare
+    # area name names two different bars on a project-wide chart.
+    areas = [{"name": _zone_area_label(z.get("zone") or z["name"], c["name"]),
+              "area_name": c["name"], "zone_name": z.get("zone") or z["name"],
+              "planned": c["planned"], "actual": c["actual"]}
              for z in hierarchy for c in z["children"]]
     discipline_columns, discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
     boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)

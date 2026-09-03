@@ -1024,13 +1024,23 @@ def resolve_table(
     _hierarchy_table_flat = partial(_hierarchy_table_flat_impl, **_sizing)
 
     if source == "item.children":
-        children = (scope.get("item") or {}).get("children") or []
+        item = scope.get("item") or {}
+        children = item.get("children") or []
         if not children:
             return None
         rows = [[c["name"],
                  f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
                  f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
-        header = [labels["col_zone"], labels["col_actual"], labels["col_planned"]]
+        # Head the table with which stage and zone it covers. On a repeating
+        # page the reader meets this table on its own, several pages in, with
+        # nothing in it saying which of fifteen zones it belongs to.
+        # Reversed because each insert goes to the top: stage ends up above zone,
+        # reading down the hierarchy the way the page title does.
+        for label, value in ((labels["col_zone"], item.get("zone")),
+                             (labels.get("col_stage", "Stage"), item.get("stage"))):
+            if value:
+                rows.insert(0, [f"{label}: {value}", "", ""])
+        header = [labels.get("col_unit", "Unit"), labels["col_actual"], labels["col_planned"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
@@ -1088,25 +1098,18 @@ def resolve_table(
              _fmt_date(p.get("part_forecast_completion")) if p.get("part_forecast_completion") else ""),
             (labels.get("info_part_delay", "(Part) Delay (Calendar Days)"), days(p.get("part_delay_days"))),
         ]
-        # Flags the schedule-risk rows (forecast/delay dates) for _info_table
-        # to tint — matches the client's own reference report's own
-        # convention of visually calling those out rather than letting them
-        # blend into the rest of the table (found 2026-08-26). Resolved
-        # from `labels` (not hardcoded English key names) so this still
-        # matches after a template overrides any of these to Arabic.
-        highlight_labels = {
-            labels.get("info_forecast", "Forecast finish"),
-            labels.get("info_delay", "Delay"),
-            labels.get("info_part_forecast", "(Part) Forecasted Completion Date"),
-            labels.get("info_part_delay", "(Part) Delay (Calendar Days)"),
-        }
+        # No row tinting. The forecast/delay rows used to be shaded to match
+        # the client's dashboard, but on the report itself they read as an
+        # error state rather than emphasis — the client asked for it off
+        # (2026-09-03). _info_table still accepts highlight_labels for any
+        # template that wants it; nothing passes it now.
         rows = [[k, v] for k, v in rows if v and v != "—"]
         if not rows:
             return None
         apply_table_overrides("info", None, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "info", "header": None, "rows": rows}
-        return _info_table(cfg, styles, rows, rtl, avail_width=avail_width, highlight_labels=highlight_labels)
+        return _info_table(cfg, styles, rows, rtl, avail_width=avail_width)
 
     if source == "zone_progress":
         zones = ctx.get("zones") or []

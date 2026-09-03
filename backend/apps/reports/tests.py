@@ -1867,8 +1867,11 @@ class AreaDashboardsTests(TestCase):
         report = Report.objects.create(company=self.company, project=self.project, title="R")
 
         ctx = build_report_context(report)
-        names = [a["name"] for a in ctx["areas"]]
-        self.assertIn("Bldg 1", names)
+        # The chart label carries the zone as well, since a building number
+        # recurs across zones (see _zone_area_label); "Zone A" is too long to
+        # join, so it falls back to "zone - area" rather than "AreaBldg 1".
+        self.assertEqual([a["name"] for a in ctx["areas"]], ["Zone A - Bldg 1"])
+        self.assertEqual([a["area_name"] for a in ctx["areas"]], ["Bldg 1"])
         # The chart renders (returns a Drawing, not None) when areas exist.
         self.assertIsNotNone(area_progress_chart(default_config(), ctx, 400, default_config()["labels"]))
 
@@ -3978,3 +3981,49 @@ class ZoneAreaLabelTests(SimpleTestCase):
         self.assertEqual(self._label("", "Building 6"), "Building 6")
         self.assertEqual(self._label("Z(A)", ""), "Z(A)")
         self.assertEqual(self._label(None, "Building 6"), "Building 6")
+
+
+class SummaryCoverageTests(SimpleTestCase):
+    """Client review 2026-09-03: the project-wide area chart was plotting the
+    first 15 of 251 buildings — all of them in one zone of one stage — with
+    nothing on the page saying so."""
+
+    def _ctx(self, n_areas):
+        zones = [{"name": f"PH1 - Z({c})", "planned": 100.0, "progress": 90.0 - i}
+                 for i, c in enumerate("ABCD")]
+        return {
+            "arabic": False,
+            "areas": [{"name": f"Building ({i})", "planned": 100.0, "actual": 90.0}
+                      for i in range(n_areas)],
+            "zones": zones,
+        }
+
+    def _categories(self, ctx):
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+        from .pdf_base import ensure_fonts
+        from .pdf_charts import area_progress_chart
+        ensure_fonts()
+        cfg = merged_config(default_config())
+        drawing = area_progress_chart(cfg, ctx, 700, cfg["labels"], height=200)
+        chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
+        return chart.data
+
+    def test_a_readable_number_of_areas_is_plotted_in_full(self):
+        data = self._categories(self._ctx(12))
+        self.assertEqual(len(data[-1]), 12)   # every area, not a slice of them
+
+    def test_too_many_areas_roll_up_to_zones_rather_than_truncating(self):
+        """251 buildings can't be read on one chart, but showing the first 15
+        is worse than showing all four zones: it hides the whole project."""
+        data = self._categories(self._ctx(251))
+        self.assertEqual(len(data[-1]), 4)    # the zones, covering everything
+        self.assertNotEqual(len(data[-1]), 15)
+
+    def test_the_rollup_needs_zones_to_fall_back_to(self):
+        ctx = self._ctx(251)
+        ctx["zones"] = []
+        from .pdf_base import ensure_fonts
+        from .pdf_charts import area_progress_chart
+        ensure_fonts()
+        cfg = merged_config(default_config())
+        self.assertIsNone(area_progress_chart(cfg, ctx, 700, cfg["labels"], height=200))
