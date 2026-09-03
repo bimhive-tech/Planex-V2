@@ -563,32 +563,46 @@ def invoice_status_chart(cfg, ctx, width, labels, height=None):
 
 
 def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
-    """Budget share vs. financial % complete per BOQ phase (reference
-    dashboard's "Financial Progress according to BOQ" grouped bars,
-    2026-08-30) — data assembled in services._boq_financial_progress, see
-    its own docstring for what each of the two bars actually means. Same
-    grouped-VerticalBarChart shape as planned_actual_chart; `None` (not an
-    empty chart) when the project has no P6 cost import at all."""
+    """Budgeted vs earned cost per BOQ phase — the reference dashboard's
+    "Financial Progress according to BOQ" grouped bars. Data assembled in
+    services._boq_financial_progress.
+
+    Plotted as MONEY, not percentages. This is a budget line, and a reader
+    comparing trades wants to know that finishes are 2.4bn against 1.1bn
+    earned, not that they are "45% vs 39%" of something they then have to
+    multiply back out (the client asked for the amounts, 2026-09-03). The
+    percentages are still what services computes and what the value axis
+    ordering follows; they're just not what the bars are labelled with.
+
+    `None` (not an empty chart) when the project has no P6 cost import."""
     rows = ctx.get("boq_financial_progress") or []
     if not rows:
         return None
+    # Fall back to the percentages for data captured before the money was
+    # carried through, so an older saved context still renders something.
+    money = all(r.get("budget") is not None for r in rows)
+    key_planned, key_actual = ("budget", "earned") if money else ("budget_share", "financial_percent")
     height = height or 78 * mm
     d = Drawing(width, height)
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
     chart.width, chart.height = width - 48, height - 60
     chart.data = [
-        [r["budget_share"] for r in rows],
-        [r["financial_percent"] for r in rows],
+        [r[key_planned] for r in rows],
+        [r[key_actual] for r in rows],
     ]
     chart.categoryAxis.categoryNames = _thinned_labels([shape(r["name"]) for r in rows], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = 7
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
-    top = max(max(r["budget_share"], r["financial_percent"]) for r in rows) or 1
+    top = max(max(r[key_planned], r[key_actual]) for r in rows) or 1
     chart.valueAxis.valueMin, chart.valueAxis.valueMax = 0, top * 1.15
-    chart.valueAxis.labelTextFormat = "%d%%"
+    # Axis in millions with the currency stated once, rather than ten-digit
+    # tick labels wider than the plot they're labelling.
+    cur = (ctx.get("project") or {}).get("currency") or ""
+    chart.valueAxis.labelTextFormat = (
+        (lambda v: f"{v / 1e6:,.0f}") if money else "%d%%")
     chart.valueAxis.labels.fontName = FONT_NAME
     chart.valueAxis.labels.fontSize = 7
     _grid(chart.valueAxis, cfg)
@@ -598,12 +612,23 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = 6
-    chart.barLabelFormat = "%0.0f%%"
+    # Millions, so a nine-figure budget doesn't print a number wider than its
+    # own bar; the axis carries the full scale.
+    chart.barLabelFormat = (lambda v: f"{v / 1e6:,.1f}M" if v else "") if money else "%0.0f%%"
     chart.barLabels.nudge = 6
+    chart.barLabels.angle = 90 if money else 0
     d.add(chart)
+    if money:
+        # The unit belongs on the axis, said once — every tick and bar label
+        # would otherwise repeat "EGP" down the side of the chart.
+        unit = labels.get("unit_millions", "millions")
+        d.add(String(4, chart.y + chart.height + 4, shape(f"{unit} {cur}".strip()),
+                     fontName=FONT_NAME, fontSize=6,
+                     fillColor=hexcolor(cfg["colors"].get("muted", "#A5A5A5"))))
+    keys = (("budget_planned_value", "Budget"), ("budget_earned_value", "Earned value")) if money         else (("budget_share", "Budget"), ("financial_percent", "Actual"))
     d.add(_legend([
-        (cfg["colors"]["chart_planned"], labels.get("budget_share", "Budget")),
-        (cfg["colors"]["chart_actual"], labels.get("financial_percent", "Actual")),
+        (cfg["colors"]["chart_planned"], labels.get(keys[0][0], keys[0][1])),
+        (cfg["colors"]["chart_actual"], labels.get(keys[1][0], keys[1][1])),
     ], width / 2 - 95, height - 12))
     return d
 

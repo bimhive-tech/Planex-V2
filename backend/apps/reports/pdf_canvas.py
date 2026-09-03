@@ -1031,20 +1031,32 @@ def resolve_table(
         rows = [[c["name"],
                  f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
                  f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
-        # Head the table with which stage and zone it covers. On a repeating
-        # page the reader meets this table on its own, several pages in, with
-        # nothing in it saying which of fifteen zones it belongs to.
-        # Reversed because each insert goes to the top: stage ends up above zone,
-        # reading down the hierarchy the way the page title does.
-        for label, value in ((labels["col_zone"], item.get("zone")),
-                             (labels.get("col_stage", "Stage"), item.get("stage"))):
-            if value:
-                rows.insert(0, [f"{label}: {value}", "", ""])
+        # Head the table with which stage and zone it covers, each carrying its
+        # OWN rolled-up figures rather than blank cells — those are the totals
+        # the rows beneath them add up to, and leaving them empty made the two
+        # rows look like a stray caption (2026-09-03). On a repeating page the
+        # reader meets this table on its own, several pages in, with nothing in
+        # it saying which of fifteen zones it belongs to.
+        def _summary_row(label, name, actual, planned):
+            return [f"{label}: {name}",
+                    f"{actual:.1f}%" if actual is not None else "—",
+                    f"{planned:.1f}%" if planned is not None else "—"]
+
+        summary = []
+        if item.get("stage"):
+            summary.append(_summary_row(labels.get("col_stage", "Stage"), item["stage"],
+                                        item.get("stage_actual"), item.get("stage_planned")))
+        if item.get("zone"):
+            summary.append(_summary_row(labels["col_zone"], item["zone"],
+                                        item.get("actual"), item.get("planned")))
+        rows = summary + rows
+        tint = set(range(len(summary)))
         header = [labels.get("col_unit", "Unit"), labels["col_actual"], labels["col_planned"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows}
-        return _data_table(cfg, styles, header, rows, col_widths=[None, 30 * mm, 30 * mm], avail_width=avail_width)
+        return _data_table(cfg, styles, header, rows, col_widths=[None, 30 * mm, 30 * mm],
+                           avail_width=avail_width, tint_rows=tint)
     if source.startswith("item."):
         return None  # no other item-scoped table source defined
 

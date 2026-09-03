@@ -660,6 +660,11 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
             "name": r["phase_name"],
             "budget_share": round(budget / total_budget * 100, 1),
             "financial_percent": round(earned / total_budget * 100, 1),
+            # The money itself, for a chart that plots amounts rather than
+            # shares — a budget line means more read as a figure than as a
+            # percentage of something (2026-09-03).
+            "budget": round(budget, 2),
+            "earned": round(earned, 2),
         })
     return out
 
@@ -835,7 +840,7 @@ def _selected_progress_photos(report, project):
              "url": f"/api/projects/{project.id}/progress-images/{p['id']}/file/"} for p in ordered]
 
 
-def _area_dashboards(project, hierarchy, as_of, schedule_import=None):
+def _area_dashboards(project, hierarchy, as_of, schedule_import=None, phases=None):
     """Per-zone dashboard data: its own duration/time-performance (falls back
     to the project's when it has none of its own) and a handful of recent
     progress photos from its subtree. The planned-vs-actual bar chart is drawn
@@ -845,6 +850,10 @@ def _area_dashboards(project, hierarchy, as_of, schedule_import=None):
     this mainly matters for the `_subtree_ids` lookup below."""
     from apps.projects.models import ProgressImage
 
+    # Each stage's own rolled-up figures, so a zone page can show the stage it
+    # belongs to beside the zone itself. Empty when the caller has no phase
+    # rows, in which case the page shows a dash rather than a wrong number.
+    stage_progress = {p["name"]: (p.get("actual"), p.get("planned")) for p in (phases or [])}
     zone_ids = [z["id"] for z in hierarchy]
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     zones_by_id = {str(s.id): s for s in scopes.filter(id__in=zone_ids)}
@@ -867,9 +876,12 @@ def _area_dashboards(project, hierarchy, as_of, schedule_import=None):
         out.append({
             "name": z["name"], "actual": z["actual"], "planned": z["planned"],
             # Carried through so the page's table can head itself with which
-            # stage and zone it covers — the repeat page's title alone left the
-            # table looking unattributed (2026-09-03).
+            # stage and zone it covers, each with its own rolled-up figures —
+            # the repeat page's title alone left the table unattributed, and
+            # blank summary cells read as a stray caption (2026-09-03).
             "stage": z.get("stage") or "", "zone": z.get("zone") or z["name"],
+            "stage_actual": stage_progress.get(z.get("stage") or "", (None, None))[0],
+            "stage_planned": stage_progress.get(z.get("stage") or "", (None, None))[1],
             "children": z["children"],
             "duration": _zone_duration(zone, project, as_of, planned_pct=z["planned"], actual_pct=z["actual"])
             if own_schedule else None,
@@ -1044,10 +1056,12 @@ def build_report_context(report):
     discipline_columns, discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
     boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
     financial_percent_complete = _financial_percent_complete(project, schedule_import)
-    area_dashboards = _area_dashboards(project, hierarchy, as_of, schedule_import)
+
     # Per-phase (STAGE scope) rollups — backs the reference report's own
     # per-phase dashboard pages. Same inputs as `hierarchy`, one level up.
     phase_dashboards = _phase_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
+    area_dashboards = _area_dashboards(
+        project, hierarchy, as_of, schedule_import, phases=phase_dashboards)
     critical_path = _critical_path_rows(project, hierarchy, as_of, schedule_import)
     gantt = _gantt_rows(project, report.scope_ids, progress, schedule_import)
 

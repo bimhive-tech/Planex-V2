@@ -376,13 +376,19 @@ def element_row_heights(heights_mm, hidden_rows, body_rows, header_row=True):
 
 
 def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
-                col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None):
+                col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None,
+                tint_rows=None):
     """Header row plus flat body rows.
     `col_widths_frac`/`row_heights_mm` are the element's own dragged column
     widths and row heights, still in the ORIGINAL index space (see
     element_col_widths/element_row_heights, which reconcile them against
     `hidden_cols`/`hidden_rows` and the real row/column counts here). When
     present they take precedence over this builder's per-source defaults.
+
+    `tint_rows` is a set of BODY row indices to shade — for rows that summarise
+    the ones under them rather than sitting alongside them, so the reader can
+    see at a glance which lines are the roll-up (the zone-dashboard table's
+    stage/zone header rows). Zebra striping skips them so the two don't fight.
     """
     col_widths = element_col_widths(col_widths_frac, hidden_cols, avail_width, len(header)) or col_widths
     c, tcfg = cfg["colors"], cfg["table"]
@@ -411,9 +417,15 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
     ]
     if tcfg.get("border"):
         style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
+    tinted = {i + 1 for i in (tint_rows or ())}      # body index -> data index
     if tcfg.get("zebra"):
         for i in range(2, len(data), 2):
-            style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c["table_row_alt"])))
+            if i not in tinted:
+                style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c["table_row_alt"])))
+    for i in sorted(tinted):
+        if i < len(data):
+            style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c.get("table_summary_bg", "#DCE6F1"))))
+            style.append(("FONTNAME", (0, i), (-1, i), BOLD))
     t.setStyle(TableStyle(style))
     return t
 

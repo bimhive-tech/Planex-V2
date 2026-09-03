@@ -25,6 +25,9 @@ DEFAULT_CONFIG = {
         "table_header_text": "#ffffff",
         "table_border": "#000000",
         "table_row_alt": "#eef3f8",
+        # Rows that summarise the ones under them (the zone dashboard's
+        # stage/zone header rows), tinted a touch stronger than the zebra.
+        "table_summary_bg": "#dce6f1",
         "table_highlight": "#FFF2CC",    # info-table rows worth flagging (forecast/delay dates) — see _info_table
         "cover_bg": "#ffffff",
         "cover_accent": "#963634",       # maroon bar + project title on the cover
@@ -217,6 +220,7 @@ DEFAULT_CONFIG = {
         "col_this_month": "إنجاز هذا الشهر",
         "col_performance_factor": "معامل الأداء",
         "variance": "الانحراف",
+        "unit_millions": "بالمليون",
         "budget_planned_value": "القيمة المخططة",
         "budget_earned_value": "القيمة المكتسبة",
         "budget_remaining_value": "القيمة المتبقية",
