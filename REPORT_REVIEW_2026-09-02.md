@@ -294,6 +294,13 @@ Value labels drop out once bars are denser than ~11pt apart: at 74 buildings the
 printed as one unreadable "98989898…" smear, and the reference carries no values
 on that chart either.
 
+**Taller, on the client's follow-up.** The bar chart takes whatever the rows above
+don't need, so height came from tightening them: the project block measures ~48mm
+at 6pt but was reserving 86, and the pies now match the table's height instead of
+leaving 20mm of white under them. The chart went **62mm → 98mm** — it fills the
+lower half of the page — with the page count unchanged at 85, so the table still
+fits its box rather than overflowing onto continuation pages.
+
 ---
 
 ## 11. Missing page — the Progress Sheet table
