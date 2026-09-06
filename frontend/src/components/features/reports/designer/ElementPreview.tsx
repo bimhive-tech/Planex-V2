@@ -18,7 +18,7 @@ import type {
   ChartSvgMap, CustomTableData, LayoutElement, ReportLabels, TableDataMap, TableDataResult, TableStyle, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
 import { resolveItemField } from "@/lib/reportRepeat";
-import { tocCapacity, tocChunkIndex } from "@/lib/reportToc";
+import { originalPageId, tocCapacity, tocChunkIndex } from "@/lib/reportToc";
 import type { RepeatItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { CustomTableEditor } from "./CustomTableEditor";
@@ -899,8 +899,19 @@ function TocPreview({ el, liveData, tocEntries, tocCaptions, ownPageId, onElemen
   // Real page names + real page numbers from the current draft — mirrors
   // apps/reports/pdf_canvas.py's _draw_toc_element exactly (same exclusion
   // rules, same "skip my own page" rule), never a fake sample list.
+  //
+  // originalPageId: on a synthesized continuation page (see
+  // buildTocOverflowPages) `ownPageId` is that page's own synthetic id,
+  // which no entry in `tocEntries` ever carries (synthetic pages get no row
+  // — see tocEntriesFor) — so the exclusion below silently excluded
+  // nothing, leaving the real Contents page's own row in the list. That
+  // made a continuation page's row list one entry longer than the page it
+  // continues, and slicing both by the same fixed window shifted every row
+  // on the continuation by one, duplicating its predecessor's last row
+  // (found 2026-09-06 — "موقف الرسومات والمواد" listed as page 44 twice).
   const rows = (tocEntries ?? [])
-    .filter((e) => e.id !== ownPageId)
+    .filter((e) => !e.synthetic)
+    .filter((e) => e.id !== originalPageId(ownPageId ?? ""))
     .filter((e) => !(excludeCover && e.name.trim().toLowerCase() === "cover"));
 
   if (!tocEntries) {

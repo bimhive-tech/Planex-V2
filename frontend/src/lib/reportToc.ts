@@ -19,6 +19,27 @@ function chunkElementId(originalId: string, chunkIndex: number): string {
   return `${originalId}${CHUNK_MARK}${chunkIndex}`;
 }
 
+/** The PAGE_ID prefix of `buildTocOverflowPages`' synthetic page ids
+ * (`${page.id}::toc::${el.id}::${chunk}`) — the real page a continuation
+ * was spliced after, so the "toc" element on it can still exclude that real
+ * page's own row.
+ *
+ * A "contents" toc element skips whatever page it's drawn on (see
+ * `tocRows`'s `e.id !== ownPageId`) — on the ORIGINAL page that's the page's
+ * own real id, but a continuation page's real id IS that same original page
+ * (it's the same logical page, split across two boxes), while its OWN id is
+ * the synthetic one nothing in `entries` ever carries. Without unwrapping it
+ * here, the exclusion silently did nothing on a continuation page: its row
+ * list came out one entry longer than the original page's, and slicing both
+ * by the same fixed window shifted the second page's rows by one, so its
+ * first row silently repeated the first page's last one (found 2026-09-06,
+ * "موقف الرسومات والمواد" listed as page 44 twice — once ending page 2 of
+ * Contents, again starting page 3 — while the real PDF lists it once). */
+export function originalPageId(pageId: string): string {
+  const at = pageId.indexOf(CHUNK_MARK);
+  return at === -1 ? pageId : pageId.slice(0, at);
+}
+
 /** Which chunk of its rows this element draws — 0 for the original element on
  * its own page. */
 export function tocChunkIndex(elementId: string): number {
@@ -48,6 +69,7 @@ export function tocRows(
   }
   const excludeCover = el.props.exclude_cover ?? true;
   return entries
+    .filter((e) => !e.synthetic)
     .filter((e) => e.id !== ownPageId)
     .filter((e) => !(excludeCover && e.name.trim().toLowerCase() === "cover"))
     .map((e) => ({ name: e.name, page: e.number, id: e.id }));
@@ -96,9 +118,11 @@ export function buildTocOverflowPages(
 
 /** Every page's real name and real page number, for any "toc" element on the
  * canvas — mirrors build_canvas_pdf's toc_map/toc_order pre-pass: numbering
- * counts EVERY page the PDF prints, but only the first instance of each page
- * gets a row, so a continuation page shifts the numbers after it without
- * listing itself. */
+ * counts EVERY page the PDF prints. A synthetic continuation page still gets
+ * an entry (marked `synthetic`) so a page-number field on it resolves to its
+ * own real number — see ElementPreview's "field" case — but a Contents/
+ * List-of-X listing must filter those out itself (see `tocRows`), the same
+ * way the real PDF never lists a continuation page under its own name. */
 export function tocEntriesFor(pages: LayoutPage[]): TocEntry[] {
-  return pages.flatMap((p, i) => (p.synthetic ? [] : [{ id: p.id, name: p.name, number: i + 1 }]));
+  return pages.map((p, i) => ({ id: p.id, name: p.name, number: i + 1, synthetic: p.synthetic }));
 }

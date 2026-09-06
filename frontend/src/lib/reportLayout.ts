@@ -162,6 +162,14 @@ export interface TocEntry {
   id: string;
   name: string;
   number: number;
+  /** True for a synthesized continuation page (table/toc overflow — see
+   * reportOverflow.ts/reportToc.ts). It still gets a real, correctly-counted
+   * `number` — a "page number" field on its master footer needs that — but
+   * carries no row of its own in a Contents/List-of-X listing, exactly like
+   * the real PDF's own toc_map/toc_order (a continuation page counts toward
+   * the numbering, never lists itself — see pdf_canvas.py's
+   * _index_toc_context). */
+  synthetic?: boolean;
 }
 
 /** Data sources a repeating page can clone itself against — mirrors
