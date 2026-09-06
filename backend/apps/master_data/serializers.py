@@ -2,7 +2,7 @@
 logic in services.py (mirrors apps.accounts.settings_serializers)."""
 from rest_framework import serializers
 
-from .models import Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
 
 
 class CurrencySerializer(serializers.ModelSerializer):
@@ -50,3 +50,40 @@ class NameOnlySerializer(serializers.Serializer):
     are just a company-scoped name."""
 
     name = serializers.CharField(max_length=60)
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Client
+        fields = ["id", "name", "sort_order", "created_at"]
+        read_only_fields = ["id", "sort_order", "created_at"]
+
+
+class ConsultantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultant
+        fields = ["id", "name", "phone", "email", "sort_order", "created_at"]
+        read_only_fields = ["id", "sort_order", "created_at"]
+
+
+class ContractorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contractor
+        fields = ["id", "name", "phone", "email", "sort_order", "created_at"]
+        read_only_fields = ["id", "sort_order", "created_at"]
+
+
+class PartyWriteSerializer(serializers.Serializer):
+    """Create/update payload for a consultant or contractor. `partial` on the
+    view is what makes each field optional on a PATCH, so an edit that only
+    changes the phone doesn't have to resend the name."""
+
+    name = serializers.CharField(max_length=180)
+    phone = serializers.CharField(max_length=40, allow_blank=True, required=False, default="")
+    email = serializers.EmailField(allow_blank=True, required=False, default="")
+
+
+class ClientWriteSerializer(serializers.Serializer):
+    """A client is a name and nothing else — see the model."""
+
+    name = serializers.CharField(max_length=180)

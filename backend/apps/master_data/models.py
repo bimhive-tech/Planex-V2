@@ -1,8 +1,9 @@
 """Company-editable dropdown lists ("Master Data"): currencies, project types,
-and project priorities. Each Project stores the chosen value as a plain string
-(no FK — matches how currency has always worked), so these tables exist only
-to drive the dropdowns and let a company curate its own list; they never
-constrain what a Project can already hold.
+project priorities, and the three stakeholder lists (clients, consultants,
+contractors). Each Project stores the chosen value as a plain string (no FK —
+matches how currency has always worked), so these tables exist only to drive
+the dropdowns and let a company curate its own list; they never constrain what
+a Project can already hold.
 """
 import uuid
 
@@ -68,3 +69,75 @@ class ProjectPriority(TimestampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.company.name})"
+
+
+class _Party(TimestampedModel):
+    """Shared shape for the stakeholder lists below.
+
+    Abstract, not one table with a "role" column: a company's clients,
+    consultants and contractors are three separately-curated lists that happen
+    to look alike, and each maps to its own Project field (`client_name`,
+    `consultant_name`, `contractor_name`). One shared table would make
+    "rename this consultant" quietly able to collide with a client of the same
+    name, and every query would need a role filter for no gain.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=180)  # stored verbatim on the Project
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        abstract = True
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.company.name})"
+
+
+class Client(_Party):
+    """A client a project can be for (stored on Project.client_name)."""
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="clients")
+
+    class Meta(_Party.Meta):
+        abstract = False
+        constraints = [
+            models.UniqueConstraint(fields=["company", "name"], name="uniq_client_per_company"),
+        ]
+
+
+class _ContactParty(_Party):
+    """A party the project also records a phone/email for. Picking one in the
+    project form fills those in alongside the name, which is the whole reason
+    they live here rather than being retyped per project."""
+
+    phone = models.CharField(max_length=40, blank=True)
+    email = models.EmailField(blank=True)
+
+    class Meta(_Party.Meta):
+        abstract = True
+
+
+class Consultant(_ContactParty):
+    """A consultant (stored on Project.consultant_name, and reused for
+    Project.contractor_consultant — that field names a consultant too)."""
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="consultants")
+
+    class Meta(_ContactParty.Meta):
+        abstract = False
+        constraints = [
+            models.UniqueConstraint(fields=["company", "name"], name="uniq_consultant_per_company"),
+        ]
+
+
+class Contractor(_ContactParty):
+    """A contractor (stored on Project.contractor_name)."""
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="contractors")
+
+    class Meta(_ContactParty.Meta):
+        abstract = False
+        constraints = [
+            models.UniqueConstraint(fields=["company", "name"], name="uniq_contractor_per_company"),
+        ]

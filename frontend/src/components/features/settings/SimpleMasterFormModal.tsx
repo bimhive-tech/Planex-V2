@@ -1,7 +1,7 @@
 "use client";
 
-// Create/rename a name-only master-data row (Project Type or Priority — same
-// shape, so one modal covers both via the `resource` prop).
+// Create/rename a name-only master-data row (Project Type, Priority or Client
+// — same shape, so one modal covers them all via the `resource` prop).
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
@@ -17,7 +17,7 @@ interface Row {
 
 interface Props {
   open: boolean;
-  resource: "project-types" | "project-priorities";
+  resource: "project-types" | "project-priorities" | "clients";
   label: string; // "project type" | "priority" — for modal copy
   companyId: string;
   item: Row | null; // null = create

@@ -5,7 +5,16 @@ from django.db import transaction
 
 from apps.accounts.models import Company
 
-from .models import Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
+
+# Each stakeholder list and the Project field whose value it supplies. Deleting
+# a row is blocked while any project still holds that name (see _in_use_count),
+# same rule the other lists already follow.
+_PARTY_FIELDS = {
+    Client: ("client_name",),
+    Consultant: ("consultant_name", "contractor_consultant"),
+    Contractor: ("contractor_name",),
+}
 
 # The four project types and three priorities that already exist as Django
 # TextChoices on Project (see apps.projects.models) — seeded verbatim (same
@@ -155,3 +164,80 @@ def delete_project_priority(*, priority: ProjectPriority) -> None:
     if count:
         raise MasterDataError(f"{count} project(s) still use this priority.")
     priority.delete()
+
+
+def _party_in_use(instance) -> int:
+    """How many of the company's projects still name this party — across every
+    field the list feeds (a Consultant can be a project's own consultant OR its
+    contractor's consultant, and either one blocks deletion)."""
+    from django.db.models import Q
+
+    from apps.projects.models import Project
+
+    fields = _PARTY_FIELDS[type(instance)]
+    q = Q()
+    for field in fields:
+        q |= Q(**{field: instance.name})
+    return Project.objects.filter(q, company=instance.company).count()
+
+
+def create_party(*, model, company: Company, name: str, phone: str = "", email: str = ""):
+    """Add one stakeholder to a company's list. Shared by clients, consultants
+    and contractors — `phone`/`email` are simply ignored by Client, which has
+    neither."""
+    name = name.strip()
+    if model.objects.filter(company=company, name=name).exists():
+        raise MasterDataError(f"'{name}' already exists for this company.")
+    fields = {"company": company, "name": name,
+              "sort_order": model.objects.filter(company=company).count()}
+    if hasattr(model, "phone"):
+        fields.update(phone=phone.strip(), email=email.strip())
+    return model.objects.create(**fields)
+
+
+@transaction.atomic
+def update_party(*, instance, name: str | None = None, phone: str | None = None, email: str | None = None):
+    """Renaming carries the new name onto every project still using the old
+    one. Without that a rename would orphan those projects — their stored
+    string would no longer match anything in the list, so the dropdown would
+    show them as blank even though nothing about the project changed."""
+    fields = []
+    if name is not None:
+        name = name.strip()
+        if model_has_name(type(instance), instance.company, name, exclude_pk=instance.pk):
+            raise MasterDataError(f"'{name}' already exists for this company.")
+        if name != instance.name:
+            _rename_on_projects(instance, name)
+        instance.name = name
+        fields.append("name")
+    if phone is not None and hasattr(instance, "phone"):
+        instance.phone = phone.strip()
+        fields.append("phone")
+    if email is not None and hasattr(instance, "email"):
+        instance.email = email.strip()
+        fields.append("email")
+    if fields:
+        instance.save(update_fields=fields + ["updated_at"])
+    return instance
+
+
+def model_has_name(model, company: Company, name: str, *, exclude_pk=None) -> bool:
+    qs = model.objects.filter(company=company, name=name)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.exists()
+
+
+def _rename_on_projects(instance, new_name: str) -> None:
+    from apps.projects.models import Project
+
+    for field in _PARTY_FIELDS[type(instance)]:
+        (Project.objects.filter(company=instance.company, **{field: instance.name})
+         .update(**{field: new_name}))
+
+
+def delete_party(*, instance) -> None:
+    count = _party_in_use(instance)
+    if count:
+        raise MasterDataError(f"{count} project(s) still use this entry.")
+    instance.delete()

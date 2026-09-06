@@ -11,6 +11,15 @@ interface NamedRow {
   name: string;
 }
 
+/** A consultant or contractor: picking one fills the project's phone/email
+ * alongside the name. Clients carry a name only (see the master_data models). */
+export interface PartyRow {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+}
+
 interface CurrencyRow {
   id: string;
   code: string;
@@ -28,4 +37,16 @@ export function useProjectPriorities() {
 
 export function useCurrencies() {
   return useFetch(() => api.get<Paginated<CurrencyRow>>("/currencies/?page_size=200"), []);
+}
+
+export function useClients() {
+  return useFetch(() => api.get<Paginated<NamedRow>>("/clients/?page_size=500"), []);
+}
+
+export function useConsultants() {
+  return useFetch(() => api.get<Paginated<PartyRow>>("/consultants/?page_size=500"), []);
+}
+
+export function useContractors() {
+  return useFetch(() => api.get<Paginated<PartyRow>>("/contractors/?page_size=500"), []);
 }

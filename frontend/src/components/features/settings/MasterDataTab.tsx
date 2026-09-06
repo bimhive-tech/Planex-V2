@@ -1,21 +1,27 @@
 "use client";
 
-// Settings -> Master Data: currencies, project types, and priorities — the
-// lists that populate a project's own dropdowns. Internally segmented rather
-// than three more top-level Settings tabs.
+// Settings -> Master Data: currencies, project types, priorities and the three
+// stakeholder lists — the lists that populate a project's own dropdowns.
+// Internally segmented rather than six more top-level Settings tabs.
 import { useState } from "react";
 
 import { CompanySelector } from "./CompanySelector";
 import { CurrencyList } from "./CurrencyList";
+import { PartyMasterList } from "./PartyMasterList";
 import { SimpleMasterList } from "./SimpleMasterList";
 import styles from "./masterData.module.css";
 
-type Section = "currencies" | "project-types" | "project-priorities";
+type Section =
+  | "currencies" | "project-types" | "project-priorities"
+  | "clients" | "consultants" | "contractors";
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: "currencies", label: "Currencies" },
   { key: "project-types", label: "Project Types" },
   { key: "project-priorities", label: "Priorities" },
+  { key: "clients", label: "Clients" },
+  { key: "consultants", label: "Consultants" },
+  { key: "contractors", label: "Contractors" },
 ];
 
 interface Props {
@@ -54,6 +60,19 @@ export function MasterDataTab({ isPlatformAdmin, ownCompanyId }: Props) {
       {section === "project-priorities" && (
         <SimpleMasterList
           resource="project-priorities" label="priority" labelPlural="priorities" companyId={companyId}
+        />
+      )}
+      {section === "clients" && (
+        <SimpleMasterList resource="clients" label="client" labelPlural="clients" companyId={companyId} />
+      )}
+      {section === "consultants" && (
+        <PartyMasterList
+          resource="consultants" label="consultant" labelPlural="consultants" companyId={companyId}
+        />
+      )}
+      {section === "contractors" && (
+        <PartyMasterList
+          resource="contractors" label="contractor" labelPlural="contractors" companyId={companyId}
         />
       )}
     </div>

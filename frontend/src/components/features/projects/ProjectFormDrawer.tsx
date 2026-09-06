@@ -9,8 +9,11 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { api, ApiError } from "@/lib/api";
-import { useCurrencies, useProjectPriorities, useProjectTypes } from "@/hooks/useMasterData";
+import {
+  useClients, useConsultants, useContractors, useCurrencies, useProjectPriorities, useProjectTypes,
+} from "@/hooks/useMasterData";
 import type { ProjectDetail } from "@/types/project";
+import { PartySelect, type PartyOption } from "./PartySelect";
 import styles from "./projectForm.module.css";
 
 interface Props {
@@ -52,6 +55,30 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
   const priorityOptions = (prioritiesData?.results ?? []).map((p) => ({ value: p.name, label: p.name }));
   const currencyOptions = (currenciesData?.results ?? [])
     .map((c) => ({ value: c.code, label: `${c.code} — ${c.name}` }));
+
+  // Stakeholder lists (Settings -> Master Data) behind the three dropdowns
+  // below, so a client/consultant/contractor is picked rather than retyped —
+  // and spelled the same way on every project that uses it.
+  const { data: clientsData, loading: clientsLoading } = useClients();
+  const { data: consultantsData, loading: consultantsLoading } = useConsultants();
+  const { data: contractorsData, loading: contractorsLoading } = useContractors();
+  const clients: PartyOption[] = clientsData?.results ?? [];
+  const consultants: PartyOption[] = consultantsData?.results ?? [];
+  const contractors: PartyOption[] = contractorsData?.results ?? [];
+
+  /** Store the picked name, and carry that party's own phone/email onto the
+   * project with it. Explicitly picked, so overwriting is what's wanted —
+   * leaving the previous consultant's phone next to a new consultant's name
+   * would be worse than clearing it. Both stay editable afterwards for a
+   * project that genuinely needs a different contact. */
+  const pickParty = (nameKey: string, phoneKey?: string, emailKey?: string) =>
+    (row: PartyOption | null, name: string) =>
+      setForm((f) => ({
+        ...f,
+        [nameKey]: name,
+        ...(phoneKey ? { [phoneKey]: row?.phone ?? "" } : {}),
+        ...(emailKey ? { [emailKey]: row?.email ?? "" } : {}),
+      }));
 
   // A brand-new project has no stored value yet — default it to this
   // company's own first option (Master Data is company-editable, so there's
@@ -211,23 +238,35 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
         </p>
 
         <p className={styles.section}>Client</p>
-        <Input label="Client name" name="client_name" value={form.client_name} onChange={set("client_name")} />
+        <PartySelect label="Client" name="client_name" value={form.client_name}
+          options={clients} loading={clientsLoading} onPick={pickParty("client_name")} />
 
         <p className={styles.section}>Consultant</p>
-        <Input label="Name" name="consultant_name" value={form.consultant_name} onChange={set("consultant_name")} />
+        <PartySelect label="Name" name="consultant_name" value={form.consultant_name}
+          options={consultants} loading={consultantsLoading}
+          onPick={pickParty("consultant_name", "consultant_phone", "consultant_email")} />
         <div className={styles.row2}>
           <Input label="Phone" name="consultant_phone" value={form.consultant_phone} onChange={set("consultant_phone")} />
           <Input label="Email" name="consultant_email" type="email" value={form.consultant_email} onChange={set("consultant_email")} />
         </div>
 
         <p className={styles.section}>Contractor</p>
-        <Input label="Name" name="contractor_name" value={form.contractor_name} onChange={set("contractor_name")} />
+        <PartySelect label="Name" name="contractor_name" value={form.contractor_name}
+          options={contractors} loading={contractorsLoading}
+          onPick={pickParty("contractor_name", "contractor_phone", "contractor_email")} />
         <div className={styles.row2}>
           <Input label="Phone" name="contractor_phone" value={form.contractor_phone} onChange={set("contractor_phone")} />
           <Input label="Email" name="contractor_email" type="email" value={form.contractor_email} onChange={set("contractor_email")} />
         </div>
-        <Input label="Contractor's consultant" name="contractor_consultant"
-          value={form.contractor_consultant} onChange={set("contractor_consultant")} />
+        {/* Names a consultant, so it draws on the consultant list too — its own
+            contact details aren't tracked separately on the project. */}
+        <PartySelect label="Contractor's consultant" name="contractor_consultant"
+          value={form.contractor_consultant} options={consultants} loading={consultantsLoading}
+          onPick={pickParty("contractor_consultant")} />
+
+        <p className={styles.sectionHint}>
+          These come from Settings &rarr; Master Data. Add a new one there and it becomes available here.
+        </p>
 
         <div className={styles.field}>
           <label className={styles.label} htmlFor="notes">Notes</label>

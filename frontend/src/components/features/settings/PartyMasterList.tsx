@@ -1,8 +1,8 @@
 "use client";
 
-// One row-per-name CRUD list shared by Project Types, Priorities and Clients
-// (Settings -> Master Data) — every list whose row is just a name. Which
-// endpoint/copy to use is passed in via `resource`.
+// Consultants and contractors (Settings -> Master Data). Same shape as
+// SimpleMasterList, plus the phone/email that make these worth storing once:
+// picking one in the project form fills its contact details in too.
 import { useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/ui/Button";
@@ -10,51 +10,40 @@ import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
-import { SimpleMasterFormModal } from "./SimpleMasterFormModal";
+import { PartyFormModal, type PartyRow } from "./PartyFormModal";
 import { companyQuery } from "./companyQuery";
 import styles from "./settingsList.module.css";
 
-const COLS = { "--cols": "1fr auto" } as CSSProperties;
-
-interface Row {
-  id: string;
-  name: string;
-}
+const COLS = { "--cols": "2fr 1fr 2fr auto" } as CSSProperties;
 
 interface Props {
-  resource: "project-types" | "project-priorities" | "clients";
-  label: string; // singular, e.g. "project type"
-  labelPlural: string; // e.g. "project types"
+  resource: "consultants" | "contractors";
+  label: string; // singular, e.g. "consultant"
+  labelPlural: string;
   companyId: string;
 }
 
-export function SimpleMasterList({ resource, label, labelPlural, companyId }: Props) {
+export function PartyMasterList({ resource, label, labelPlural, companyId }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Row | null>(null);
+  const [editing, setEditing] = useState<PartyRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const { data, loading, error, reload } = useFetch(
-    () => api.get<Paginated<Row>>(`/${resource}/${companyQuery(companyId, { page_size: "200" })}`),
+    () => api.get<Paginated<PartyRow>>(`/${resource}/${companyQuery(companyId, { page_size: "200" })}`),
     [resource, companyId],
   );
   const rows = data?.results ?? [];
 
-  function openCreate() {
-    setEditing(null);
-    setModalOpen(true);
-  }
-  function openEdit(row: Row) {
-    setEditing(row);
-    setModalOpen(true);
-  }
-
-  async function handleDelete(row: Row) {
+  async function handleDelete(row: PartyRow) {
     if (!window.confirm(`Delete “${row.name}”? This can't be undone.`)) return;
     setActionError(null);
     try {
       await api.del(`/${resource}/${row.id}/${companyQuery(companyId)}`);
       reload();
     } catch (err) {
+      // The backend refuses while any project still names this party, and
+      // says how many — surfacing that verbatim is more use than "couldn't
+      // delete", since the fix is to go change those projects.
       setActionError(err instanceof ApiError ? err.message : `Couldn't delete this ${label}.`);
     }
   }
@@ -65,7 +54,11 @@ export function SimpleMasterList({ resource, label, labelPlural, companyId }: Pr
         <span className={styles.muted}>
           {data ? `${data.count} ${data.count === 1 ? label : labelPlural}` : labelPlural}
         </span>
-        <Button size="sm" leadingIcon={<Icon name="plus" size={16} />} onClick={openCreate}>
+        <Button
+          size="sm"
+          leadingIcon={<Icon name="plus" size={16} />}
+          onClick={() => { setEditing(null); setModalOpen(true); }}
+        >
           New {label}
         </Button>
       </div>
@@ -75,6 +68,8 @@ export function SimpleMasterList({ resource, label, labelPlural, companyId }: Pr
       <div className={styles.surface} style={COLS}>
         <div className={styles.headRow}>
           <span>Name</span>
+          <span>Phone</span>
+          <span>Email</span>
           <span />
         </div>
 
@@ -89,8 +84,14 @@ export function SimpleMasterList({ resource, label, labelPlural, companyId }: Pr
           {rows.map((r) => (
             <div key={r.id} className={styles.row}>
               <div className={styles.primary}>{r.name}</div>
+              <span className={styles.muted}>{r.phone || "—"}</span>
+              <span className={styles.muted}>{r.email || "—"}</span>
               <div className={styles.actions}>
-                <button className={styles.actionBtn} aria-label={`Rename ${r.name}`} onClick={() => openEdit(r)}>
+                <button
+                  className={styles.actionBtn}
+                  aria-label={`Edit ${r.name}`}
+                  onClick={() => { setEditing(r); setModalOpen(true); }}
+                >
                   <Icon name="edit" size={16} />
                 </button>
                 <button
@@ -106,7 +107,7 @@ export function SimpleMasterList({ resource, label, labelPlural, companyId }: Pr
         </StateView>
       </div>
 
-      <SimpleMasterFormModal
+      <PartyFormModal
         open={modalOpen}
         resource={resource}
         label={label}
