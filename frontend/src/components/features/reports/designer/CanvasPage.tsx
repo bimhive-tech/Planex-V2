@@ -7,7 +7,7 @@
 // elements, closer to Photoshop frames than a pixel-perfect page preview.
 import { useEffect, useRef, useState } from "react";
 
-import { contentBox, pageDimensions } from "@/lib/reportLayout";
+import { contentBox, masterBox, pageDimensions } from "@/lib/reportLayout";
 import type {
   ChartSvgMap, LayoutElement, PageDesign, ReportLabels, TableDataMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
@@ -85,6 +85,14 @@ interface Props {
   design: PageDesign;
   elements: LayoutElement[];
   masterElements?: LayoutElement[];
+  /** The template's OWN default design — what the master elements were
+   * actually authored against — for when `design` is this one page's own
+   * orientation override instead (see ReportConfigurator's `effectiveDesign`).
+   * Master elements are re-anchored to the page's real edges when the two
+   * differ (see masterBox); omit when there's no such override to correct
+   * for (Template Builder's Page Designer, where `design` already IS the
+   * template default). */
+  masterDesign?: PageDesign;
   scale: number;
   selectedIds: string[];
   showGuides: boolean;
@@ -138,12 +146,13 @@ interface Props {
 }
 
 export function CanvasPage({
-  design, elements, masterElements = [], scale, selectedIds, showGuides, alignGuides,
+  design, elements, masterElements = [], masterDesign, scale, selectedIds, showGuides, alignGuides,
   onSelect, onMarqueeSelect, onStartMove, onStartResize, onStartRotate, onStartGroupResize,
   onAction, onDropSpec, onElementChange, liveData, reportId, pinnedItem,
   chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId,
 }: Props) {
   const { w, h } = pageDimensions(design);
+  const { w: defaultW, h: defaultH } = pageDimensions(masterDesign ?? design);
   const box = contentBox(design);
   const borderOffset = design.border_offset_mm ?? design.margin_mm;
   const pxWidth = w * scale;
@@ -328,7 +337,7 @@ export function CanvasPage({
       {masterElements.map((el) => (
         <CanvasElementView
           key={`master-${el.id}`}
-          el={el}
+          el={{ ...el, ...masterBox(el, w, h, defaultW, defaultH) }}
           scale={scale}
           selected={false}
           ghost

@@ -85,6 +85,9 @@ export function buildTocOverflowPages(
         // The real PDF draws a continuation chunk in the same box, with no
         // title or caption (pdf_canvas._draw_toc_element returns before both).
         elements: [{ ...el, id: chunkElementId(el.id, chunk), props: { ...el.props, show_title: false } }],
+        // Same fix as buildOverflowPages' table continuations: a landscape
+        // toc page's overflow must stay landscape too.
+        orientation: page.orientation,
       });
     }
   }

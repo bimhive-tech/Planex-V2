@@ -277,6 +277,56 @@ export function contentBox(design: PageDesign) {
   };
 }
 
+/** Horizontal placement (x, w) in mm for a master element on a page whose
+ * width differs from the one it was authored against — mirrors
+ * apps/reports/pdf_canvas.py's `_master_x` exactly.
+ *
+ * Header and footer bands are laid out against the page EDGES, so an
+ * element keeps whichever edge it was placed against rather than its
+ * absolute x. A right-hand logo authored at x=150 on a 210mm portrait page
+ * otherwise landed two-thirds of the way across a 297mm landscape one (and
+ * a page-number band, anchored right, sat off the bottom of a landscape
+ * page since nothing remapped it at all) — the Customize canvas simply drew
+ * every master element at its raw authored position regardless of the
+ * active page's own orientation override (found 2026-09-03, `escB` on the
+ * footer's page-number element measured +153px past the page bottom).
+ * Full-width rules keep both insets and simply stretch. */
+export function masterX(el: LayoutElement, pageWMm: number, defaultWMm: number): { x: number; w: number } {
+  const { x, w } = el;
+  if (Math.abs(pageWMm - defaultWMm) < 0.01) return { x, w };
+  const rightInset = defaultWMm - (x + w);
+  if (w >= defaultWMm * 0.9) return { x, w: Math.max(1, pageWMm - x - rightInset) };  // full-width rule/band
+  const centre = x + w / 2;
+  if (centre < defaultWMm / 3) return { x, w };                                       // anchored left
+  if (centre > (defaultWMm * 2) / 3) return { x: Math.max(0, pageWMm - rightInset - w), w };  // anchored right
+  return { x: Math.max(0, (pageWMm - w) / 2), w };                                    // centred stays centred
+}
+
+/** (x, y, w, h) in mm, top-left origin, for one master element on a page
+ * whose size may differ from the one the master was authored against —
+ * mirrors apps/reports/pdf_canvas.py's `_master_box` (adapted from its
+ * points/bottom-left ReportLab frame to this canvas's mm/top-left one, so
+ * unlike the backend's version this needs no separate y-flip).
+ *
+ * Header-band elements keep their distance from the TOP; footer-band ones
+ * keep their distance from the BOTTOM; anything in between stays on its
+ * authored y. */
+export function masterBox(
+  el: LayoutElement, pageWMm: number, pageHMm: number, defaultWMm: number, defaultHMm: number,
+): { x: number; y: number; w: number; h: number } {
+  const { x, w } = masterX(el, pageWMm, defaultWMm);
+  if (Math.abs(pageHMm - defaultHMm) < 0.01) return { x, y: el.y, w, h: el.h };
+  const { y, h } = el;
+  // "Below the midpoint of the page it was authored for" is the practical
+  // test for a footer element — the master only ever holds a header band
+  // and a footer band, so there's nothing ambiguous in the middle.
+  if (y + h / 2 > defaultHMm / 2) {
+    const fromBottom = defaultHMm - (y + h);
+    return { x, y: pageHMm - fromBottom - h, w, h };
+  }
+  return { x, y, w, h };
+}
+
 export function newElementId(): string {
   // crypto.randomUUID needs a secure context; the fallback keeps local HTTP dev working.
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();

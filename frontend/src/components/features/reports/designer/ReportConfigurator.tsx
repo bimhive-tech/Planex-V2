@@ -555,6 +555,11 @@ export function ReportConfigurator({
       // undo that crosses into header history. LayoutEditor resets exactly
       // the per-edit-target state itself instead; see its reset effect.
       design={effectiveDesign}
+      // Only meaningful (and only supplied) when this page's own override
+      // actually diverges from the template default — see CanvasPage's
+      // masterDesign doc. The header/footer editing surface always uses the
+      // template default for both, so there's nothing to correct there.
+      masterDesign={!editingHeader && effectiveDesign !== design ? design : undefined}
       elements={editingHeader ? (masterElements ?? []) : active.elements}
       // A synthetic continuation page (see buildOverflowPages) has no
       // backing entry in `pages` for setElements to write into, and

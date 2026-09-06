@@ -34,6 +34,14 @@ export function buildOverflowPages(pages: LayoutPage[], continuations: TableOver
             id: overflowElementId(el.id, idx),
             props: { ...el.props, show_caption: false, show_title: false },
           }],
+          // Dropping this left a continuation of a landscape-authored page
+          // (a wide table's own overflow) rendering on a PORTRAIT box while
+          // keeping the original element's landscape-wide x/y/w/h — the
+          // exact same class of bug expandRepeatingPages had (found
+          // 2026-09-03, same session): the real PDF's own continuation page
+          // (pdf_canvas._continuation_box) inherits the original page's
+          // size for the same reason.
+          orientation: page.orientation,
         });
       });
     }

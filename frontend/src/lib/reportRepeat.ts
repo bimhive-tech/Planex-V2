@@ -70,6 +70,13 @@ export function expandRepeatingPages(pages: LayoutPage[], data: ReportData): Lay
         elements: page.elements.map((e) => ({ ...e, id: newElementId(), props: { ...e.props } })),
         repeat: { ...rep, pin_index: i },
         skip_master: page.skip_master,
+        // Dropping this left every clone of a landscape-authored repeating
+        // page (the stage dashboard, wide enough that its own elements ran
+        // 583px into a 462px-wide portrait box) silently rendering portrait
+        // instead — the template page's own override, lost on every one of
+        // its real instances (found 2026-09-03, alongside the same page's
+        // master elements needing re-anchoring for the same reason).
+        orientation: page.orientation,
       });
     });
   }

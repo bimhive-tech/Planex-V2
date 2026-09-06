@@ -58,6 +58,10 @@ interface Props {
   leftHeader?: React.ReactNode;
   /** Master elements drawn as ghosts behind the editable ones. */
   masterElements?: LayoutElement[];
+  /** See CanvasPage's own doc — the template's default design, for
+   * re-anchoring master elements when `design` is one page's orientation
+   * override instead. Omit where `design` already IS the template default. */
+  masterDesign?: PageDesign;
   emptyHint?: string;
   /** True when the active page is set to repeat — unlocks item-scoped
    * field/table/chart sources in the inspector (Report Configuration only). */
@@ -121,7 +125,7 @@ interface Props {
 }
 
 export function LayoutEditor({
-  design, elements, onElementsChange, leftHeader, masterElements, emptyHint, repeating = false, liveData,
+  design, elements, onElementsChange, leftHeader, masterElements, masterDesign, emptyHint, repeating = false, liveData,
   pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId, bottomPanel,
   onNavigatePage, initialScrollToBottom = false, history, historyPageId,
 }: Props) {
@@ -527,6 +531,7 @@ export function LayoutEditor({
             design={design}
             elements={rendered}
             masterElements={masterElements}
+            masterDesign={masterDesign}
             scale={scale}
             selectedIds={selectedIds}
             showGuides={showGuides}
