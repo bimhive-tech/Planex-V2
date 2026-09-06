@@ -1216,6 +1216,29 @@ th:hover > .tableLiveHeaderCell > .tableLiveColHideBtn,
   gap: var(--space-2);
 }
 
+/* Total page count beside the "Pages" heading — the number the download
+   will have, so it's worth stating rather than making someone scroll and
+   count 89 rows. */
+.pageCount {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-canvas);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Shown only while the live data the continuation pages come from is still
+   loading — see ReportConfigurator. */
+.pagesPending {
+  margin-top: var(--space-2);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .addPageBtn {
   display: flex;
   align-items: center;

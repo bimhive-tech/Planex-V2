@@ -5,7 +5,10 @@ Reports are sensitive deliverables, so a role without it (e.g. a site engineer)
 sees no reports at all, not just a hidden download button.
 """
 import copy as copy_module
+import hashlib
 import json
+import time
+from dataclasses import replace
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -24,7 +27,13 @@ from .constants import merge_layout_override, merged_config
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
 from .pdf import build_report_pdf
-from .pdf_canvas import build_canvas_pdf, has_canvas_layout
+from .pdf_canvas import (
+    _expand_description_overflow,
+    _expand_table_overflow,
+    build_canvas_pdf,
+    expand_pages,
+    has_canvas_layout,
+)
 from .serializers import (
     ReportListSerializer,
     ReportTemplateSerializer,
@@ -64,7 +73,69 @@ def _cached_report_context(report):
     if ctx is None:
         ctx = build_report_context(report)
         cache.set(key, ctx, _CONTEXT_CACHE_TTL)
+    # _element_will_draw memoizes into this (see its docstring) but the cache
+    # hands back a fresh deserialized copy every request, so that memo used to
+    # die with the request and _collect_captions re-resolved every captioned
+    # table and chart from cold every single time (~16s on a 89-page report).
+    # Carried in the process-local store instead, where it survives — the keys
+    # are (type, source, scope, width, height), which describe what would be
+    # resolved rather than where it sits, so rearranging the canvas can't
+    # invalidate them.
+    ctx["_will_draw_cache"] = _PROCESS_LOCAL.setdefault(f"will-draw:{report.id}", {})
     return ctx
+
+
+# Deliberately NOT Django's cache: these hold live ReportLab flowables (a
+# pre-split table chunk per continuation page), which the cache would have to
+# pickle on every get/set — the exact cost this exists to avoid. Django's
+# default LocMemCache is per-process anyway, so nothing here is more
+# process-local than what _cached_report_context already relies on.
+_PROCESS_LOCAL: dict = {}
+_EXPANSION_CACHE: dict = {}
+
+
+def _layout_fingerprint(cfg) -> str:
+    """Identifies the layout an expansion was computed for. Only the parts the
+    expansion actually reads — the pages and the page design — so unrelated
+    config edits (labels, colors) don't needlessly throw it away."""
+    payload = json.dumps(
+        {"layout": cfg.get("layout"), "page_design": cfg.get("page_design")},
+        sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _cached_expansion(report, cfg, ctx):
+    """The expanded page-instance list — `expand_pages` plus the description
+    and table overflow passes — shared by the `table-overflow` and
+    `toc-entries` actions.
+
+    Both derive the identical list, and both are fired together by the
+    Customize tab on every load, so each was independently paying for the same
+    ~15s table-overflow pass (measured on the client's 89-page report,
+    2026-09-06). Keyed by the layout it was computed for, and given the same
+    TTL as the context it was built from: like that context it only ever backs
+    transient in-editor previews, never `pdf`/`data`, which still build
+    everything fresh so a download always reflects current project data.
+
+    Returns a fresh list of fresh PageInstance objects each call —
+    `_expand_toc_overflow` renumbers the instances it's handed in place, and
+    that must not reach back into what the next caller gets.
+    """
+    key = (str(report.id), _layout_fingerprint(cfg))
+    hit = _EXPANSION_CACHE.get(key)
+    if hit is None or hit[0] < time.monotonic():
+        design = cfg.get("page_design") or {}
+        instances = expand_pages(cfg, ctx, report)
+        instances = _expand_description_overflow(instances, cfg, ctx, design)
+        instances = _expand_table_overflow(instances, cfg, ctx, design)
+        # One report's editing session only ever works on one layout at a
+        # time; the cap just stops a long-lived worker accumulating every
+        # intermediate layout a day of editing produced.
+        if len(_EXPANSION_CACHE) > 32:
+            _EXPANSION_CACHE.clear()
+        hit = (time.monotonic() + _CONTEXT_CACHE_TTL, instances)
+        _EXPANSION_CACHE[key] = hit
+    return [replace(inst) for inst in hit[1]]
 
 
 def _render_report_pdf(report, engine, override=_UNSET):
@@ -462,9 +533,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         """
         from reportlab.lib.units import mm as _mm
 
-        from .pdf_canvas import (
-            _expand_description_overflow, _expand_table_overflow, _page_size_mm, el_box, expand_pages, resolve_table,
-        )
+        from .pdf_canvas import _page_size_mm, el_box, resolve_table
         from .pdf_tables import table_style_override
 
         report = self.get_object()
@@ -487,9 +556,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
             }
 
-        instances = expand_pages(cfg, ctx, report)
-        instances = _expand_description_overflow(instances, cfg, ctx, design)
-        instances = _expand_table_overflow(instances, cfg, ctx, design)
+        instances = _cached_expansion(report, cfg, ctx)
 
         continuations = {}
         i = 0
@@ -567,10 +634,7 @@ class ReportViewSet(viewsets.ModelViewSet):
 
         Same Customize-tab-only scoping as chart_svgs/table_data.
         """
-        from .pdf_canvas import (
-            _collect_captions, _expand_description_overflow, _expand_table_overflow, _expand_toc_overflow,
-            _index_toc_context, expand_pages,
-        )
+        from .pdf_canvas import _collect_captions, _expand_toc_overflow, _index_toc_context
 
         report = self.get_object()
         override = request.data.get("layout_override")
@@ -580,9 +644,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         cfg = merge_layout_override(cfg, applied)
 
         design = cfg.get("page_design") or {}
-        instances = expand_pages(cfg, ctx, report)
-        instances = _expand_description_overflow(instances, cfg, ctx, design)
-        instances = _expand_table_overflow(instances, cfg, ctx, design)
+        instances = _cached_expansion(report, cfg, ctx)
         # Needed before _expand_toc_overflow: a "contents" toc element's own
         # row count (how many pages the report has) only exists once this has
         # run — skipping it left the real download's own "Contents" page

@@ -336,11 +336,25 @@ export function ReportConfigurator({
       )}
 
       <div className={styles.pagesHead}>
-        <h2 className={styles.panelTitle}>Pages</h2>
+        <h2 className={styles.panelTitle}>
+          Pages <span className={styles.pageCount}>{displayPages.length}</span>
+        </h2>
         <button type="button" className={styles.addPageBtn} onClick={addPage} title="Add a new page">
           <Icon name="plus" size={14} /> Add
         </button>
       </div>
+
+      {/* Continuation pages only exist once the live table/TOC data they're
+          derived from has landed (see buildOverflowPages/buildTocOverflowPages),
+          so until then this list is genuinely short — 45 rows on the client's
+          report, against the 89 the PDF prints — and every page number a
+          Contents element shows is short with it. Saying so beats a list that
+          looks settled and is quietly wrong for the ~minute it takes. */}
+      {isReportContext && !previewsReady && (
+        <p className={styles.pagesPending} role="status">
+          Resolving continuation pages — the count and page numbers below aren&apos;t final yet.
+        </p>
+      )}
 
       <div className={styles.pageList}>
         {displayPages.map((page, index) => {
