@@ -1,6 +1,6 @@
 "use client";
 
-// Create/edit a consultant or contractor (name + contact details).
+// Create/edit a consultant, contractor or sub-contractor (name + contacts).
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
@@ -18,8 +18,8 @@ export interface PartyRow {
 
 interface Props {
   open: boolean;
-  resource: "consultants" | "contractors";
-  label: string; // "consultant" | "contractor" — for modal copy
+  resource: "consultants" | "contractors" | "subcontractors";
+  label: string; // "consultant" | "contractor" | "sub-contractor" — modal copy
   companyId: string;
   item: PartyRow | null; // null = create
   onClose: () => void;

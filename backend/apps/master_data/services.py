@@ -5,7 +5,7 @@ from django.db import transaction
 
 from apps.accounts.models import Company
 
-from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType, SubContractor
 
 # Each stakeholder list and the Project field whose value it supplies. Deleting
 # a row is blocked while any project still holds that name (see _in_use_count),
@@ -14,6 +14,7 @@ _PARTY_FIELDS = {
     Client: ("client_name",),
     Consultant: ("consultant_name", "contractor_consultant"),
     Contractor: ("contractor_name",),
+    SubContractor: ("subcontractor_name",),
 }
 
 # The four project types and three priorities that already exist as Django

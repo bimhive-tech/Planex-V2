@@ -1,6 +1,6 @@
 """Company-editable dropdown lists ("Master Data"): currencies, project types,
-project priorities, and the three stakeholder lists (clients, consultants,
-contractors). Each Project stores the chosen value as a plain string (no FK —
+project priorities, and the stakeholder lists (clients, consultants,
+contractors, subcontractors). Each Project stores the chosen value as a plain string (no FK —
 matches how currency has always worked), so these tables exist only to drive
 the dropdowns and let a company curate its own list; they never constrain what
 a Project can already hold.
@@ -140,4 +140,19 @@ class Contractor(_ContactParty):
         abstract = False
         constraints = [
             models.UniqueConstraint(fields=["company", "name"], name="uniq_contractor_per_company"),
+        ]
+
+
+class SubContractor(_ContactParty):
+    """A subcontractor (stored on Project.subcontractor_name). Its own list
+    rather than a reuse of Contractor: the same firm can be a main contractor
+    on one project and a subcontractor on another, and a company curates the
+    two rosters separately."""
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="subcontractors")
+
+    class Meta(_ContactParty.Meta):
+        abstract = False
+        constraints = [
+            models.UniqueConstraint(fields=["company", "name"], name="uniq_subcontractor_per_company"),
         ]

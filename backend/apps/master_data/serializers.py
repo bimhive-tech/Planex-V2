@@ -2,7 +2,7 @@
 logic in services.py (mirrors apps.accounts.settings_serializers)."""
 from rest_framework import serializers
 
-from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType, SubContractor
 
 
 class CurrencySerializer(serializers.ModelSerializer):
@@ -69,6 +69,13 @@ class ConsultantSerializer(serializers.ModelSerializer):
 class ContractorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contractor
+        fields = ["id", "name", "phone", "email", "sort_order", "created_at"]
+        read_only_fields = ["id", "sort_order", "created_at"]
+
+
+class SubContractorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubContractor
         fields = ["id", "name", "phone", "email", "sort_order", "created_at"]
         read_only_fields = ["id", "sort_order", "created_at"]
 

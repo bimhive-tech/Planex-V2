@@ -8,6 +8,7 @@ from .views import (
     CurrenciesViewSet,
     ProjectPrioritiesViewSet,
     ProjectTypesViewSet,
+    SubContractorsViewSet,
 )
 
 router = SimpleRouter(trailing_slash=True)
@@ -17,5 +18,6 @@ router.register("project-priorities", ProjectPrioritiesViewSet, basename="projec
 router.register("clients", ClientsViewSet, basename="clients")
 router.register("consultants", ConsultantsViewSet, basename="consultants")
 router.register("contractors", ContractorsViewSet, basename="contractors")
+router.register("subcontractors", SubContractorsViewSet, basename="subcontractors")
 
 urlpatterns = router.urls

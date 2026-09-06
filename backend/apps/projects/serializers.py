@@ -9,6 +9,7 @@ from .services import project_overall_progress
 STAKEHOLDER_FIELDS = [
     "client_name", "consultant_name", "consultant_phone", "consultant_email",
     "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
+    "subcontractor_name", "subcontractor_phone", "subcontractor_email",
 ]
 DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
 # revised_finish is derived (the latest approved schedule Variation's new

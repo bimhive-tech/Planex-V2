@@ -68,6 +68,11 @@ class Project(TimestampedModel):
     # A 4th party distinct from the project's own consultant — the contractor's
     # own consultant/advisor, as tracked on some contracts' progress reports.
     contractor_consultant = models.CharField(max_length=180, blank=True)
+    # The contractor's own subcontractor, tracked as a project party in its own
+    # right (client ask, 2026-09-06).
+    subcontractor_name = models.CharField(max_length=180, blank=True)
+    subcontractor_phone = models.CharField(max_length=40, blank=True)
+    subcontractor_email = models.EmailField(blank=True)
 
     planned_start = models.DateField(null=True, blank=True)
     planned_finish = models.DateField(null=True, blank=True)

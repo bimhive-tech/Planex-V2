@@ -8,7 +8,7 @@ from apps.accounts.models import Company, Membership, Role, User
 from apps.projects.models import Project
 
 from . import services as svc
-from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType, SubContractor
 
 
 def _make_user(company, permissions):
@@ -234,3 +234,40 @@ class StakeholderListTests(TestCase):
         theirs = Client.objects.create(company=self.other, name="Theirs")
         self.assertEqual(self.client.patch(f"/api/clients/{theirs.id}/", {"name": "x"}).status_code, 404)
         self.assertEqual(self.client.delete(f"/api/clients/{theirs.id}/").status_code, 404)
+
+
+class SubContractorTests(TestCase):
+    """The subcontractor list, added alongside the other project parties
+    (client ask, 2026-09-06). Its own roster, not a reuse of Contractor: the
+    same firm can be a main contractor on one project and a sub on another."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.client = APIClient()
+        self.client.force_authenticate(_make_user(self.company, permissions=COMPANY_ADMIN_PERMISSIONS))
+
+    def test_create_with_contacts_and_list(self):
+        resp = self.client.post(
+            "/api/subcontractors/", {"name": "Sinai Sub", "phone": "+20 2", "email": "s@sub.example"})
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["email"], "s@sub.example")
+        self.assertEqual(self.client.get("/api/subcontractors/").data["count"], 1)
+
+    def test_same_name_can_be_a_contractor_and_a_subcontractor(self):
+        self.assertEqual(self.client.post("/api/contractors/", {"name": "Dual Role"}).status_code, 201)
+        self.assertEqual(self.client.post("/api/subcontractors/", {"name": "Dual Role"}).status_code, 201)
+
+    def test_delete_blocked_while_a_project_names_it(self):
+        sub = SubContractor.objects.create(company=self.company, name="Sinai Sub")
+        Project.objects.create(company=self.company, name="P1", project_type="commercial",
+                               subcontractor_name="Sinai Sub")
+        resp = self.client.delete(f"/api/subcontractors/{sub.id}/")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_rename_carries_onto_projects(self):
+        sub = SubContractor.objects.create(company=self.company, name="Old Sub")
+        p = Project.objects.create(company=self.company, name="P1", project_type="commercial",
+                                   subcontractor_name="Old Sub")
+        self.assertEqual(self.client.patch(f"/api/subcontractors/{sub.id}/", {"name": "New Sub"}).status_code, 200)
+        p.refresh_from_db()
+        self.assertEqual(p.subcontractor_name, "New Sub")

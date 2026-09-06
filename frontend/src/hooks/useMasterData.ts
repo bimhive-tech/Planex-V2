@@ -50,3 +50,7 @@ export function useConsultants() {
 export function useContractors() {
   return useFetch(() => api.get<Paginated<PartyRow>>("/contractors/?page_size=500"), []);
 }
+
+export function useSubcontractors() {
+  return useFetch(() => api.get<Paginated<PartyRow>>("/subcontractors/?page_size=500"), []);
+}

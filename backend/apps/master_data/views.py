@@ -13,7 +13,7 @@ from apps.accounts.settings_views import StandardListMixin
 from apps.accounts.tenancy import resolve_company
 
 from . import services as svc
-from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType
+from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType, SubContractor
 from .serializers import (
     ClientSerializer,
     ClientWriteSerializer,
@@ -26,6 +26,7 @@ from .serializers import (
     PartyWriteSerializer,
     ProjectPrioritySerializer,
     ProjectTypeSerializer,
+    SubContractorSerializer,
 )
 
 
@@ -267,3 +268,9 @@ class ContractorsViewSet(_PartyViewSet):
     model = Contractor
     serializer_class = ContractorSerializer
     not_found = "Contractor not found."
+
+
+class SubContractorsViewSet(_PartyViewSet):
+    model = SubContractor
+    serializer_class = SubContractorSerializer
+    not_found = "Subcontractor not found."

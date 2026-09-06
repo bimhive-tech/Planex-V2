@@ -1,8 +1,9 @@
 "use client";
 
-// Consultants and contractors (Settings -> Master Data). Same shape as
-// SimpleMasterList, plus the phone/email that make these worth storing once:
-// picking one in the project form fills its contact details in too.
+// Consultants, contractors and sub-contractors (Settings -> Master Data).
+// Same shape as SimpleMasterList, plus the phone/email that make these worth
+// storing once: picking one in the project form fills its contact details in
+// too.
 import { useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/ui/Button";
@@ -17,7 +18,7 @@ import styles from "./settingsList.module.css";
 const COLS = { "--cols": "2fr 1fr 2fr auto" } as CSSProperties;
 
 interface Props {
-  resource: "consultants" | "contractors";
+  resource: "consultants" | "contractors" | "subcontractors";
   label: string; // singular, e.g. "consultant"
   labelPlural: string;
   companyId: string;

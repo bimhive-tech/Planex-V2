@@ -13,7 +13,7 @@ import styles from "./masterData.module.css";
 
 type Section =
   | "currencies" | "project-types" | "project-priorities"
-  | "clients" | "consultants" | "contractors";
+  | "clients" | "consultants" | "contractors" | "subcontractors";
 
 const SECTIONS: { key: Section; label: string }[] = [
   { key: "currencies", label: "Currencies" },
@@ -22,6 +22,7 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: "clients", label: "Clients" },
   { key: "consultants", label: "Consultants" },
   { key: "contractors", label: "Contractors" },
+  { key: "subcontractors", label: "Sub-contractors" },
 ];
 
 interface Props {
@@ -73,6 +74,11 @@ export function MasterDataTab({ isPlatformAdmin, ownCompanyId }: Props) {
       {section === "contractors" && (
         <PartyMasterList
           resource="contractors" label="contractor" labelPlural="contractors" companyId={companyId}
+        />
+      )}
+      {section === "subcontractors" && (
+        <PartyMasterList
+          resource="subcontractors" label="sub-contractor" labelPlural="sub-contractors" companyId={companyId}
         />
       )}
     </div>

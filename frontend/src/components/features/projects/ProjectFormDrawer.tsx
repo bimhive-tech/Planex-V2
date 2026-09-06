@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/Select";
 import { api, ApiError } from "@/lib/api";
 import {
   useClients, useConsultants, useContractors, useCurrencies, useProjectPriorities, useProjectTypes,
+  useSubcontractors,
 } from "@/hooks/useMasterData";
 import type { ProjectDetail } from "@/types/project";
 import { PartySelect, type PartyOption } from "./PartySelect";
@@ -30,6 +31,7 @@ const FIELDS = [
   "budget", "budget_currency", "currency", "advance_payment", "advance_payment_currency", "client_name",
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
+  "subcontractor_name", "subcontractor_phone", "subcontractor_email",
   "planned_start", "planned_finish", "forecast_finish",
   "eot_days", "size_sqm", "notes",
   "contract_value", "contract_value_currency", "forecast_cost", "forecast_cost_currency",
@@ -62,9 +64,11 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
   const { data: clientsData, loading: clientsLoading } = useClients();
   const { data: consultantsData, loading: consultantsLoading } = useConsultants();
   const { data: contractorsData, loading: contractorsLoading } = useContractors();
+  const { data: subcontractorsData, loading: subcontractorsLoading } = useSubcontractors();
   const clients: PartyOption[] = clientsData?.results ?? [];
   const consultants: PartyOption[] = consultantsData?.results ?? [];
   const contractors: PartyOption[] = contractorsData?.results ?? [];
+  const subcontractors: PartyOption[] = subcontractorsData?.results ?? [];
 
   /** Store the picked name, and carry that party's own phone/email onto the
    * project with it. Explicitly picked, so overwriting is what's wanted —
@@ -263,6 +267,17 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
         <PartySelect label="Contractor's consultant" name="contractor_consultant"
           value={form.contractor_consultant} options={consultants} loading={consultantsLoading}
           onPick={pickParty("contractor_consultant")} />
+
+        <p className={styles.section}>Sub-contractor</p>
+        <PartySelect label="Name" name="subcontractor_name" value={form.subcontractor_name}
+          options={subcontractors} loading={subcontractorsLoading}
+          onPick={pickParty("subcontractor_name", "subcontractor_phone", "subcontractor_email")} />
+        <div className={styles.row2}>
+          <Input label="Phone" name="subcontractor_phone" value={form.subcontractor_phone}
+            onChange={set("subcontractor_phone")} />
+          <Input label="Email" name="subcontractor_email" type="email" value={form.subcontractor_email}
+            onChange={set("subcontractor_email")} />
+        </div>
 
         <p className={styles.sectionHint}>
           These come from Settings &rarr; Master Data. Add a new one there and it becomes available here.
