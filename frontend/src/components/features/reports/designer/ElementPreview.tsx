@@ -158,17 +158,23 @@ function singleItem(pinnedItem: RepeatItem | RepeatItem[] | null | undefined): R
  * no real project data to override in the first place) falls back to
  * plain, non-editable text. */
 function InlineEditableText({
-  value, onCommit, className, dir, style,
+  value, onCommit, className, dir, style, multiline,
 }: {
   value: string;
   onCommit?: (next: string) => void;
   className?: string;
   dir?: "ltr" | "rtl";
   style?: React.CSSProperties;
+  /** Let Enter start a new line instead of committing — for a text box, whose
+   * content is genuinely multi-line (the PDF has always drawn it that way, see
+   * pdf_canvas._draw_text splitting on newlines). Off elsewhere: a table cell
+   * or a TOC row is one line, and there Enter-to-commit is the faster gesture.
+   * Blur still commits either way; Ctrl/Cmd+Enter commits without leaving. */
+  multiline?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
   useEffect(() => {
@@ -185,22 +191,28 @@ function InlineEditableText({
   }
 
   if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        className={`${styles.inlineEditInput} ${className ?? ""}`}
-        style={style}
-        dir={dir}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); commit(); }
-          if (e.key === "Escape") { e.preventDefault(); setDraft(value); setEditing(false); }
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
-      />
-    );
+    const shared = {
+      className: `${styles.inlineEditInput} ${className ?? ""}`,
+      style,
+      dir,
+      value: draft,
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(e.target.value),
+      onBlur: commit,
+      onKeyDown: (e: React.KeyboardEvent) => {
+        // Plain Enter in a text box types a newline (the textarea's own
+        // default), so only the explicit Ctrl/Cmd+Enter commits there.
+        if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") { e.preventDefault(); setDraft(value); setEditing(false); }
+      },
+      onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+    };
+    return multiline
+      ? <textarea {...shared} ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+          className={`${shared.className} ${styles.inlineEditArea}`} />
+      : <input {...shared} ref={inputRef as React.RefObject<HTMLInputElement>} />;
   }
 
   return (
@@ -1147,6 +1159,7 @@ export function ElementPreview({
           }}
         >
           <InlineEditableText
+            multiline
             value={String(p.text ?? "Text")}
             onCommit={onElementChange && ((v) => onElementChange({ ...el, props: { ...p, text: v } }))}
           />

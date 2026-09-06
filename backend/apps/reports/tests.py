@@ -272,6 +272,25 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertAlmostEqual(w, 50 * mm)
         self.assertAlmostEqual(h, 30 * mm)
 
+    def test_text_element_draws_a_newline_as_a_second_line(self):
+        """A text box is genuinely multi-line — the canvas editor now edits it
+        in a textarea where Enter starts a new line (2026-09-06), and that only
+        means anything if the newline survives into the PDF. _draw_text splits
+        on newlines and joins with <br/>; this pins that a stored newline
+        really does come out as two lines, not one run-together one."""
+        import fitz
+
+        pages = [{"id": "p1", "name": "T", "elements": [
+            {"id": "t1", "type": "text", "x": 10, "y": 10, "w": 180, "h": 60, "z": 0,
+             "props": {"text": "FIRST LINE\nSECOND LINE", "size": 14}},
+        ]}]
+        report = SimpleNamespace(title="T", template=self._template(pages), scope_ids=[])
+        doc = fitz.open(stream=build_canvas_pdf(report, _sample_ctx()), filetype="pdf")
+
+        tops = {w[4]: round(w[1]) for w in doc[0].get_text("words") if w[4] in ("FIRST", "SECOND")}
+        self.assertEqual(set(tops), {"FIRST", "SECOND"}, "both lines must be drawn")
+        self.assertNotEqual(tops["FIRST"], tops["SECOND"], "they must sit on different lines")
+
     def test_has_canvas_layout_false_for_default_config(self):
         self.assertFalse(has_canvas_layout(default_config()))
 
