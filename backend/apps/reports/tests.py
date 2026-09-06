@@ -3385,6 +3385,38 @@ class ArabicWrapTests(SimpleTestCase):
         _, natural_h = table.wrap(avail_w, 10_000)
         self.assertLessEqual(natural_h, content_h)
 
+    def test_full_page_info_box_fits_every_row_plus_the_subcontractor(self):
+        """The sub-contractor row is opt-in precisely because the Summary box
+        above can't take a 27th row (measured 419.6pt into 413.9pt of space,
+        2026-09-06). The full-page Project Info table — 178x205mm, where it IS
+        switched on — has to fit it, or enabling it there just moves the
+        orphaned-row bug rather than avoiding it."""
+        from reportlab.lib.units import mm
+
+        from .constants import default_config
+        from .pdf_tables import _info_table, _styles
+
+        cfg = default_config()
+        cfg["table"]["cell_padding"] = 3      # same density as the Summary test above
+        cfg["fonts"]["base_size"] = 8
+        labels = cfg["labels"]
+        keys = [
+            "info_progress_as_on", "info_name", "info_code", "info_client", "info_consultant",
+            "info_contractor", "info_contractor_consultant", "info_subcontractor",
+            "info_type", "info_location",
+            "info_budget", "info_contract_value", "info_approved_value", "info_forecast_cost",
+            "info_advance_payment", "info_duration", "info_start", "info_finish", "info_eot",
+            "info_revised", "info_forecast", "info_delay", "info_size", "info_part_amount",
+            "info_part_completion_revised", "info_part_forecast", "info_part_delay",
+        ]
+        rows = [(labels.get(k, k), "مشروع المنصورة 6 - أعمال التشطيبات") for k in keys]
+        self.assertEqual(len(rows), 27)
+
+        box_w, box_h = 178 * mm, 205 * mm
+        table = _info_table(cfg, _styles(cfg), rows, True, avail_width=box_w - 8)
+        _, natural_h = table.wrap(box_w - 8, 10_000)
+        self.assertLessEqual(natural_h, box_h - 8 * mm)
+
 
 class SubmittalsChartLegendTests(SimpleTestCase):
     """The submittals breakdown chart is drawn both full-width (its own
@@ -4215,3 +4247,29 @@ class SummaryCoverageTests(SimpleTestCase):
         ensure_fonts()
         cfg = merged_config(default_config())
         self.assertIsNone(area_progress_chart(cfg, ctx, 700, cfg["labels"], height=200))
+
+
+class SubcontractorInfoRowTests(SimpleTestCase):
+    """The project-info table's sub-contractor row: present only where the
+    element asks for it (client ask 2026-09-06 — see resolve_table)."""
+
+    def _rows(self, **props):
+        from .constants import default_config, merged_config
+        from .pdf_canvas import resolve_table
+
+        ctx = _sample_ctx()
+        ctx["project"] = {**ctx.get("project", {}),
+                          "contractor_consultant": "Their Consultant",
+                          "subcontractor": "Sinai Sub"}
+        grid = resolve_table("project_info", merged_config(default_config()), ctx, {"item": None},
+                             raw=True, style={"source": "project_info", **props})
+        return [label for label, _ in grid["rows"]]
+
+    def test_absent_by_default(self):
+        self.assertNotIn("Sub-contractor", self._rows())
+
+    def test_present_when_the_element_switches_it_on(self):
+        rows = self._rows(show_subcontractor=True)
+        self.assertIn("Sub-contractor", rows)
+        # Sits with the other parties, right after the contractor's consultant.
+        self.assertEqual(rows.index("Sub-contractor"), rows.index("Contractor's Consultant") + 1)

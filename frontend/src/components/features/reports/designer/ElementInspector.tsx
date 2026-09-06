@@ -141,6 +141,10 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "zebra_color", label: "Zebra stripe color", kind: "color" },
         { path: "border", label: "Borders", kind: "toggle" },
         { path: "border_color", label: "Border color", kind: "color" },
+        // project_info only — harmless elsewhere (no other source reads it).
+        // Off by default: the Summary page's panel and a stage dashboard's
+        // strip have no room for the extra row, only the full-page table does.
+        { path: "show_subcontractor", label: "Show sub-contractor row (project info)", kind: "toggle" },
         { path: "show_title", label: "Show title", kind: "toggle", defaultOn: true },
         { path: "title_text", label: "Title text (optional — defaults to the data source's name)", kind: "text" },
         { path: "show_caption", label: "Show caption", kind: "toggle" },

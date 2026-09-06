@@ -327,6 +327,7 @@ DEFAULT_CONFIG = {
         "info_forecast_cost": "Forecast cost",
         "info_progress_as_on": "Progress as on",
         "info_contractor_consultant": "Contractor's Consultant",
+        "info_subcontractor": "Sub-contractor",
         "info_advance_payment": "Advance Payment",
         "info_eot": "EOT (Days)",
         "info_part_amount": "(Part) Amount",

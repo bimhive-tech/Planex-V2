@@ -184,11 +184,12 @@ def _progress_overview_page(cfg, design):
     return _page("Overall Progress", [*heading, field, chart])
 
 
-def _table_page(cfg, design, label_key, source, name):
+def _table_page(cfg, design, label_key, source, name, extra_props=None):
     box = _content_box(design)
     sub = _below_heading(box)
     heading = _heading_el(cfg, cfg["labels"].get(label_key, label_key), box)
-    table = _el("table", sub["x"], sub["y"], sub["w"], sub["h"], _table_props(cfg, source))
+    props = {**_table_props(cfg, source), **(extra_props or {})}
+    table = _el("table", sub["x"], sub["y"], sub["w"], sub["h"], props)
     return _page(name, [*heading, table])
 
 
@@ -320,7 +321,10 @@ def seed_layout_from_sections(cfg: dict) -> dict:
     if sections.get("summary"):
         pages.append(_field_page(cfg, design, "summary", "progress.overall", "Executive Summary"))
     if sections.get("project_info"):
-        pages.append(_table_page(cfg, design, "project_info", "project_info", "Project Info"))
+        # A whole page of its own, so unlike the Summary panel's cramped copy
+        # it can afford the sub-contractor row (see resolve_table).
+        pages.append(_table_page(cfg, design, "project_info", "project_info", "Project Info",
+                                 extra_props={"show_subcontractor": True}))
     if sections.get("dashboard"):
         pages.append(_dashboard_page(cfg, design))
     if sections.get("progress_overview"):

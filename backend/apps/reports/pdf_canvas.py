@@ -1127,6 +1127,14 @@ def resolve_table(
             (labels["info_consultant"], p.get("consultant")),
             (labels["info_contractor"], p.get("contractor")),
             (labels.get("info_contractor_consultant", "Contractor's Consultant"), p.get("contractor_consultant")),
+            # Opt-in per element, not on by default: this table is drawn in
+            # three very different boxes (a full page, the Summary panel, a
+            # stage dashboard's 56mm strip), and the Summary panel has no room
+            # for a 27th row on a project that fills every optional field —
+            # overflowing it orphans the last rows on a continuation page (see
+            # the info-table fit test). The full-page element switches it on.
+            *(((labels.get("info_subcontractor", "Sub-contractor"), p.get("subcontractor")),)
+              if (style or {}).get("show_subcontractor") else ()),
             # Project type is a model enum too — localize like the rest.
             (labels["info_type"], enum_label(cfg, p.get("type"))),
             (labels["info_location"], p.get("location")),

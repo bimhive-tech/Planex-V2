@@ -1192,6 +1192,7 @@ def build_report_context(report):
             "consultant": project.consultant_name,
             "contractor": project.contractor_name,
             "contractor_consultant": project.contractor_consultant,
+            "subcontractor": project.subcontractor_name,
             "planned_start": project.planned_start,
             "planned_finish": project.planned_finish,
             "revised_finish": project.revised_finish,
