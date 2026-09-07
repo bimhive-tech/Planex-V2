@@ -769,6 +769,25 @@ class ScheduleImportApiTests(TestCase):
         self.assertFalse(self.project.snapshots.filter(date="2026-01-15").exists())
         self.assertTrue(self.project.snapshots.filter(date="2026-02-15").exists())
 
+    def test_deleting_an_import_takes_its_milestones_with_it(self):
+        """They are upserted by title and never removed, so before this a
+        wrong upload's milestones outlived the batch that brought them — an
+        airport project kept 264 from a different job (2026-09-07)."""
+        from .models import Milestone
+
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        target = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()[0]["id"]
+        # One added by hand carries no batch and must survive the delete.
+        Milestone.objects.create(company=self.company, project=self.project, title="By hand")
+
+        self.assertEqual(
+            self.client.delete(f"/api/projects/{self.project.id}/schedule-imports/{target}/").status_code, 204)
+        self.assertEqual(
+            list(Milestone.objects.filter(project=self.project).values_list("title", flat=True)),
+            ["By hand"])
+
     def test_deleting_the_last_import_clears_the_projects_stated_figures(self):
         """Those come from whichever import stated them, so they must not
         outlive the schedule they describe."""

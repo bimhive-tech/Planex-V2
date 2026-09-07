@@ -321,6 +321,15 @@ class Milestone(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="milestones")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="milestones")
+    # The import that brought this milestone in, so deleting that batch takes
+    # its milestones with it. Without this they simply accumulated: they are
+    # upserted by (project, title) and never removed, so an airport project
+    # whose first upload was the wrong workbook kept showing 264 milestones
+    # from a different job — "استلام عمارة (A15)" on a project with no
+    # buildings (2026-09-07). Nullable, and left null, for one added by hand:
+    # same rule as ProjectScope/Activity above.
+    schedule_import = models.ForeignKey(
+        "ScheduleImport", on_delete=models.CASCADE, null=True, blank=True, related_name="milestones")
     title = models.CharField(max_length=180)
     date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.UPCOMING)

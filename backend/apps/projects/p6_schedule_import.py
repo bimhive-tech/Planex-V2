@@ -305,10 +305,14 @@ def _resolve_milestone_scopes(project, scope_paths):
     return resolved
 
 
-def _record_milestones(project, tasks):
+def _record_milestones(project, tasks, schedule_import=None):
     """Store milestone activities as Milestones. Upserted by title rather than
     replaced wholesale so re-importing an updated schedule refreshes the dates
-    without discarding milestones somebody added by hand."""
+    without discarding milestones somebody added by hand.
+
+    `schedule_import` tags each one with the batch it came from, so deleting
+    that batch takes them with it — an upsert alone left a wrong upload's
+    milestones behind forever (see the model's own note)."""
     from .models import Milestone
 
     paths = {tuple(task.get("scope_path") or ()) for task in tasks}
@@ -324,7 +328,8 @@ def _record_milestones(project, tasks):
             project=project, title=task["name"][:180],
             defaults={"company": project.company, "sort_order": order, "status": status,
                       "date": task["finish"] or task["start"], "scope": scope,
-                      "progress_percent": task.get("pct_raw")},
+                      "progress_percent": task.get("pct_raw"),
+                      "schedule_import": schedule_import},
         )
     return len(tasks)
 
@@ -467,7 +472,7 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     schedule_import.activity_count = len(activities)
     schedule_import.save(update_fields=["activity_count", "updated_at"])
 
-    milestones = _record_milestones(project, milestone_tasks)
+    milestones = _record_milestones(project, milestone_tasks, schedule_import=schedule_import)
 
     # The Planex-code scheme builds its tree from the code column, so the
     # project-title row (which carries no code) never becomes a root and can't
