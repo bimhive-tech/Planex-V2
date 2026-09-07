@@ -892,6 +892,48 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     return d
 
 
+def _finish_scurve(d, chart, series, swatches, cfg, width, height):
+    """Axes, line colours, end-of-line callouts and legend — shared by the
+    dashboard's own four-series curve and the snapshot-derived one."""
+    _thin_category_axis(chart.categoryAxis, [p["date"].strftime("%b %y") for p in series],
+                        chart.width, font_size=6)
+    chart.categoryAxis.labels.fontName = FONT_NAME
+    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.angle = 90
+    chart.categoryAxis.labels.boxAnchor = "e"
+    # 10% steps and a 0-100 range, matching the reference's own percentage axes.
+    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
+    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
+    chart.valueAxis.labels.fontName = FONT_NAME
+    chart.valueAxis.labels.fontSize = 6
+    _grid(chart.valueAxis, cfg)
+    for i, (color, _) in enumerate(swatches):
+        chart.lines[i].strokeColor = hexcolor(color)
+        chart.lines[i].strokeWidth = 2
+    d.add(chart)
+
+    # Call out where each line ends, the way the reference's own Progress Curve
+    # does ("83.70%", "100.00%"). Reading a final value off a 10%-step axis is
+    # guesswork otherwise, and that end figure is the number the report is
+    # actually about.
+    step = chart.width / max(1, len(series) - 1)
+    for row, (color, _) in enumerate(swatches):
+        values = chart.data[row]
+        last = next((i for i in range(len(values) - 1, -1, -1) if values[i] is not None), None)
+        if last is None:
+            continue
+        value = values[last]
+        x = chart.x + last * step
+        y = chart.y + chart.height * (min(100.0, max(0.0, value)) / 100.0)
+        # Nudge in from the right edge so a final-column label isn't clipped.
+        anchor = "end" if last >= len(values) - 1 else "start"
+        d.add(String(x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
+                     fontName=_SANS_BOLD, fontSize=6,
+                     fillColor=hexcolor(color), textAnchor=anchor))
+    _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
+    return d
+
+
 def scurve_chart(cfg, ctx, width, labels, height=None):
     """Time Performance S-curve: planned vs actual cumulative progress, plus
     the forecast continuation the reference report's own Progress Curve
@@ -904,7 +946,14 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     to 100%, which is the only forecast this data supports: the project
     stores forecast/revised *dates*, not a month-by-month projected curve.
     Nothing is drawn when there's no forecast date to aim at."""
-    series = [p for p in ctx.get("scurve", []) if p.get("planned") is not None]
+    points = ctx.get("scurve", [])
+    # The dashboard's own four-series curve, when its workbook supplied one
+    # (services.build_report_context). Each series covers a different span —
+    # the planned pair stops at the baseline finish, actual at the data date,
+    # remaining only runs on from there — so unlike the derived curve below it
+    # must keep every month, not just the ones carrying a planned value.
+    has_curve = any(p.get("late_planned") is not None for p in points)
+    series = points if has_curve else [p for p in points if p.get("planned") is not None]
     if len(series) < 2:
         return None
     height = height or 72 * mm
@@ -916,6 +965,28 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     actual = [p.get("actual") for p in series]
     swatches = [(cfg["colors"]["chart_planned"], labels["planned"]),
                 (cfg["colors"]["chart_actual"], labels["actual"])]
+
+    if has_curve:
+        # Drawn exactly as the source sheet plots it: four cumulative series,
+        # each with its own gaps. No run-out is synthesized — the workbook
+        # carries its own remaining curve, so inventing one could only
+        # contradict it.
+        palette = cfg["colors"].get("chart_palette") or []
+        late_color = palette[2] if len(palette) > 2 else cfg["colors"].get("gauge_average", "#9BBB59")
+        remaining_color = palette[5] if len(palette) > 5 else cfg["colors"].get("gauge_warn", "#F79646")
+        chart.data = [
+            [p.get("planned") for p in series],
+            [p.get("late_planned") for p in series],
+            actual,
+            [p.get("forecast") for p in series],
+        ]
+        swatches = [
+            (cfg["colors"]["chart_planned"], labels.get("scurve_early_planned", "Cummulative Early Planned %")),
+            (late_color, labels.get("scurve_late_planned", "Cummulative Late Planned %")),
+            (cfg["colors"]["chart_actual"], labels.get("scurve_actual", "Cummulative Actual %")),
+            (remaining_color, labels.get("scurve_remaining", "Cummulative Remaining %")),
+        ]
+        return _finish_scurve(d, chart, series, swatches, cfg, width, height)
 
     # Split at the report's as-of date, not at the last snapshot: a project
     # can carry snapshots dated past the report period, and drawing those as
@@ -963,43 +1034,7 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
             swatches.append((forecast_color, labels.get("scurve_forecast", "Forecast")))
 
     chart.data = data
-    _thin_category_axis(chart.categoryAxis, [p["date"].strftime("%b %y") for p in series],
-                        chart.width, font_size=6)
-    chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 6
-    chart.categoryAxis.labels.angle = 90
-    chart.categoryAxis.labels.boxAnchor = "e"
-    # 10% steps and a 0-100 range, matching the reference's own percentage axes.
-    chart.valueAxis.valueMin, chart.valueAxis.valueMax, chart.valueAxis.valueStep = 0, 100, 10
-    chart.valueAxis.labelTextFormat = "%d%%"  # axis ticks read "20%", "40%"… not bare numbers
-    chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 6
-    _grid(chart.valueAxis, cfg)
-    for i, (color, _) in enumerate(swatches):
-        chart.lines[i].strokeColor = hexcolor(color)
-        chart.lines[i].strokeWidth = 2
-    d.add(chart)
-
-    # Call out where each line ends, the way the reference's own Progress Curve
-    # does ("83.70%", "100.00%"). Reading a final value off a 10%-step axis is
-    # guesswork otherwise, and that end figure is the number the report is
-    # actually about.
-    step = chart.width / max(1, len(series) - 1)
-    for row, (color, _) in enumerate(swatches):
-        values = data[row]
-        last = next((i for i in range(len(values) - 1, -1, -1) if values[i] is not None), None)
-        if last is None:
-            continue
-        value = values[last]
-        x = chart.x + last * step
-        y = chart.y + chart.height * (min(100.0, max(0.0, value)) / 100.0)
-        # Nudge in from the right edge so a final-column label isn't clipped.
-        anchor = "end" if last >= len(values) - 1 else "start"
-        d.add(String(x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
-                     fontName=_SANS_BOLD, fontSize=6,
-                     fillColor=hexcolor(color), textAnchor=anchor))
-    _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
-    return d
+    return _finish_scurve(d, chart, series, swatches, cfg, width, height)
 
 
 def cashflow_chart(cfg, rows, width, labels, height=None):

@@ -266,6 +266,13 @@ DEFAULT_CONFIG = {
         "variance": "الانحراف",
         # The forecast run-out on the progress curve (actual -> 100%).
         "scurve_forecast": "المتوقع",
+        # The dashboard's own Progress Curve series, worded as its chart words
+        # them (client ask, 2026-09-07) — used only when that workbook supplied
+        # the curve, so the four names always match the sheet they came from.
+        "scurve_early_planned": "Cummulative Early Planned %",
+        "scurve_late_planned": "Cummulative Late Planned %",
+        "scurve_actual": "Cummulative Actual %",
+        "scurve_remaining": "Cummulative Remaining %",
         # Unit words appended to bare numbers so a reader knows what they mean.
         "unit_days": "days",
         "unit_sqm": "m²",

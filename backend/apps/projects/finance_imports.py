@@ -19,7 +19,7 @@ from decimal import Decimal, InvalidOperation
 import openpyxl
 from django.db import transaction
 
-from .models import CashFlowEntry, Invoice
+from .models import CashFlowEntry, Invoice, ProgressCurvePoint
 
 SCAN_ROWS = 100          # how deep to look for the header / label rows
 SCAN_COLS = 200          # cap width so 16k-column export sheets don't stall us
@@ -177,6 +177,82 @@ def parse_cashflow(upload):
     )
 
 
+# The dashboard's "progress curve" sheet is transposed: month dates run across
+# one header row and each series is a row beneath it. Matched on the distinctive
+# part of each label, since the sheet's own wording is inconsistent about
+# spacing ("Cummulative Actual Cost  %") and spelling.
+_CURVE_SERIES = {
+    "early_planned": ("cummulative early budget", "%"),
+    "late_planned": ("cummulative late budget", "%"),
+    "actual": ("cummulative actual", "%"),
+    "remaining": ("cumm remaining", "%"),
+}
+
+
+def _curve_label_matches(label, needles) -> bool:
+    flat = " ".join(str(label or "").lower().split())
+    return all(n in flat for n in needles)
+
+
+def parse_progress_curve(wb):
+    """{month(date): {early_planned, late_planned, actual, remaining}} from a
+    workbook's "progress curve" sheet, or {} when it has no such sheet.
+
+    Values are the sheet's own fractions scaled to percentages. Only the
+    columns whose header is a real date are read: the rows run on past the
+    plotted series into working cells, and those tails would otherwise arrive
+    as spurious 13,647% points."""
+    sheet = next((ws for ws in wb.worksheets if "progress curve" in ws.title.strip().lower()), None)
+    if sheet is None:
+        return {}
+    rows = [r for r in sheet.iter_rows(min_row=1, max_row=30, values_only=True)]
+
+    # The header row is whichever of the first few carries the most dates.
+    best, best_cols = None, []
+    for row in rows:
+        cols = [i for i, c in enumerate(row) if isinstance(c, datetime.datetime)]
+        if len(cols) > len(best_cols):
+            best, best_cols = row, cols
+    if not best_cols or len(best_cols) < 2:
+        return {}
+
+    out = {}
+    for key, needles in _CURVE_SERIES.items():
+        row = next((r for r in rows if _curve_label_matches(r[0] if r else None, needles)), None)
+        if row is None:
+            continue
+        for i in best_cols:
+            value = row[i] if i < len(row) else None
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+            month = best[i].date().replace(day=1)
+            out.setdefault(month, {})[key] = round(float(value) * 100, 2)
+    return out
+
+
+def import_progress_curve(project, wb) -> int:
+    """Replace the project's Progress Curve from an already-open workbook.
+
+    Replace, not merge — same rule as the cash flow beside it: the sheet is
+    the whole curve, so a re-import restating fewer months must not leave the
+    old ones dangling past the end of the new one."""
+    data = parse_progress_curve(wb)
+    if not data:
+        return 0
+    rows = [
+        ProgressCurvePoint(
+            company=project.company, project=project, date=month,
+            early_planned=values.get("early_planned"), late_planned=values.get("late_planned"),
+            actual=values.get("actual"), remaining=values.get("remaining"),
+        )
+        for month, values in sorted(data.items())
+    ]
+    with transaction.atomic():
+        project.curve_points.all().delete()
+        ProgressCurvePoint.objects.bulk_create(rows)
+    return len(rows)
+
+
 def import_cashflow(project, upload):
     """Replace the project's monthly cash flow from an uploaded workbook.
 
@@ -192,10 +268,28 @@ def import_cashflow(project, upload):
     with transaction.atomic():
         project.cashflow_entries.all().delete()
         CashFlowEntry.objects.bulk_create(rows)
+
+    # The same workbook carries the Progress Curve the report's S-curve draws,
+    # so one upload brings both rather than asking for the same file twice.
+    # Re-read from the start: parse_cashflow has already consumed the stream.
+    curve_months = 0
+    try:
+        upload.seek(0)
+        wb = openpyxl.load_workbook(upload, read_only=False, data_only=True)
+        try:
+            curve_months = import_progress_curve(project, wb)
+        finally:
+            wb.close()
+    except Exception:
+        # A workbook with no such sheet (or an unreadable one) still imported
+        # its cash flow — that must not be undone over a curve it never had.
+        curve_months = 0
+
     return {
         "months": len(rows),
         "first_month": months[0].isoformat(),
         "last_month": months[-1].isoformat(),
+        "curve_months": curve_months,
     }
 
 

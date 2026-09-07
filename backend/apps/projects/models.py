@@ -223,6 +223,45 @@ class ProgressSnapshot(TimestampedModel):
             models.UniqueConstraint(fields=["project", "date"], name="uniq_snapshot_per_date"),
         ]
         indexes = [models.Index(fields=["project", "date"])]
+
+
+class ProgressCurvePoint(TimestampedModel):
+    """One month of the dashboard's own Progress Curve — the four cumulative
+    cost-loaded series its "progress curve" sheet plots.
+
+    Kept apart from ProgressSnapshot rather than folded into it, even though
+    that model has planned_progress/forecast_progress fields written with this
+    sheet in mind. Snapshots are the SCHEDULE's history: one row per import,
+    dated when that import ran, with overall_progress derived from activities.
+    This is the COST curve: one row per calendar month, restated wholesale
+    every time the workbook is re-imported. Mixing the two would mean an
+    import silently rewriting the other's numbers on any date they share —
+    and a project's S-curve is exactly where a stray row is hardest to spot
+    (a whole fabricated history went unnoticed in one, 2026-09-07).
+
+    Percentages, 0-100, stored as the sheet's own fractions x100. All four are
+    nullable: each series covers a different span of the programme (the
+    planned ones stop at the baseline finish, actual stops at the data date,
+    remaining only runs on from there)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="progress_curve_points")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="curve_points")
+    date = models.DateField()
+    early_planned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    late_planned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    actual = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    remaining = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        ordering = ["date"]
+        constraints = [
+            models.UniqueConstraint(fields=["project", "date"], name="uniq_curve_point_per_date"),
+        ]
+        indexes = [models.Index(fields=["project", "date"])]
+
+    def __str__(self):
+        return f"{self.project.name} curve @ {self.date}"
         ordering = ["date"]
 
     def __str__(self):

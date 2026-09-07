@@ -17,6 +17,12 @@ from apps.projects.services import (
 from .models import ReportImage
 
 
+def _f(value):
+    """Decimal-or-None to float-or-None — the curve's series each cover a
+    different span, so any of them can be blank in a given month."""
+    return None if value is None else float(value)
+
+
 def _planned_progress(project, as_of, use_imported=False):
     """Time-based planned % (0–100): how far along the contract calendar we are.
     Matches the reference, where overdue scopes show planned = 100%.
@@ -1126,17 +1132,37 @@ def build_report_context(report):
     # bend the way a real programme does; the date-based fallback is a straight
     # line between two dates, which is not what the client's curve looks like
     # and reads wrong on any front- or back-loaded job (2026-09-02).
-    scurve = [
-        {
-            "date": s["date"],
-            "actual": float(s["overall_progress"]),
-            "planned": (float(s["planned_progress"]) if s["planned_progress"] is not None
-                        else _planned_progress(project, s["date"])),
-            "forecast": (float(s["forecast_progress"])
-                         if s["forecast_progress"] is not None else None),
-        }
-        for s in snapshots if s["date"]
-    ]
+    # The dashboard's own Progress Curve when the workbook supplied one — four
+    # cost-loaded cumulative series straight from its "progress curve" sheet
+    # (see finance_imports.import_progress_curve). Preferred outright over the
+    # snapshot-derived version below: it IS the curve the client publishes, so
+    # anything we derive can only disagree with it.
+    curve = list(project.curve_points.order_by("date").values(
+        "date", "early_planned", "late_planned", "actual", "remaining"))
+    if curve:
+        scurve = [
+            {
+                "date": c["date"],
+                "planned": _f(c["early_planned"]),
+                "late_planned": _f(c["late_planned"]),
+                "actual": _f(c["actual"]),
+                "forecast": _f(c["remaining"]),
+            }
+            for c in curve
+        ]
+    else:
+        scurve = [
+            {
+                "date": s["date"],
+                "actual": float(s["overall_progress"]),
+                "planned": (float(s["planned_progress"]) if s["planned_progress"] is not None
+                            else _planned_progress(project, s["date"])),
+                "forecast": (float(s["forecast_progress"])
+                             if s["forecast_progress"] is not None else None),
+                "late_planned": None,
+            }
+            for s in snapshots if s["date"]
+        ]
     # Logos stay on the project (constant branding); the cover/photos/attachments
     # are per-report content that overrides any project-level fallback.
     proj_images = list(
