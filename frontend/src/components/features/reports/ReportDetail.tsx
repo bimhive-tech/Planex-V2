@@ -408,6 +408,10 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                     // list expands repeating pages instead of freezing on 13 raw types.
                     key={`${reportId}-${form.template}-${data ? "live" : "pending"}`}
                     reportId={reportId}
+                    projectId={form.project}
+                    // A logo/cover uploaded from the canvas has to reach the
+                    // canvas: bump refetches the live data the slots read.
+                    onAssetsChanged={bump}
                     template={selectedTemplate}
                     savedOverride={savedOverride}
                     liveData={data}

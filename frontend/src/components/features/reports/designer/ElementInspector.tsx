@@ -13,6 +13,7 @@ import {
 } from "@/lib/reportElements";
 import type { LayoutElement } from "@/lib/reportLayout";
 import type { ReportData, ReportImage } from "@/types/report";
+import { SlotImageUpload, isSlotSource } from "./SlotImageUpload";
 import styles from "./designer.module.css";
 
 type PropField =
@@ -186,6 +187,11 @@ interface Props {
    * "Uploaded image" source, since that image belongs to one specific
    * report, not a project-agnostic template. */
   reportId?: string;
+  /** This report's project — lets a logo slot be filled from here rather than
+   * from the Setup tab (see SlotImageUpload). */
+  projectId?: string;
+  /** Refetches live data after a slot image changes, so the canvas redraws. */
+  onAssetsChanged?: () => void;
   /** How many elements are currently selected — `el` is only ever set for
    * exactly one of them, so a multi-selection shows a group summary here
    * instead of per-type property fields (merging N different elements'
@@ -207,7 +213,8 @@ interface Props {
 const isFiniteNumber = (v: string) => v.trim() !== "" && Number.isFinite(Number(v));
 
 export function ElementInspector({
-  el, onChange, repeating = false, reportId, selectedCount = 0, onDeleteSelection, liveData,
+  el, onChange, repeating = false, reportId, projectId, onAssetsChanged, selectedCount = 0,
+  onDeleteSelection, liveData,
 }: Props) {
   // Hooks must run every render regardless of `el`, so these sit above the
   // early returns below.
@@ -351,6 +358,16 @@ export function ElementInspector({
             </p>
           )}
         </div>
+      )}
+
+      {(el.type === "image" || el.type === "logo") && isSlotSource(el.props.source) && (
+        <SlotImageUpload
+          source={el.props.source}
+          slot={Number(el.props.slot ?? 0) || 0}
+          reportId={reportId}
+          projectId={projectId}
+          onUploaded={onAssetsChanged}
+        />
       )}
 
       {el.type === "description" && (

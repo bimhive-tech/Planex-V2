@@ -58,6 +58,11 @@ interface Props {
   leftHeader?: React.ReactNode;
   /** Master elements drawn as ghosts behind the editable ones. */
   masterElements?: LayoutElement[];
+  /** This report's project — lets a logo slot be filled straight from the
+   * canvas properties panel (see SlotImageUpload). */
+  projectId?: string;
+  /** Refetches live data after a slot image changes, so the canvas redraws. */
+  onAssetsChanged?: () => void;
   /** See CanvasPage's own doc — the template's default design, for
    * re-anchoring master elements when `design` is one page's orientation
    * override instead. Omit where `design` already IS the template default. */
@@ -126,6 +131,7 @@ interface Props {
 
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, masterDesign, emptyHint, repeating = false, liveData,
+  projectId, onAssetsChanged,
   pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId, bottomPanel,
   onNavigatePage, initialScrollToBottom = false, history, historyPageId,
 }: Props) {
@@ -570,6 +576,8 @@ export function LayoutEditor({
         onChange={updateElement}
         repeating={repeating}
         reportId={reportId}
+        projectId={projectId}
+        onAssetsChanged={onAssetsChanged}
         selectedCount={selectedIds.length}
         onDeleteSelection={deleteSelection}
         liveData={liveData}

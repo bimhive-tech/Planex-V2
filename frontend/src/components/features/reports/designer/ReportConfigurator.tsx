@@ -48,6 +48,11 @@ interface Props {
   /** Live, real per-table data — each table's own effective style (colors,
    * font size, padding) travels with it — see useTableData. */
   tableData?: TableDataMap;
+  /** This report's project — lets a logo slot be filled straight from the
+   * canvas properties panel (see SlotImageUpload). */
+  projectId?: string;
+  /** Refetches live data after a slot image changes, so the canvas redraws. */
+  onAssetsChanged?: () => void;
   /** Live, real continuation-page row data for any table that overflows
    * its own box — see useTableOverflow. Present only alongside liveData;
    * undefined in the Template Builder (no real project data to know
@@ -71,7 +76,7 @@ interface Props {
 }
 
 export function ReportConfigurator({
-  design, pages, onChange, liveData, reportId, masterElements, onMasterElementsChange,
+  design, pages, onChange, liveData, reportId, projectId, onAssetsChanged, masterElements, onMasterElementsChange,
   chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true, labels,
 }: Props) {
   // Real, downloaded-PDF-accurate continuation pages spliced in after any
@@ -595,6 +600,8 @@ export function ReportConfigurator({
       repeating={Boolean(active.repeat)}
       liveData={liveData}
       reportId={reportId}
+      projectId={projectId}
+      onAssetsChanged={onAssetsChanged}
       pinnedItem={editingHeader ? null : pinnedItem}
       chartSvgs={chartSvgs}
       tableData={mergedTableData}

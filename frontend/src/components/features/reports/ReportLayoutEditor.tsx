@@ -44,13 +44,19 @@ interface Props {
    * could unlock before liveData arrived, showing every table/chart's
    * generic placeholder and looking like real data had silently failed. */
   liveDataLoading: boolean;
+  /** This report's project — lets a logo slot be filled straight from the
+   * canvas properties panel (see SlotImageUpload). */
+  projectId?: string;
+  /** Refetches live data after a slot image changes, so the canvas redraws. */
+  onAssetsChanged?: () => void;
   canManage: boolean;
   /** Refreshes the report row + the PDF preview after a save/reset. */
   onSaved: () => void;
 }
 
 export function ReportLayoutEditor({
-  reportId, template, savedOverride, liveData, liveDataLoading, canManage, onSaved,
+  reportId, projectId, onAssetsChanged, template, savedOverride, liveData, liveDataLoading,
+  canManage, onSaved,
 }: Props) {
   const design = template ? readPageDesign(template.config) : null;
   const templatePages = template ? readPages(template.config) : [];
@@ -209,6 +215,8 @@ export function ReportLayoutEditor({
         onChange={updatePages}
         liveData={liveData}
         reportId={reportId}
+        projectId={projectId}
+        onAssetsChanged={onAssetsChanged}
         masterElements={masterElements}
         onMasterElementsChange={updateMasterElements}
         chartSvgs={chartSvgs}
