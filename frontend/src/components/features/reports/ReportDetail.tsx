@@ -41,8 +41,6 @@ const STATUS_TONE: Record<ReportStatus, "neutral" | "info" | "success"> = {
 const TABS = [
   { key: "setup", label: "Setup" },
   { key: "scope", label: "Scope" },
-  { key: "info", label: "Project Info" },
-  { key: "progress", label: "Progress Report" },
   { key: "photos", label: "Progress Images" },
   { key: "attachments", label: "Attachments" },
   { key: "layout", label: "Customize" },
@@ -54,17 +52,13 @@ const TABS = [
 // field with its own tab.
 const TAB_ANCHOR: Record<string, string> = {
   setup: "tab_cover", scope: "tab_cover",
-  info: "tab_info",
-  progress: "tab_progress", photos: "tab_photos", attachments: "tab_attachments",
+  photos: "tab_photos", attachments: "tab_attachments",
 };
 
 type Form = {
   project: string; template: string; title: string; report_number: string;
   report_date: string; period_start: string; period_finish: string; status: string;
 };
-
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
   const router = useRouter();
@@ -319,50 +313,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   </section>
                 )}
 
-
-                {tab === "info" && (
-                  <section className={styles.tabPanel}>
-                    <h2 className={styles.panelTitle}>Project information (from {data?.project.name ?? "the project"})</h2>
-                    <table className={styles.dataTable}>
-                      <tbody>
-                        {data && ([
-                          ["Client", data.project.client], ["Consultant", data.project.consultant],
-                          ["Contractor", data.project.contractor], ["Type", data.project.type],
-                          ["Location", data.project.location],
-                          ["Value", data.project.budget ? `${data.project.budget} ${data.project.currency}` : "—"],
-                          ["Planned start", fmtDate(data.project.planned_start)],
-                          ["Planned finish", fmtDate(data.project.planned_finish)],
-                          ["Built-up area (m²)", data.project.size_sqm ?? "—"],
-                        ] as [string, string][]).map(([k, v]) => (
-                          <tr key={k}><th>{k}</th><td>{v || "—"}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </section>
-                )}
-
-                {tab === "progress" && (
-                  <section className={styles.tabPanel}>
-                    <h2 className={styles.panelTitle}>Overall progress</h2>
-                    <div className={styles.bigStat}>{data ? `${data.overall.toFixed(1)}%` : "…"}</div>
-                    {data && (
-                      <div className={styles.statRow}>
-                        <div className={styles.statChip}><strong>{data.breakdown.completed}</strong><span>Completed</span></div>
-                        <div className={styles.statChip}><strong>{data.breakdown.in_progress}</strong><span>In progress</span></div>
-                        <div className={styles.statChip}><strong>{data.breakdown.not_started}</strong><span>Not started</span></div>
-                      </div>
-                    )}
-                    <h2 className={styles.panelTitle}>Progress by zone</h2>
-                    <table className={styles.dataTable}>
-                      <thead><tr><th>Zone</th><th>Progress</th></tr></thead>
-                      <tbody>
-                        {data?.zones.length
-                          ? data.zones.map((z) => <tr key={z.name}><th>{z.name}</th><td>{z.progress.toFixed(1)}%</td></tr>)
-                          : <tr><td colSpan={2}>No zones in this project yet.</td></tr>}
-                      </tbody>
-                    </table>
-                  </section>
-                )}
 
                 {tab === "photos" && (
                   <section className={styles.tabPanel}>
