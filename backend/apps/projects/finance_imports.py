@@ -354,6 +354,32 @@ def _locate_extract_header(ws):
 _EXTRACT_NUMBER_LABEL = "رقم المستخلص"
 _PLACEHOLDER_VALUES = {"-", "—", ""}
 
+# The sheet ends with its own totals row ("الاجمالي"), which already adds up
+# every item row above it. Summing the column blind therefore counted each
+# extract TWICE — every invoice, and the project's invoiced total, came out at
+# exactly 2x (confirmed on the client's own workbook: the totals row reads
+# 772,765,610.74 where the naive sum read 1,545,531,221.48, 2026-09-07).
+# Spelling varies across trackers (hamza and alef-maqsura both appear), so
+# match a normalised form rather than one literal.
+_TOTAL_ROW_LABELS = {"الاجمالي", "الإجمالي", "الاجمالى", "الإجمالى", "اجمالي", "إجمالي"}
+
+
+# Only the row-title columns are checked for it. The word also appears as a
+# label deep inside the data columns (col 69 on the client's own sheet), and
+# matching there stopped the scan 20 rows early on a row that is not a total.
+_TOTAL_LABEL_MAX_COL = 3
+
+
+def _is_total_row(row) -> bool:
+    """True when a data row is the sheet's own totals line. Matched on the
+    WHOLE cell, never a substring — the value sub-header one row above is
+    "اجمالي الأعمال", which contains the same word — and only in the leading
+    label columns."""
+    for cell in row[:_TOTAL_LABEL_MAX_COL]:
+        if isinstance(cell, str) and cell.strip() in _TOTAL_ROW_LABELS:
+            return True
+    return False
+
 
 def parse_invoice_extracts(upload):
     """Return ([{name, date, value}], skipped) — one dict per submitted extract
@@ -389,8 +415,18 @@ def parse_invoice_extracts(upload):
                 continue
 
             sums = defaultdict(float)
+            totals = {}   # value_col -> the sheet's own stated total, when it has one
             numbers = {}  # value_col -> first real "رقم المستخلص" text seen
             for row in ws.iter_rows(min_row=sub_row + 1, values_only=True):
+                if _is_total_row(row):
+                    # Take the sheet's own figure and stop: it's authoritative,
+                    # and adding it to the running sum would double every
+                    # extract (see _TOTAL_ROW_LABELS).
+                    for idx, _, _ in periods:
+                        v = row[idx] if idx < len(row) else None
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            totals[idx] = float(v)
+                    break
                 for idx, number_col, _ in periods:
                     if idx < len(row):
                         v = row[idx]
@@ -409,7 +445,10 @@ def parse_invoice_extracts(upload):
             # nonsense: a "delta" between two unrelated points in time. Sort by
             # the parsed date first — column position only breaks ties (kept
             # stable) when two extracts share one date.
-            dated = [(idx, numbers.get(idx, label), _parse_extract_date(label), sums.get(idx, 0.0))
+            # The sheet's own total wins where it has one; the item rows are
+            # only added up for a tracker that carries no totals line.
+            dated = [(idx, numbers.get(idx, label), _parse_extract_date(label),
+                      totals.get(idx, sums.get(idx, 0.0)))
                     for idx, _, label in periods]
             dated.sort(key=lambda t: (t[2] is None, t[2] or datetime.date.max, t[0]))
 

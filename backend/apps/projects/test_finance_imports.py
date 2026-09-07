@@ -106,3 +106,53 @@ class ImportProgressCurveTests(TestCase):
         import_progress_curve(self.project, _workbook())
         self.assertEqual(import_progress_curve(self.project, _workbook(title="cashflow")), 0)
         self.assertEqual(ProgressCurvePoint.objects.filter(project=self.project).count(), 3)
+
+
+class InvoiceTotalsRowTests(SimpleTestCase):
+    """An extracts tracker ends with its own "الاجمالي" line, which already
+    adds up every item row above it. Summing the column blind counted each
+    extract twice — every invoice, and the project's invoiced total, came out
+    at exactly 2x (client's own workbook, 2026-09-07)."""
+
+    HEADER = [None, None, "حتى 10 يناير - 2023", None, "حتى 01 مارس - 2023", None]
+    SUB = [None, None, "رقم المستخلص", "اجمالي الأعمال", "رقم المستخلص", "اجمالي الأعمال"]
+
+    def _sheet(self, body):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(self.HEADER)
+        ws.append(self.SUB)
+        for row in body:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_the_sheets_own_total_is_used_not_the_sum_of_both(self):
+        from .finance_imports import parse_invoice_extracts
+
+        rows, _ = parse_invoice_extracts(self._sheet([
+            ["Zone", "Item A", "م-1", 40.0, "م-2", 100.0],
+            ["Zone", "Item B", None, 60.0, None, 150.0],
+            [None, "الاجمالي", None, 100.0, None, 250.0],
+        ]))
+        # 100 then 250 cumulative -> 100 and 150, NOT 200 and 500.
+        self.assertEqual([r["value"] for r in rows], [100.0, 150.0])
+
+    def test_a_tracker_with_no_total_row_still_sums_its_items(self):
+        from .finance_imports import parse_invoice_extracts
+
+        rows, _ = parse_invoice_extracts(self._sheet([
+            ["Zone", "Item A", "م-1", 40.0, "م-2", 100.0],
+            ["Zone", "Item B", None, 60.0, None, 150.0],
+        ]))
+        self.assertEqual([r["value"] for r in rows], [100.0, 150.0])
+
+    def test_the_word_in_a_data_column_is_not_a_total_row(self):
+        """It appears as a column label deep in the real sheet (col 69);
+        matching there stopped the scan 20 rows early."""
+        from .finance_imports import _is_total_row
+
+        self.assertTrue(_is_total_row([None, "الاجمالي", None, 1.0]))
+        self.assertFalse(_is_total_row(["Zone", "Item A", None, 1.0] + [None] * 60 + ["اجمالي"]))
