@@ -126,6 +126,35 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     }
   }
 
+  /** Delete the import currently chosen in the picker (blank = the latest).
+   *
+   * Re-importing keeps every previous batch on purpose, so an upload that was
+   * simply the wrong file otherwise stays stacked under the project's totals
+   * with no way back (client ask, 2026-09-07). Its scopes and activities go
+   * with it server-side. */
+  async function handleDeleteImport() {
+    const chosen = scheduleImports?.find((si) => (importId ? si.id === importId : si.is_current));
+    if (!chosen) return;
+    const ok = window.confirm(
+      `Delete the schedule import dated ${chosen.date}?
+
+`
+      + `Its ${chosen.activity_count} activities and their scopes will be removed. `
+      + `This can't be undone.`);
+    if (!ok) return;
+    setActionError(null);
+    setImportMsg(null);
+    try {
+      await api.del(`/projects/${projectId}/schedule-imports/${chosen.id}/`);
+      setImportMsg(`Deleted the import dated ${chosen.date}.`);
+      setImportId("");   // whatever remains is latest now
+      reload();
+      reloadImports();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : "Couldn't delete that import.");
+    }
+  }
+
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
   const roots = childrenOf.get(null) ?? [];
 
@@ -297,6 +326,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
                 </option>
               ))}
             </select>
+          )}
+          {canManage && scheduleImports && scheduleImports.length > 0 && (
+            <Button size="sm" variant="secondary" onClick={handleDeleteImport}
+              title="Delete the schedule import shown in the picker, and everything it brought in">
+              Delete import
+            </Button>
           )}
           {/* Reading the tree isn't a managing action, so these stay available to everyone. */}
           <Button size="sm" variant="secondary" disabled={visibleRoots.length === 0}

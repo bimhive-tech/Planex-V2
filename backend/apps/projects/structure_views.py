@@ -455,6 +455,50 @@ class ScheduleImportListView(APIView):
         return Response(data)
 
 
+class ScheduleImportDetailView(APIView):
+    """Delete one retained schedule-import batch.
+
+    Re-importing deliberately keeps every previous batch (see ScheduleImport's
+    docstring), which is right for history but leaves no way back from an
+    upload that was simply the wrong file — its scopes and activities stay
+    stacked under the project's totals forever. This is that way back.
+
+    The batch's own ProjectScope/Activity rows go with it (both FKs cascade).
+    Two pieces of derived state don't, and are fixed up here."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, project_id, import_id):
+        project = _project(request, project_id)
+        _require(request, Permission.MANAGE_PROJECTS.value)
+        try:
+            batch = project.schedule_imports.get(pk=import_id)
+        except (ScheduleImport.DoesNotExist, ValueError):
+            raise NotFound("Schedule import not found.")
+
+        batch_date = batch.date
+        batch.delete()   # cascades to this batch's scopes + activities
+
+        # 1. The project's headline figures are whatever the LAST import
+        #    stated (see p6_schedule_import). Deleting that import must not
+        #    leave its numbers behind quoting a schedule that's gone.
+        latest = latest_schedule_import(project)
+        if latest is None:
+            project.imported_progress_percent = None
+            project.imported_planned_progress_percent = None
+            project.save(update_fields=[
+                "imported_progress_percent", "imported_planned_progress_percent", "updated_at"])
+
+        # 2. Snapshots carry no FK to the import that wrote them, so one can
+        #    only be attributed by its date. Drop it when no import is left on
+        #    that date — otherwise a surviving batch still owns it and it
+        #    stays, rather than this guessing and deleting real history.
+        if not project.schedule_imports.filter(date=batch_date).exists():
+            project.snapshots.filter(date=batch_date).delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class ScheduleImportFileView(APIView):
     """Stream one retained import's own workbook — same private, tenant-scoped
     pattern as ProjectImageFileView (apps/projects/image_views.py)."""

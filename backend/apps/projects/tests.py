@@ -741,6 +741,80 @@ class ScheduleImportApiTests(TestCase):
         self.assertEqual(historical["activity_count"], 1)
         self.assertNotEqual(historical["scopes"][0]["id"], current["scopes"][0]["id"])
 
+    def test_deleting_an_import_removes_only_its_own_rows(self):
+        """Re-importing keeps every batch (ScheduleImport's docstring), so a
+        wrong file stays stacked under the project's totals until it can be
+        deleted — the whole point of this endpoint (client ask 2026-09-07)."""
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-02-15"})
+        rows = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()
+        older = next(r["id"] for r in rows if not r["is_current"])
+        from .models import ProjectScope
+
+        before = ProjectScope.objects.filter(project=self.project).count()
+
+        resp = self.client.delete(f"/api/projects/{self.project.id}/schedule-imports/{older}/")
+        self.assertEqual(resp.status_code, 204, resp.content)
+
+        left = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()
+        self.assertEqual([r["date"] for r in left], ["2026-02-15"])
+        self.assertTrue(left[0]["is_current"])
+        # The surviving batch keeps its own scopes; only the deleted one's went.
+        self.assertLess(ProjectScope.objects.filter(project=self.project).count(), before)
+        self.assertTrue(ProjectScope.objects.filter(project=self.project).exists())
+        # Its snapshot went with it — nothing else was imported on that date.
+        self.assertFalse(self.project.snapshots.filter(date="2026-01-15").exists())
+        self.assertTrue(self.project.snapshots.filter(date="2026-02-15").exists())
+
+    def test_deleting_the_last_import_clears_the_projects_stated_figures(self):
+        """Those come from whichever import stated them, so they must not
+        outlive the schedule they describe."""
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        only = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()[0]["id"]
+
+        self.assertEqual(
+            self.client.delete(f"/api/projects/{self.project.id}/schedule-imports/{only}/").status_code, 204)
+        from .models import Activity
+
+        self.project.refresh_from_db()
+        self.assertIsNone(self.project.imported_progress_percent)
+        self.assertIsNone(self.project.imported_planned_progress_percent)
+        self.assertFalse(Activity.objects.filter(project=self.project).exists())
+
+    def test_deleting_an_import_requires_manage_projects(self):
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        target = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()[0]["id"]
+
+        view_role = Role.objects.create(
+            company=self.company, name="Viewer2", permissions=[Permission.VIEW_PROJECTS.value])
+        viewer = User.objects.create_user(email="v2@acme.com", password=STRONG_PW, company=self.company)
+        Membership.objects.create(company=self.company, user=viewer, role=view_role, is_active=True)
+        self.login("v2@acme.com")
+        resp = self.client.delete(f"/api/projects/{self.project.id}/schedule-imports/{target}/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_another_companys_import_is_not_reachable(self):
+        self.login("fa@acme.com")
+        self.client.post(f"/api/projects/{self.project.id}/import/",
+                         {"file": self._workbook(), "date": "2026-01-15"})
+        target = self.client.get(f"/api/projects/{self.project.id}/schedule-imports/").json()[0]["id"]
+
+        other = Company.objects.create(name="Other Co")
+        role = Role.objects.create(company=other, name="A", permissions=[Permission.MANAGE_PROJECTS.value])
+        User.objects.create_user(email="o@other.com", password=STRONG_PW, company=other)
+        Membership.objects.create(company=other, user=User.objects.get(email="o@other.com"),
+                                  role=role, is_active=True)
+        self.login("o@other.com")
+        resp = self.client.delete(f"/api/projects/{self.project.id}/schedule-imports/{target}/")
+        self.assertIn(resp.status_code, (403, 404))
+
     def test_import_requires_manage_projects(self):
         view_role = Role.objects.create(
             company=self.company, name="Viewer", permissions=[Permission.VIEW_PROJECTS.value])
