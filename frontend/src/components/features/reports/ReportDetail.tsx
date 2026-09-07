@@ -24,7 +24,6 @@ import type { ReportData, ReportLayoutOverride, ReportRow, ReportStatus, ReportT
 import { ReportAssets } from "./ReportAssets";
 import { ReportLayoutEditor } from "./ReportLayoutEditor";
 import { ProgressImagePicker } from "./ProgressImagePicker";
-import { ProjectReportAssets } from "@/components/features/projects/ProjectReportAssets";
 import { ScopeTree } from "./ScopeTree";
 import styles from "./reports.module.css";
 
@@ -42,7 +41,6 @@ const STATUS_TONE: Record<ReportStatus, "neutral" | "info" | "success"> = {
 const TABS = [
   { key: "setup", label: "Setup" },
   { key: "scope", label: "Scope" },
-  { key: "cover", label: "Cover" },
   { key: "info", label: "Project Info" },
   { key: "progress", label: "Progress Report" },
   { key: "photos", label: "Progress Images" },
@@ -55,7 +53,7 @@ const TABS = [
 // element (edited in place on the Customize tab), not a report-metadata
 // field with its own tab.
 const TAB_ANCHOR: Record<string, string> = {
-  setup: "tab_cover", scope: "tab_cover", cover: "tab_cover",
+  setup: "tab_cover", scope: "tab_cover",
   info: "tab_info",
   progress: "tab_progress", photos: "tab_photos", attachments: "tab_attachments",
 };
@@ -303,18 +301,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />
                     </div>
-                    {/* Project logos — shown on every report's cover for this project.
-                        (Cover image and photos have their own sub-tabs.) */}
-                    {form.project && (
-                      <ProjectReportAssets
-                        projectId={form.project}
-                        canManage={canManage}
-                        onChanged={bump}
-                        types={["logo_left", "logo_right", "logo"]}
-                        title="Logos"
-                        subtitle="Left and right header logos, plus any number of additional partner logos, shown on every report for this project."
-                      />
-                    )}
                   </section>
                 )}
 
@@ -333,9 +319,6 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                   </section>
                 )}
 
-                {tab === "cover" && (
-                  <ReportAssets reportId={reportId} canManage={canManage} only="cover" onChanged={bump} />
-                )}
 
                 {tab === "info" && (
                   <section className={styles.tabPanel}>

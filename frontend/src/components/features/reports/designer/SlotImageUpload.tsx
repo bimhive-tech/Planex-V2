@@ -54,7 +54,7 @@ export function SlotImageUpload({ source, slot, reportId, projectId, onUploaded 
   // Fetched here rather than read off liveData.logos: that copy is trimmed to
   // caption+url (see views.py's `light`), and replacing an image needs the id
   // of the one it replaces.
-  const { data, reload } = useFetch(async () => {
+  const { data, loading, error: loadError, reload } = useFetch(async () => {
     if (!owner) return [];
     if (isProject) {
       const all = await api.get<ProjectImage[] | Paginated<ProjectImage>>(`/projects/${owner}/images/`);
@@ -67,9 +67,32 @@ export function SlotImageUpload({ source, slot, reportId, projectId, onUploaded 
   }, [owner, isProject, target.type]);
 
   const rows = data ?? [];
+  // Until the slot's current image is known, replacing can't delete what it
+  // replaces — and the renderer takes the FIRST match, so an upload racing
+  // this fetch would silently leave the old image winning. Everything below
+  // waits it out rather than reporting an empty slot that isn't empty.
+  const pending = loading || busy;
   // "extra" addresses one of many by index; the rest are single slots, and the
   // renderer takes the first match for those.
   const current = source === "extra" ? rows[slot] : rows[0];
+
+  async function handleRemove() {
+    if (!owner || !current) return;
+    if (!window.confirm("Remove this image? This can't be undone.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(isProject
+        ? `/projects/${owner}/images/${current.id}/`
+        : `/reports/${owner}/images/${current.id}/`);
+      reload();
+      onUploaded?.();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't remove the image.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleUpload(file: File) {
     if (!owner) return;
@@ -78,15 +101,16 @@ export function SlotImageUpload({ source, slot, reportId, projectId, onUploaded 
     try {
       // Upload BEFORE removing what it replaces: a failed upload then leaves
       // the existing image untouched rather than destroying it.
+      // Both go through an images-file route handler rather than the /api
+      // rewrite proxy, which can drop a multipart body mid-stream — Django
+      // still stores the image but the client sees a broken response and
+      // reports a failure that didn't happen (seen live, 2026-09-07).
       if (isProject) {
-        const form = new FormData();
-        form.append("image", file);
-        form.append("image_type", target.type);
-        form.append("caption", current?.caption ?? "");
-        await api.uploadApi<ProjectImage>(`/projects/${owner}/images/`, form);
+        await api.upload<ProjectImage>(
+          `/projects/${owner}/images-file`, file, "image",
+          { image_type: target.type, caption: current?.caption ?? "" },
+        );
       } else {
-        // Routed via the images-file route handler, not the /api proxy, which
-        // can drop a multipart body mid-stream on a dev Fast Refresh.
         await api.upload<ReportImage>(`/reports/${owner}/images-file`, file, "image", { kind: "cover" });
       }
       // Nothing enforces one image per slot in the DB, and the renderer takes
@@ -120,10 +144,12 @@ export function SlotImageUpload({ source, slot, reportId, projectId, onUploaded 
   return (
     <div className={styles.uploadBlock}>
       {current ? (
+        // Kept on screen through a refetch rather than flipping to "Loading…"
+        // — the buttons are disabled meanwhile, so it can't be acted on stale.
         // eslint-disable-next-line @next/next/no-img-element -- authed streaming URL, not an optimizable public asset
         <img className={styles.uploadPreview} src={current.url} alt="" />
       ) : (
-        <p className={styles.panelHint}>Nothing in this slot yet.</p>
+        <p className={styles.panelHint}>{loading ? "Loading…" : "Nothing in this slot yet."}</p>
       )}
       <input
         ref={fileInputRef}
@@ -136,17 +162,27 @@ export function SlotImageUpload({ source, slot, reportId, projectId, onUploaded 
           e.target.value = ""; // same file re-selectable next time
         }}
       />
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        disabled={busy}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        {busy ? "Uploading…" : current ? "Replace image" : "Upload image"}
-      </Button>
-      <p className={styles.panelHint}>{target.note}</p>
-      {error && <p className="formError">{error}</p>}
+      <div className={styles.slotActions}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={pending}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {busy ? "Uploading…" : current ? "Replace image" : "Upload image"}
+        </Button>
+        {current && (
+          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={handleRemove}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <p className={styles.panelHint}>
+        {target.note}
+        {source === "cover" && " Removing it falls back to the project's own cover image, if it has one."}
+      </p>
+      {(error || loadError) && <p className="formError">{error ?? "Couldn't load this slot."}</p>}
     </div>
   );
 }
