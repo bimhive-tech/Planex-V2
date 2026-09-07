@@ -7,7 +7,7 @@ import datetime
 import io
 
 import openpyxl
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from apps.accounts.models import Company
 
@@ -474,3 +474,49 @@ class ScheduleCompletePlannedTests(TestCase):
         project = self._import(rows)
         self.assertIsNone(Activity.objects.get(project=project, code="A-1").schedule_percent)
         self.assertEqual(scope_planned_map(project), {})
+
+
+class PlanexCodeLegendTests(SimpleTestCase):
+    """A Planex Code's meaning comes from WHICH legend slot a segment sits in,
+    not from how many of its siblings happen to be filled.
+
+    Cairo Airport is coded purely by discipline — every area/phase/zone slot
+    is "0" — so collapsing the zeros promoted "Civil" (a discipline, slot 10)
+    to the first surviving position and the tree typed it as a stage, with
+    levels and disciplines landing in the zone and area slots under it
+    (reported 2026-09-07).
+    """
+
+    LEGEND = ["PN", "CON", "AR", "SUB AR", "PH", "Z", "P", "U", "LEV", "DEC", "SUB DEC", "NU"]
+
+    def test_a_discipline_coded_row_makes_no_stage_or_zone(self):
+        from .p6_id_schedule_import import slot_path
+
+        path = slot_path("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", self.LEGEND)
+        self.assertEqual(path, [("Civil", "phase"), ("Pre Demolitioning", "phase")])
+        self.assertNotIn("stage", [t for _, t in path])
+        self.assertNotIn("zone", [t for _, t in path])
+
+    def test_each_segment_takes_its_own_slots_meaning(self):
+        from .p6_id_schedule_import import slot_path
+
+        self.assertEqual(
+            slot_path("XX-CON-Area 1-0-PH2-Z(C)-0-Unit 4-0-MEP-0-7", self.LEGEND),
+            [("Area 1", "area"), ("PH2", "stage"), ("Z(C)", "zone"),
+             ("Unit 4", "area"), ("MEP", "phase")],
+        )
+
+    def test_a_code_that_does_not_fill_the_legend_is_left_alone(self):
+        """Mansoura carries 10 segments against the same 12-slot legend, so
+        which two are missing is unknowable — it keeps the positional
+        reading rather than being silently misaligned by two places."""
+        from .p6_id_schedule_import import segment_path, slot_path
+
+        code = "MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Internal Finishes-1"
+        self.assertEqual(slot_path(code, self.LEGEND), [])
+        self.assertEqual(segment_path(code), ["PH1", "Z(A)", "Building 6", "Internal Finishes"])
+
+    def test_no_legend_means_no_change(self):
+        from .p6_id_schedule_import import slot_path
+
+        self.assertEqual(slot_path("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", []), [])

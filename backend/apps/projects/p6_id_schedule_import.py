@@ -57,6 +57,58 @@ _MATCH_RATIO = 0.6  # majority, not unanimous — a few malformed/legacy rows sh
 _MIN_SEGMENTS = 3  # project code + at least one real level + differentiator
 
 
+# What each legend slot means for the scope tree. The legend ("Planex Code"
+# sheet) names 12 slots but ProjectScope has four levels, so several slots
+# share one: a part/unit is a subdivision of an area, and a level/discipline
+# names the work package itself. PN/CON/NU are the project code, the
+# "construction" tag and the activity number — never scope levels.
+_SLOT_SCOPE_TYPE = {
+    "ph": "stage",
+    "z": "zone",
+    "ar": "area", "sub ar": "area", "sar": "area", "p": "area", "u": "area",
+    "lev": "phase", "dec": "phase", "sub dec": "phase", "sdec": "phase",
+}
+
+
+def legend_slots(wb) -> list:
+    """The ordered slot codes a workbook's own "Planex Code" sheet declares —
+    ["PN", "CON", "AR", "SUB AR", "PH", "Z", "P", "U", "LEV", "DEC",
+    "SUB DEC", "NU"] — or [] when the sheet is missing or unreadable.
+
+    The legend is what gives a segment its meaning: "Civil" is a discipline
+    because it sits in the DEC slot, not because of how many siblings on its
+    row happen to be filled in."""
+    for name in wb.sheetnames:
+        if name.strip().lower() != "planex code":
+            continue
+        for row in wb[name].iter_rows(values_only=True):
+            if row and isinstance(row[0], str) and row[0].strip().lower() == "code":
+                return [str(c).strip() for c in row[1:] if c is not None and str(c).strip()]
+    return []
+
+
+def slot_path(code: str, slots: list) -> list:
+    """[(name, scope_type)] for the used, structural slots of one code — or []
+    when `code` doesn't fill the legend exactly.
+
+    Only applied to a file that fills every slot it declares (Cairo Airport
+    does: 12 segments for 12 slots). Mansoura's codes carry 10 segments
+    against the same 12-slot legend, so which two are missing is unknowable
+    and it keeps the positional reading below (2026-09-07)."""
+    if not slots or not isinstance(code, str):
+        return []
+    parts = [p.strip() for p in code.strip().split("-")]
+    if len(parts) != len(slots):
+        return []
+    out = []
+    for value, slot in zip(parts, slots):
+        stype = _SLOT_SCOPE_TYPE.get(slot.strip().lower())
+        if not stype or not value or value == "0" or value.lower() in _PLACEHOLDER_WORDS:
+            continue
+        out.append((value, stype))
+    return out
+
+
 def segment_path(code: str) -> list:
     """The real (non-placeholder) middle segments of one Planex Code, in
     order — dropping the leading project code and trailing differentiator.
@@ -108,9 +160,12 @@ def _looks_like_planex_code(rows, code_col) -> bool:
     return seen > 0 and hits / seen >= _MATCH_RATIO
 
 
-def _new_group(name: str) -> dict:
+def _new_group(name: str, stype: str | None = None) -> dict:
+    # `stype` is set only when the file's own legend says what this segment is
+    # (see slot_path); otherwise it stays None and the tree falls back to
+    # typing by depth (p6_schedule_import's _BY_DEPTH).
     return {"name": name[:180] or "Uncategorized", "label": None, "children": [], "activities": [],
-            "start": None, "finish": None, "pct": None, "schedule_pct": None}
+            "start": None, "finish": None, "pct": None, "schedule_pct": None, "stype": stype}
 
 
 def _label_ancestors(by_path, path, heading_stack):
@@ -239,6 +294,11 @@ def parse_id_schedule_sheets(wb):
         if not _looks_like_planex_code(data_rows, code_c):
             continue
 
+        # The workbook's own "Planex Code" legend, if it has one — what makes
+        # a segment's meaning positional-by-slot rather than by how many of
+        # its siblings happen to be filled in.
+        legend = legend_slots(wb)
+
         start_c, finish_c = cols["start"], cols["finish"]
         pct_c = cols.get("activity % complete")
         dur_c = cols.get("original duration")
@@ -265,18 +325,19 @@ def parse_id_schedule_sheets(wb):
         by_path: dict[tuple, dict] = {}
         roots: list[dict] = []
 
-        def node_for(path: tuple) -> dict:
+        def node_for(path: tuple, stypes: tuple = ()) -> dict:
             """Get-or-create the group node at `path`, creating any missing
             ancestors along the way so an out-of-order file still nests
-            correctly."""
+            correctly. `stypes` pairs with `path` when the legend named each
+            segment's level."""
             if path in by_path:
                 return by_path[path]
             parent_children = roots
             built = ()
-            for seg in path:
+            for i, seg in enumerate(path):
                 built = built + (seg,)
                 if built not in by_path:
-                    by_path[built] = _new_group(seg)
+                    by_path[built] = _new_group(seg, stypes[i] if i < len(stypes) else None)
                     parent_children.append(by_path[built])
                 parent_children = by_path[built]["children"]
             return by_path[path]
@@ -325,7 +386,15 @@ def parse_id_schedule_sheets(wb):
                 })
                 continue
 
-            path = tuple(segment_path(raw_code))
+            # The legend's own reading when the file fills every slot it
+            # declares; the positional fallback otherwise (see slot_path).
+            slotted = slot_path(raw_code, legend)
+            if slotted:
+                path = tuple(name for name, _ in slotted)
+                stypes = tuple(st for _, st in slotted)
+            else:
+                path = tuple(segment_path(raw_code))
+                stypes = ()
             if not path:
                 continue
             matched_any = True
@@ -342,7 +411,7 @@ def parse_id_schedule_sheets(wb):
                 "schedule_pct": _to_pct_optional(row[sched_pct_c]) if sched_pct_c is not None
                                 and sched_pct_c < len(row) else None,
             }
-            node_for(path)["activities"].append(task)
+            node_for(path, stypes)["activities"].append(task)
             _label_ancestors(by_path, path, heading_stack)
 
         if not matched_any:

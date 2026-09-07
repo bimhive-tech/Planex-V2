@@ -400,6 +400,13 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         # it sits at, and the grid looks for activities under a Phase.
         if node["activities"]:
             return Scope.ScopeType.PHASE
+        # What the file's own Planex Code legend says this segment is, when it
+        # says anything (see p6_id_schedule_import.slot_path). Depth is only a
+        # guess: on a schedule coded by discipline rather than by zone it
+        # promoted "Civil" to a stage and "Steel Work" to a zone purely
+        # because they were the first surviving segments (2026-09-07).
+        if node.get("stype"):
+            return node["stype"]
         return _BY_DEPTH.get(depth, Scope.ScopeType.AREA)
 
     def walk(node, parent, depth, grid):
