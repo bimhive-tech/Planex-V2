@@ -337,8 +337,22 @@ def _zone_area_label(zone_name: str, area_name: str) -> str:
     return f"{zone_token} - {area_name}"
 
 
+def _text(scope) -> str:
+    """What the reader sees for a scope: the file's own full wording where the
+    import recovered one, else the name the schedule uses.
+
+    A Planex-coded file names its levels with the team's own shorthand — "P1",
+    "L.2", "Porcelain & Granite" — which only the people who write those codes
+    can read, and the report goes to the client. The import pairs each code
+    with the WBS heading that names it (p6_id_schedule_import._headings_by_slot)
+    and stores it as `label`; this is where that reaches the page (2026-09-08).
+    Left as the name wherever no heading was recovered."""
+    return (getattr(scope, "label", "") or "").strip() or scope.name
+
+
 def _disambiguated_names(scopes):
-    """`scopes`: an iterable of (id, name, parent_id). Returns {str(id): name} —
+    """`scopes`: an iterable of (id, display text, parent_id). Returns
+    {str(id): text} —
     a name shared by more than one scope in the set (a P6 import can genuinely
     have several zones all called "Z(A)" under different stages/buildings —
     see this function's callers) gets prefixed with its own parent's name
@@ -349,8 +363,11 @@ def _disambiguated_names(scopes):
     scopes = list(scopes)
     counts = Counter(name for _, name, _ in scopes)
     parent_ids = {pid for _, _, pid in scopes if pid}
+    # The parent prefix is display text too — "Level 2 - …", not "L.2 - …".
     parent_names = (
-        dict(ProjectScope.objects.filter(id__in=parent_ids).values_list("id", "name"))
+        {pid: (label or "").strip() or name
+         for pid, name, label in ProjectScope.objects.filter(id__in=parent_ids)
+         .values_list("id", "name", "label")}
         if parent_ids else {}
     )
     result = {}
@@ -376,10 +393,11 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
         ProjectScope.objects.filter(
             project=project, scope_type=_scope_roles(project, schedule_import)["zone"],
             schedule_import=schedule_import
-        ).order_by("sort_order", "name").values_list("id", "name", "parent_id")
+        ).order_by("sort_order", "name").values_list("id", "name", "parent_id", "label")
     )
-    order = {str(z): i for i, (z, _, _) in enumerate(zones)}
-    zone_name = _disambiguated_names(zones)
+    order = {str(z): i for i, (z, _, _, _) in enumerate(zones)}
+    zone_name = _disambiguated_names(
+        (zid, (label or "").strip() or name, pid) for zid, name, pid, label in zones)
 
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     sw, spw = {}, {}
@@ -485,14 +503,16 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     )
     # See _disambiguated_names's docstring — the same "Z(A)" repeated under
     # different stages/buildings gets a disambiguating parent prefix here too.
-    zone_display_name = _disambiguated_names((z.id, z.name, z.parent_id) for z in zones)
+    zone_display_name = _disambiguated_names((z.id, _text(z), z.parent_id) for z in zones)
     # The zone's own parent (its stage), kept separately as well as folded into
     # the display name: the reference Progress Sheet puts the stage in its own
     # "Unit" column beside the zone, rather than prefixing it (2026-09-02).
-    stage_names = dict(
-        ProjectScope.objects.filter(id__in={z.parent_id for z in zones if z.parent_id})
-        .values_list("id", "name")
-    )
+    stage_names = {
+        pid: (label or "").strip() or name
+        for pid, name, label in ProjectScope.objects
+        .filter(id__in={z.parent_id for z in zones if z.parent_id})
+        .values_list("id", "name", "label")
+    }
 
     rows = []
     for zone in zones:
@@ -506,14 +526,14 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
                 continue
             child = scopes[cid]
             sub_rows.append({
-                "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
+                "name": _text(child), "actual": pct(cid), "previous": prev_scopes.get(cid),
                 "planned": _scope_planned_progress(child, project, as_of, planned_map),
             })
         rows.append({
             "id": zid, "name": zone_display_name[zid], "actual": pct(zid), "previous": prev_scopes.get(zid),
             "planned": _scope_planned_progress(zone, project, as_of, planned_map),
             "stage": stage_names.get(zone.parent_id) or "",
-            "zone": zone.name,
+            "zone": _text(zone),
             "children": sub_rows,
         })
     return rows
@@ -605,7 +625,7 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
                 continue
             child = scopes[cid]
             kids.append({
-                "name": child.name, "actual": pct(cid), "previous": prev_scopes.get(cid),
+                "name": _text(child), "actual": pct(cid), "previous": prev_scopes.get(cid),
                 "planned": _scope_planned_progress(child, project, as_of, planned_map),
             })
         # A stage's direct children are ZONES, but the reference dashboard's
@@ -622,8 +642,8 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
                 areas.append({
                     # Labelled with its zone, not just its own name — see
                     # _zone_area_label; "Building 6" alone names two bars.
-                    "name": _zone_area_label(scopes[zid].name, child.name),
-                    "area_name": child.name, "zone_name": scopes[zid].name,
+                    "name": _zone_area_label(_text(scopes[zid]), _text(child)),
+                    "area_name": _text(child), "zone_name": _text(scopes[zid]),
                     "actual": pct(aid_), "previous": prev_scopes.get(aid_),
                     "planned": _scope_planned_progress(child, project, as_of, planned_map),
                 })
@@ -632,7 +652,7 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         actual = pct(sid)
         budgeted, earned = cost(sid)
         rows.append({
-            "id": sid, "name": stage.name, "actual": actual, "previous": prev_scopes.get(sid),
+            "id": sid, "name": _text(stage), "actual": actual, "previous": prev_scopes.get(sid),
             "planned": planned, "children": kids, "areas": areas,
             "budgeted_cost": budgeted, "earned_value_cost": earned,
             "duration": _zone_duration(stage, project, as_of, planned_pct=planned, actual_pct=actual),
@@ -842,10 +862,10 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     # so a table keyed on the bare name shows the same label twice on one page
     # with different numbers, reading as contradictory data (2026-08-30). Same
     # disambiguation `_hierarchy_rows` already applies to its zones.
-    unit_display = _disambiguated_names((u.id, u.name, u.parent_id) for u in units.values())
+    unit_display = _disambiguated_names((u.id, _text(u), u.parent_id) for u in units.values())
     rows = []
     for uid, by_phase in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
-        row = {"name": unit_display.get(uid, units[uid].name), "values": []}
+        row = {"name": unit_display.get(uid, _text(units[uid])), "values": []}
         for key in columns:
             w = by_phase.get(key, 0.0)
             row["values"].append(round(unit_pw[uid][key] / w, 1) if w else None)
@@ -918,7 +938,7 @@ def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
         if not (scope.planned_start and scope.planned_finish and scope.planned_finish > scope.planned_start):
             return None
         return {
-            "name": scope.name, "level": level, "start": scope.planned_start,
+            "name": _text(scope), "level": level, "start": scope.planned_start,
             "finish": scope.planned_finish, "revised_finish": scope.revised_finish,
             "progress": round(pweight[sid] / weight[sid], 1),
         }
@@ -1092,7 +1112,7 @@ def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
 
         rows = [rows_by_index[i] for i in order]
         if columns and rows:
-            grids.append({"zone_name": zone.name, "columns": columns, "rows": rows})
+            grids.append({"zone_name": _text(zone), "columns": columns, "rows": rows})
     return grids
 
 

@@ -188,6 +188,61 @@ def _new_group(name: str, stype: str | None = None) -> dict:
             "start": None, "finish": None, "pct": None, "schedule_pct": None, "stype": stype}
 
 
+def _headings_by_slot(observed) -> dict:
+    """`{(scope_type, name): heading text}` — which WBS heading names each
+    coded value, for a legend-read file.
+
+    A file's headings and its Planex Code describe the same tree in different
+    orders: Cairo Airport nests headings sub-discipline > level > part while
+    its legend declares part, level, discipline, sub-discipline. Pairing them
+    by position labelled the "P1" part "Civil Works", and pairing them by
+    indentation depth fails too — that file puts parts and work packages at
+    the same depth in different branches.
+
+    What a heading names is what it ADDS: the slot that varies under its
+    parent heading and is fixed under it. Under "Steel Works" the level still
+    varies; under "Steel Works > Level 2" it is fixed at L.2, so that heading
+    names L.2. Only accepted when exactly one slot settles, which is what
+    keeps a heading with no code counterpart of its own ("Split high wall
+    unit", where both part and level happen to be fixed) from claiming one.
+
+    `observed` is {heading path (tuple of texts): {scope_type: {values}}}.
+    """
+    from collections import Counter
+
+    def settled(path):
+        per = observed.get(path) or {}
+        return {st: next(iter(v)) for st, v in per.items() if len(v) == 1}
+
+    claims = {}
+    for path in observed:
+        if not path:
+            continue
+        fixed, parent_fixed = settled(path), settled(path[:-1])
+        added = [st for st in fixed if st not in parent_fixed]
+        if len(added) != 1:
+            continue
+        claims.setdefault((added[0], fixed[added[0]]), Counter())[path[-1]] += 1
+    return {key: names.most_common(1)[0][0] for key, names in claims.items()}
+
+
+def _label_from_headings(by_path, observed) -> None:
+    """Give every legend-read node the WBS heading that names it.
+
+    The codes are the team's own shorthand ("P1", "Porcelain & Granite") and
+    only the people who wrote them can read those; the report goes to the
+    client, so it shows the file's own full wording instead (2026-09-08).
+    Cosmetic like _label_ancestors: sets `label`, never `name`, so nothing
+    here can affect how a re-import matches."""
+    named = _headings_by_slot(observed)
+    for node in by_path.values():
+        if node.get("label"):
+            continue
+        text = named.get((node.get("stype"), node["name"]))
+        if text:
+            node["label"] = text[:180]
+
+
 def _label_ancestors(by_path, path, heading_stack):
     """Best-effort human-readable label for each ancestor node in `path`,
     read from the file's own WBS heading text (e.g. "المرحلة الاولي (75
@@ -376,6 +431,10 @@ def parse_id_schedule_sheets(wb):
         # depth, purely to source human-readable labels (see _label_ancestors)
         # — independent of the code-driven tree being built below it.
         heading_stack: list[tuple[int, str]] = []
+        # {heading path: {scope_type: {values seen under it}}} — what
+        # _label_from_headings reads to work out which heading names which
+        # coded level. Only gathered for legend-read rows.
+        heading_observed: dict[tuple, dict] = {}
         for row in data_rows:
             raw_code = row[code_c] if code_c < len(row) else None
             act_id = row[id_c] if id_c < len(row) else None
@@ -440,8 +499,21 @@ def parse_id_schedule_sheets(wb):
                                 and sched_pct_c < len(row) else None,
             }
             node_for(path, stypes)["activities"].append(task)
-            if not slotted:
+            if slotted:
+                # Keyed by the heading PATH, not by depth: the same depth
+                # holds different kinds of heading in different branches, so
+                # only a heading's own parent says what it adds.
+                path_so_far = ()
+                for _, text in heading_stack:
+                    path_so_far += (text,)
+                    per = heading_observed.setdefault(path_so_far, {})
+                    for value, stype in slotted:
+                        per.setdefault(stype, set()).add(value)
+            else:
                 _label_ancestors(by_path, path, heading_stack)
+
+        if heading_observed:
+            _label_from_headings(by_path, heading_observed)
 
         if not matched_any:
             continue

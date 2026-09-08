@@ -569,22 +569,39 @@ class LegendReadImportTests(TestCase):
 
     def _import(self):
         d = datetime.date
-        # The WBS nests sub-discipline > level > part, the REVERSE of the
-        # order the legend declares those slots in — the real file's shape.
+
+        def head(indent, text):
+            return ["", " " * indent + text, None, None, None, None, None, None, None]
+
+        def act(code, aid, name):
+            return [code, aid, name, 5, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500]
+
+        # The WBS nests discipline > sub-discipline > level > part, the
+        # REVERSE of the order the legend declares those slots in — the real
+        # file's shape.
         rows = [
-            ["", "      Steel Works", None, None, None, None, None, None, None],
-            ["", "        Level 2", None, None, None, None, None, None, None],
-            ["", "          Part 1", None, None, None, None, None, None, None],
-            ["CA-CON-0-0-0-0-P1-0-L.2-Civil-Steel Works-80", "PR1430", "Install columns",
-             10, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500],
-            ["CA-CON-0-0-0-0-P2-0-L.2A-MEP-Electrical Works-358", "PR2000", "Conduits",
-             5, d(2026, 2, 1), d(2026, 2, 5), 1, 500, 500],
-            # No part and no level: work coded by discipline alone.
-            ["CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", "PR4190", "Metal fence",
-             4, d(2026, 1, 2), d(2026, 1, 6), 1, 200, 200],
+            head(2, "Civil Works"),
+            head(4, "Steel Works"),
+            head(6, "Level 2"),
+            head(8, "Part 1"),
+            act("CA-CON-0-0-0-0-P1-0-L.2-Civil-Steel Works-80", "PR1430", "Install columns"),
+            head(8, "Part 2"),
+            act("CA-CON-0-0-0-0-P2-0-L.2-Civil-Steel Works-81", "PR1431", "Install beams"),
+            head(6, "Level 2A"),
+            act("CA-CON-0-0-0-0-0-0-L.2A-Civil-Steel Works-82", "PR1432", "Deck"),
+            head(4, "Pre-Demolishing"),
+            act("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", "PR4190", "Metal fence"),
+            head(2, "MEP Works"),
+            head(4, "Electrical Works"),
+            head(6, "Level 2A"),
+            act("CA-CON-0-0-0-0-P2-0-L.2A-MEP-Electrical Works-358", "PR2000", "Conduits"),
+            head(6, "Level 2"),
+            act("CA-CON-0-0-0-0-P1-0-L.2-MEP-Electrical Works-359", "PR2001", "Trays"),
+            head(4, "Plumbing Works"),
+            act("CA-CON-0-0-0-0-0-0-L.2-MEP-Plumbing-360", "PR2002", "Pipes"),
             # Discipline with no sub-discipline — the discipline IS the work.
-            ["CA-CON-0-0-0-0-0-0-0-Landscape-0-628", "PR6000", "Planting",
-             3, d(2026, 3, 1), d(2026, 3, 4), 0, 300, 0],
+            head(2, "Landscape Works"),
+            act("CA-CON-0-0-0-0-0-0-0-Landscape-0-628", "PR6000", "Planting"),
         ]
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Airport", project_type="infrastructure")
@@ -601,7 +618,7 @@ class LegendReadImportTests(TestCase):
         self.assertEqual(by_type.get(ProjectScope.ScopeType.DISCIPLINE),
                          {"Civil", "MEP", "Landscape"})
         self.assertEqual(by_type.get(ProjectScope.ScopeType.SUB_DISCIPLINE),
-                         {"Steel Works", "Electrical Works", "Pre Demolitioning"})
+                         {"Steel Works", "Electrical Works", "Pre Demolitioning", "Plumbing"})
         # Nothing is typed by position any more.
         self.assertNotIn(ProjectScope.ScopeType.STAGE, by_type)
         self.assertNotIn(ProjectScope.ScopeType.ZONE, by_type)
@@ -609,12 +626,17 @@ class LegendReadImportTests(TestCase):
     def test_a_level_is_a_level_whether_or_not_a_part_is_coded(self):
         """Read positionally, "L.2" was the second surviving segment on rows
         that also carry a part and the first on rows that don't — a zone here,
-        a stage there."""
+        a stage there. The same level legitimately recurs under each part, so
+        there is more than one node per name."""
         project = self._import()
-        for name in ("L.2", "L.2A"):
-            level = ProjectScope.objects.get(project=project, name=name)
+        levels = ProjectScope.objects.filter(project=project, name__in=("L.2", "L.2A"))
+        self.assertTrue(levels.exists())
+        for level in levels:
             self.assertEqual(level.scope_type, ProjectScope.ScopeType.LEVEL)
-            self.assertEqual(level.parent.scope_type, ProjectScope.ScopeType.PART)
+            # Under its part where one is coded, at the root where none is —
+            # never re-typed as something else either way.
+            self.assertIn(level.parent.scope_type if level.parent else None,
+                          {ProjectScope.ScopeType.PART, None})
 
     def test_the_report_reads_its_roles_off_this_shape(self):
         """No zone, no stage, no area type anywhere — the roles come from the
@@ -627,9 +649,90 @@ class LegendReadImportTests(TestCase):
             {"stage": ProjectScope.ScopeType.PART, "zone": ProjectScope.ScopeType.LEVEL,
              "area": None})
 
-    def test_no_label_is_invented_from_a_wbs_in_a_different_order(self):
-        """The headings nest the other way round, so matching them by
-        position labelled the "P1" part "Civil Works"."""
+    def test_each_level_is_labelled_with_the_heading_that_names_it(self):
+        """The codes are the team's own shorthand and the report goes to the
+        client, so each level carries the file's own wording. The headings
+        nest the other way round, so this can't be positional — matching by
+        position labelled the "P1" part "Civil Works" (2026-09-08)."""
         project = self._import()
-        labels = set(ProjectScope.objects.filter(project=project).values_list("label", flat=True))
-        self.assertEqual(labels, {""})
+        labels = dict(ProjectScope.objects.filter(project=project).values_list("name", "label"))
+        self.assertEqual(labels["P1"], "Part 1")
+        self.assertEqual(labels["L.2"], "Level 2")
+        self.assertEqual(labels["L.2A"], "Level 2A")
+        self.assertEqual(labels["Civil"], "Civil Works")
+        self.assertEqual(labels["MEP"], "MEP Works")
+        self.assertEqual(labels["Steel Works"], "Steel Works")
+        self.assertEqual(labels["Pre Demolitioning"], "Pre-Demolishing")
+
+    def test_the_report_shows_those_names_not_the_codes(self):
+        """"P1 - L.2A" means nothing to the client reading the report."""
+        from apps.reports.services import _text
+
+        project = self._import()
+        part = ProjectScope.objects.filter(project=project, name="P1").first()
+        self.assertEqual(_text(part), "Part 1")
+        unlabelled = ProjectScope.objects.filter(project=project, label="").first()
+        if unlabelled is not None:            # falls back, never blank
+            self.assertEqual(_text(unlabelled), unlabelled.name)
+
+
+class HeadingToSlotTests(SimpleTestCase):
+    """Which WBS heading names which coded level. The two describe the same
+    tree in different orders — Cairo Airport nests headings discipline >
+    sub-discipline > level > part while its legend declares part, level,
+    discipline, sub-discipline — so they can't be paired by position, and not
+    by indentation depth either: that file puts parts and work packages at the
+    same depth in different branches (2026-09-08)."""
+
+    def _observed(self):
+        # Every heading with the code values seen under it, as the parser
+        # gathers them.
+        return {
+            ("Construction",): {"discipline": {"Civil", "MEP"}, "sub_discipline": {"Steel", "Block"},
+                                "level": {"L.2", "L.2A"}, "part": {"P1", "P2"}},
+            ("Construction", "Civil Works"): {"discipline": {"Civil"}, "sub_discipline": {"Steel", "Block"},
+                                              "level": {"L.2", "L.2A"}, "part": {"P1", "P2"}},
+            ("Construction", "Civil Works", "Steel Works"): {
+                "discipline": {"Civil"}, "sub_discipline": {"Steel"},
+                "level": {"L.2", "L.2A"}, "part": {"P1", "P2"}},
+            ("Construction", "Civil Works", "Steel Works", "Level 2"): {
+                "discipline": {"Civil"}, "sub_discipline": {"Steel"},
+                "level": {"L.2"}, "part": {"P1", "P2"}},
+            ("Construction", "Civil Works", "Steel Works", "Level 2", "Part 1"): {
+                "discipline": {"Civil"}, "sub_discipline": {"Steel"},
+                "level": {"L.2"}, "part": {"P1"}},
+        }
+
+    def test_a_heading_names_the_slot_it_settles(self):
+        from .p6_id_schedule_import import _headings_by_slot
+
+        self.assertEqual(_headings_by_slot(self._observed()), {
+            ("discipline", "Civil"): "Civil Works",
+            ("sub_discipline", "Steel"): "Steel Works",
+            ("level", "L.2"): "Level 2",
+            ("part", "P1"): "Part 1",
+        })
+
+    def test_a_heading_that_settles_two_slots_at_once_names_neither(self):
+        """A heading with no code counterpart of its own ("Split high wall
+        unit" under HVAC) happens to sit above one part AND one level. Naming
+        it either would be a guess."""
+        from .p6_id_schedule_import import _headings_by_slot
+
+        observed = self._observed()
+        observed[("Construction", "Civil Works", "Steel Works", "Sundries")] = {
+            "discipline": {"Civil"}, "sub_discipline": {"Steel"},
+            "level": {"L.2"}, "part": {"P1"}}
+        named = _headings_by_slot(observed)
+        self.assertNotIn("Sundries", named.values())
+
+    def test_the_root_heading_names_nothing(self):
+        """Everything varies under it, so it settles no slot at all."""
+        from .p6_id_schedule_import import _headings_by_slot
+
+        self.assertNotIn("Construction", _headings_by_slot(self._observed()).values())
+
+    def test_no_headings_yields_no_names(self):
+        from .p6_id_schedule_import import _headings_by_slot
+
+        self.assertEqual(_headings_by_slot({}), {})
