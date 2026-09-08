@@ -478,31 +478,75 @@ class ScheduleCompletePlannedTests(TestCase):
 
 class PlanexCodeLegendTests(SimpleTestCase):
     """A Planex Code's meaning comes from WHICH legend slot a segment sits in,
-    not from how many of its siblings happen to be filled.
+    and each slot sits at ONE depth for the whole file.
 
-    Cairo Airport is coded purely by discipline — every area/phase/zone slot
-    is "0" — so collapsing the zeros promoted "Civil" (a discipline, slot 10)
-    to the first surviving position and the tree typed it as a stage, with
-    levels and disciplines landing in the zone and area slots under it
-    (reported 2026-09-07).
+    Cairo Airport is coded purely by part/level/discipline — every area, phase
+    and zone slot is "0" — so collapsing the zeros promoted "Civil" (a
+    discipline, slot 10) to the first surviving position and the tree typed it
+    as a stage, with levels and disciplines landing in the zone and area slots
+    under it (reported 2026-09-07).
     """
 
     LEGEND = ["PN", "CON", "AR", "SUB AR", "PH", "Z", "P", "U", "LEV", "DEC", "SUB DEC", "NU"]
+    # The file's two shapes: most rows carry a Part and a Level, a large
+    # minority carry only a Level, and a few only a discipline.
+    CAIRO = [
+        "CA-CON-0-0-0-0-P1-0-L.2A-MEP-Electrical Works-358",
+        "CA-CON-0-0-0-0-0-0-L.2-Civil-Block works-120",
+        "CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1",
+        "CA-CON-0-0-0-0-0-0-0-Landscape-0-628",
+    ]
 
-    def test_a_discipline_coded_row_makes_no_stage_or_zone(self):
+    def _depths(self, codes=None):
+        from .p6_id_schedule_import import slot_depths
+
+        return slot_depths(codes if codes is not None else self.CAIRO, self.LEGEND)
+
+    def test_a_slot_keeps_one_depth_across_every_row(self):
+        """The bug this replaces: read row by row, "L.2" was the second place
+        on the rows that also carry a Part and the first on the rows that
+        don't, so the same level came out a zone here and a stage there."""
         from .p6_id_schedule_import import slot_path
 
-        path = slot_path("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", self.LEGEND)
-        self.assertEqual(path, [("Civil", "phase"), ("Pre Demolitioning", "phase")])
+        depths = self._depths()
+        self.assertEqual(depths, {"p": "stage", "lev": "zone",
+                                  "dec": "phase", "sub dec": "phase"})
+        with_part = slot_path(self.CAIRO[0], self.LEGEND, depths)
+        without = slot_path(self.CAIRO[1], self.LEGEND, depths)
+        self.assertEqual(with_part, [("P1", "stage"), ("L.2A", "zone"),
+                                     ("Electrical Works", "phase")])
+        self.assertEqual(without, [("L.2", "zone"), ("Block works", "phase")])
+
+    def test_the_discipline_names_the_work_package_it_does_not_contain_it(self):
+        """No work package in the real file appears under two disciplines, so
+        "Civil" above "Block works" is a second name for the same node. Kept
+        as its own level it sat between the place and the work, and the
+        per-unit table reported "Civil" and "L.2A - Arch" as its units."""
+        from .p6_id_schedule_import import slot_path
+
+        path = slot_path(self.CAIRO[2], self.LEGEND, self._depths())
+        self.assertEqual(path, [("Pre Demolitioning", "phase")])
         self.assertNotIn("stage", [t for _, t in path])
         self.assertNotIn("zone", [t for _, t in path])
 
-    def test_each_segment_takes_its_own_slots_meaning(self):
+    def test_a_discipline_with_no_sub_discipline_is_the_work_package(self):
+        """Five rows code the work at discipline level only ("Landscape") —
+        dropping the shallower work slot outright would lose them."""
         from .p6_id_schedule_import import slot_path
 
+        self.assertEqual(slot_path(self.CAIRO[3], self.LEGEND, self._depths()),
+                         [("Landscape", "phase")])
+
+    def test_places_fill_the_scope_levels_in_the_legends_own_order(self):
+        """The legend names seven places for three scope levels, outermost
+        first; a file using more than three folds the surplus into the
+        innermost rather than dropping it."""
+        from .p6_id_schedule_import import slot_path
+
+        code = "XX-CON-Area 1-0-PH2-Z(C)-0-Unit 4-0-MEP-0-7"
         self.assertEqual(
-            slot_path("XX-CON-Area 1-0-PH2-Z(C)-0-Unit 4-0-MEP-0-7", self.LEGEND),
-            [("Area 1", "area"), ("PH2", "stage"), ("Z(C)", "zone"),
+            slot_path(code, self.LEGEND, self._depths([code])),
+            [("Area 1", "stage"), ("PH2", "zone"), ("Z(C)", "area"),
              ("Unit 4", "area"), ("MEP", "phase")],
         )
 
@@ -513,10 +557,95 @@ class PlanexCodeLegendTests(SimpleTestCase):
         from .p6_id_schedule_import import segment_path, slot_path
 
         code = "MN(6)-CON-0-0-PH1-Z(A)-0-Building 6-Internal Finishes-1"
-        self.assertEqual(slot_path(code, self.LEGEND), [])
+        self.assertEqual(self._depths([code]), {})
+        self.assertEqual(slot_path(code, self.LEGEND, self._depths([code])), [])
         self.assertEqual(segment_path(code), ["PH1", "Z(A)", "Building 6", "Internal Finishes"])
 
     def test_no_legend_means_no_change(self):
-        from .p6_id_schedule_import import slot_path
+        from .p6_id_schedule_import import slot_depths, slot_path
 
-        self.assertEqual(slot_path("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", []), [])
+        self.assertEqual(slot_depths(self.CAIRO, []), {})
+        self.assertEqual(slot_path(self.CAIRO[0], [], {}), [])
+
+
+class LegendReadImportTests(TestCase):
+    """End-to-end for a file that fills every slot its legend declares.
+
+    Cairo Airport codes its work by part/level/discipline and leaves every
+    area, phase and zone slot "0". Read positionally that promoted "Civil" to
+    the first surviving segment, so the report showed disciplines as stages
+    and work packages as zones: "Civil Works" as a stage, "Steel Works" as a
+    zone (reported 2026-09-07)."""
+
+    HEADER = ["Planex Code", "Activity ID", "Activity Name", "Original Duration", "Start", "Finish",
+              "Activity % Complete", "Budgeted Total Cost", "Earned Value Cost"]
+    LEGEND = ["PN", "CON", "AR", "SUB AR", "PH", "Z", "P", "U", "LEV", "DEC", "SUB DEC", "NU"]
+
+    def _workbook(self, rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "p6"
+        ws.append(self.HEADER)
+        for row in rows:
+            ws.append(row)
+        legend = wb.create_sheet("Planex Code")
+        legend.append(["CODE", *self.LEGEND])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def _import(self):
+        d = datetime.date
+        # The WBS nests sub-discipline > level > part, the REVERSE of the
+        # order the legend declares those slots in — the real file's shape.
+        rows = [
+            ["", "      Steel Works", None, None, None, None, None, None, None],
+            ["", "        Level 2", None, None, None, None, None, None, None],
+            ["", "          Part 1", None, None, None, None, None, None, None],
+            ["CA-CON-0-0-0-0-P1-0-L.2-Civil-Steel Works-80", "PR1430", "Install columns",
+             10, d(2026, 1, 1), d(2026, 1, 10), 0.5, 1000, 500],
+            ["CA-CON-0-0-0-0-P2-0-L.2A-MEP-Electrical Works-358", "PR2000", "Conduits",
+             5, d(2026, 2, 1), d(2026, 2, 5), 1, 500, 500],
+            # No part and no level: work coded by discipline alone.
+            ["CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", "PR4190", "Metal fence",
+             4, d(2026, 1, 2), d(2026, 1, 6), 1, 200, 200],
+            # Discipline with no sub-discipline — the discipline IS the work.
+            ["CA-CON-0-0-0-0-0-0-0-Landscape-0-628", "PR6000", "Planting",
+             3, d(2026, 3, 1), d(2026, 3, 4), 0, 300, 0],
+        ]
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Airport", project_type="infrastructure")
+        import_workbook(project, self._workbook(rows), source="cairo.xlsx")
+        return project
+
+    def test_places_become_places_and_work_packages_become_phases(self):
+        project = self._import()
+        by_type = {}
+        for s in ProjectScope.objects.filter(project=project):
+            by_type.setdefault(s.scope_type, set()).add(s.name)
+        self.assertEqual(by_type.get(ProjectScope.ScopeType.STAGE), {"P1", "P2"})
+        self.assertEqual(by_type.get(ProjectScope.ScopeType.ZONE), {"L.2", "L.2A"})
+        self.assertEqual(
+            by_type.get(ProjectScope.ScopeType.PHASE),
+            {"Steel Works", "Electrical Works", "Pre Demolitioning", "Landscape"})
+        # The disciplines themselves are never levels of the tree.
+        self.assertNotIn("Civil", {n for names in by_type.values() for n in names})
+        self.assertNotIn("MEP", {n for names in by_type.values() for n in names})
+
+    def test_a_level_sits_at_the_same_depth_whether_or_not_a_part_is_coded(self):
+        """Read row by row, "L.2" was the second place on rows that also
+        carry a part and the first on rows that don't — a zone here, a stage
+        there."""
+        project = self._import()
+        for name in ("L.2", "L.2A"):
+            zone = ProjectScope.objects.get(project=project, name=name)
+            self.assertEqual(zone.scope_type, ProjectScope.ScopeType.ZONE)
+            self.assertEqual(zone.parent.scope_type, ProjectScope.ScopeType.STAGE)
+
+    def test_no_label_is_invented_from_a_wbs_in_a_different_order(self):
+        """The headings nest the other way round, so matching them by
+        position labelled the "P1" part "Civil Works"."""
+        project = self._import()
+        labels = set(ProjectScope.objects.filter(project=project).values_list("label", flat=True))
+        self.assertEqual(labels, {""})

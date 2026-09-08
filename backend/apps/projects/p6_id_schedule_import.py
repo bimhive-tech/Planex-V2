@@ -26,7 +26,14 @@ Real shape, empirically confirmed against ~24k populated rows of one file:
     is no need to know which of the legend's 12 named slots it originally
     filled.
 
-This is deliberately content-based rather than a fixed 12-slot regex: the
+A file whose codes DO fill every slot its legend declares is read by the
+legend instead (see slot_depths/slot_path): which slot a segment sits in is
+what says whether it is a place or the work done there, and each slot is
+pinned to one depth for the whole file. The positional reading below is the
+fallback for everything else.
+
+The positional reading is deliberately content-based rather than a fixed
+12-slot regex: the
 legend sheet's own "0 vs omitted entirely" convention was inconsistent even
 within ONE project's real file — Area/Sub-area/Part kept a literal "0"
 placeholder in the string, while Level/Sub-discipline were dropped from it
@@ -57,17 +64,56 @@ _MATCH_RATIO = 0.6  # majority, not unanimous — a few malformed/legacy rows sh
 _MIN_SEGMENTS = 3  # project code + at least one real level + differentiator
 
 
-# What each legend slot means for the scope tree. The legend ("Planex Code"
-# sheet) names 12 slots but ProjectScope has four levels, so several slots
-# share one: a part/unit is a subdivision of an area, and a level/discipline
-# names the work package itself. PN/CON/NU are the project code, the
-# "construction" tag and the activity number — never scope levels.
-_SLOT_SCOPE_TYPE = {
-    "ph": "stage",
-    "z": "zone",
-    "ar": "area", "sub ar": "area", "sar": "area", "p": "area", "u": "area",
-    "lev": "phase", "dec": "phase", "sub dec": "phase", "sdec": "phase",
-}
+# The legend's structural slots, split by what they describe. PN/CON/NU are
+# the project code, the "construction" tag and the activity number — never
+# scope levels.
+#
+# Places nest outermost-first in the order the legend declares them, so the
+# ones a file actually uses fill ProjectScope's three place levels in that
+# order (see slot_depths). The legend names seven places for three levels;
+# a file using more than three folds the surplus into the innermost rather
+# than dropping it.
+_PLACE_SLOTS = ("ar", "sub ar", "sar", "ph", "z", "p", "u", "lev")
+_WORK_SLOTS = ("dec", "sub dec", "sdec")
+_PLACE_TYPES = ("stage", "zone", "area")
+
+
+def slot_depths(codes, slots) -> dict:
+    """Which scope level each legend slot fills IN THIS FILE — decided once
+    from every code in the sheet, never per row.
+
+    A legend declares far more slots than any one project uses (Cairo Airport
+    fills 4 of its 12), and reading each row on its own put the same value at
+    different depths depending on which of its neighbours happened to be
+    filled: on the rows carrying both a Part and a Level, "L.2" was the second
+    place; on the rows carrying only a Level it was the first. So L.2 came out
+    a zone on some rows and a stage on others, and the report listed it as
+    both. Deciding from the whole sheet keeps every slot at one depth.
+
+    Returns {} when no code in the sheet fills the legend exactly — Mansoura's
+    10 segments against a 12-slot legend keep the positional reading, since
+    which two are missing is unknowable (see the module docstring)."""
+    if not slots:
+        return {}
+    lower = [s.strip().lower() for s in slots]
+    used, conforming = set(), False
+    for code in codes:
+        if not isinstance(code, str):
+            continue
+        parts = [p.strip() for p in code.strip().split("-")]
+        if len(parts) != len(slots):
+            continue
+        conforming = True
+        for value, slot in zip(parts, lower):
+            if value and value != "0" and value.lower() not in _PLACEHOLDER_WORDS:
+                used.add(slot)
+    if not conforming:
+        return {}
+
+    places = [s for s in lower if s in _PLACE_SLOTS and s in used]
+    depths = {s: _PLACE_TYPES[min(i, len(_PLACE_TYPES) - 1)] for i, s in enumerate(places)}
+    depths.update({s: "phase" for s in lower if s in _WORK_SLOTS and s in used})
+    return depths
 
 
 def legend_slots(wb) -> list:
@@ -87,25 +133,37 @@ def legend_slots(wb) -> list:
     return []
 
 
-def slot_path(code: str, slots: list) -> list:
-    """[(name, scope_type)] for the used, structural slots of one code — or []
-    when `code` doesn't fill the legend exactly.
+def slot_path(code: str, slots: list, depths: dict) -> list:
+    """[(name, scope_type)] for one code — its places outermost-first, then
+    its work package. `depths` comes from slot_depths; [] when `code` doesn't
+    fill the legend exactly.
 
-    Only applied to a file that fills every slot it declares (Cairo Airport
-    does: 12 segments for 12 slots). Mansoura's codes carry 10 segments
-    against the same 12-slot legend, so which two are missing is unknowable
-    and it keeps the positional reading below (2026-09-07)."""
-    if not slots or not isinstance(code, str):
+    Only the DEEPEST work slot a row fills becomes the phase. A file's
+    discipline slot classifies its work packages rather than containing them:
+    across Cairo Airport's 492 rows no work package ever appears under two
+    disciplines, so "Civil" above "Block works" is a second name for the same
+    node, not a level of its own. Keeping both inserted a discipline between
+    the place and the work, which made the per-unit progress table report
+    "Civil" and "L.2A - Arch" as its units instead of the levels they are
+    work on (2026-09-07)."""
+    if not slots or not depths or not isinstance(code, str):
         return []
     parts = [p.strip() for p in code.strip().split("-")]
     if len(parts) != len(slots):
         return []
-    out = []
-    for value, slot in zip(parts, slots):
-        stype = _SLOT_SCOPE_TYPE.get(slot.strip().lower())
-        if not stype or not value or value == "0" or value.lower() in _PLACEHOLDER_WORDS:
+    out, work = [], None
+    for value, slot in zip(parts, (s.strip().lower() for s in slots)):
+        if not value or value == "0" or value.lower() in _PLACEHOLDER_WORDS:
             continue
-        out.append((value, stype))
+        stype = depths.get(slot)
+        if stype is None:
+            continue
+        if slot in _WORK_SLOTS:
+            work = value          # the legend orders these too, so the last wins
+        else:
+            out.append((value, stype))
+    if work is not None:
+        out.append((work, "phase"))
     return out
 
 
@@ -182,6 +240,14 @@ def _label_ancestors(by_path, path, heading_stack):
     wrapper heading has no code counterpart but sits at the front, not
     between two coded levels. A leftover heading at the front is simply
     unused; nothing here assumes every heading has a matching code segment.
+
+    Only used for the positional reading. A legend-read file states its own
+    nesting in the code, and its WBS headings need not agree: Cairo Airport
+    nests them sub-discipline > level > part, the reverse of the order its
+    legend declares those slots in, so lining the two up by position labelled
+    the "P1" part "Civil Works" (2026-09-07). Its segments are already
+    readable words ("P1", "L.2", "Steel Works"), so those rows go unlabelled
+    rather than carrying a label naming something else.
 
     Purely cosmetic — sets `label`, never touches `name` (the matching key),
     so a heading text that changes or is missing on a later import cannot
@@ -298,6 +364,9 @@ def parse_id_schedule_sheets(wb):
         # a segment's meaning positional-by-slot rather than by how many of
         # its siblings happen to be filled in.
         legend = legend_slots(wb)
+        # One depth per slot for the WHOLE sheet, not per row — see slot_depths.
+        slot_levels = slot_depths(
+            (row[code_c] for row in data_rows if code_c < len(row)), legend)
 
         start_c, finish_c = cols["start"], cols["finish"]
         pct_c = cols.get("activity % complete")
@@ -388,7 +457,7 @@ def parse_id_schedule_sheets(wb):
 
             # The legend's own reading when the file fills every slot it
             # declares; the positional fallback otherwise (see slot_path).
-            slotted = slot_path(raw_code, legend)
+            slotted = slot_path(raw_code, legend, slot_levels)
             if slotted:
                 path = tuple(name for name, _ in slotted)
                 stypes = tuple(st for _, st in slotted)
@@ -412,7 +481,8 @@ def parse_id_schedule_sheets(wb):
                                 and sched_pct_c < len(row) else None,
             }
             node_for(path, stypes)["activities"].append(task)
-            _label_ancestors(by_path, path, heading_stack)
+            if not slotted:
+                _label_ancestors(by_path, path, heading_stack)
 
         if not matched_any:
             continue
