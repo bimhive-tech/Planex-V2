@@ -118,7 +118,14 @@ class ProjectZonesView(APIView):
         # docstring: a re-import no longer deletes the previous batch).
         schedule_import = latest_schedule_import(project)
         scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
-        zones = scopes.filter(scope_type=ProjectScope.ScopeType.ZONE).order_by("sort_order", "name")
+        # The level this project reports per — a zone where it has zones, else
+        # the deepest place its own file names. Imported here, not at module
+        # level: reports already imports projects, so the other direction is
+        # only safe inside the call.
+        from apps.reports.services import _scope_roles
+
+        zones = scopes.filter(
+            scope_type=_scope_roles(project, schedule_import)["zone"]).order_by("sort_order", "name")
         return Response([{"id": str(z.id), "name": z.name} for z in zones])
 
 

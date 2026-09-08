@@ -510,12 +510,32 @@ class ProjectScope(TimestampedModel):
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""
 
     class ScopeType(models.TextChoices):
-        STAGE = "stage", "Stage"      # a top-level grouping above zones (e.g. a P6 project stage)
-        PHASE = "phase", "Phase"
+        """One per level a schedule can name.
+
+        The first six are the original set. The rest complete the Planex Code
+        legend, which names twelve slots — project name, construction, area,
+        sub-area, phase, zone, part, unit, level, discipline, sub-discipline,
+        activity number — so a coded file's tree can carry every level it
+        actually uses instead of being folded into the four that existed
+        (client ask, 2026-09-08). PN/CON/NU are not levels: they are the
+        project itself, a constant tag and the activity's own number.
+
+        Nothing here fixes an order. A project's levels nest however its own
+        file nests them, and the report layer reads the roles it needs off
+        that tree — see apps.reports.services._scope_roles.
+        """
+        STAGE = "stage", "Stage"      # the legend's PH: a top-level grouping above zones
+        PHASE = "phase", "Phase"      # a work package; what a zone-tracker import produces
         ZONE = "zone", "Zone"
         BUILDING = "building", "Building"
         AREA = "area", "Area"
         TASK = "task", "Task"
+        SUB_AREA = "sub_area", "Sub-area"
+        PART = "part", "Part"
+        UNIT = "unit", "Unit"
+        LEVEL = "level", "Level"
+        DISCIPLINE = "discipline", "Discipline"
+        SUB_DISCIPLINE = "sub_discipline", "Sub-discipline"
 
     class Discipline(models.TextChoices):
         CONCRETE = "concrete", "Concrete"
@@ -571,6 +591,24 @@ class ProjectScope(TimestampedModel):
 
     def __str__(self):
         return f"{self.get_scope_type_display()}: {self.name}"
+
+
+# Which side of "where the work is" vs "what the work is" each level falls on.
+# The report layer needs this and only this: it reports progress PER PLACE,
+# split BY WORK, so it has to know which of a project's levels are which
+# without knowing that project's particular shape (see
+# apps.reports.services._scope_roles). A Task is work — the leaf a schedule
+# hangs activities off when it names no trade at all.
+PLACE_SCOPE_TYPES = frozenset({
+    ProjectScope.ScopeType.AREA, ProjectScope.ScopeType.SUB_AREA,
+    ProjectScope.ScopeType.STAGE, ProjectScope.ScopeType.ZONE,
+    ProjectScope.ScopeType.PART, ProjectScope.ScopeType.UNIT,
+    ProjectScope.ScopeType.LEVEL, ProjectScope.ScopeType.BUILDING,
+})
+WORK_SCOPE_TYPES = frozenset({
+    ProjectScope.ScopeType.DISCIPLINE, ProjectScope.ScopeType.SUB_DISCIPLINE,
+    ProjectScope.ScopeType.PHASE, ProjectScope.ScopeType.TASK,
+})
 
 
 class Activity(TimestampedModel):

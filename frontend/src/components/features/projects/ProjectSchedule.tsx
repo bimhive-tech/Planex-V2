@@ -11,6 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
+import { scopeRoles, WORK_SCOPE_TYPES } from "@/lib/scopeRoles";
 import type { Activity, ProjectStructure, ScheduleImportSummary, Scope } from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
@@ -158,22 +159,31 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
   const roots = childrenOf.get(null) ?? [];
 
+  // Which of THIS project's levels the three filters address — a Planex-coded
+  // P6 file names its own (part > level > discipline), so these can't be
+  // hardcoded to zone/building/phase. See lib/scopeRoles.
+  const roles = useMemo(() => scopeRoles(childrenOf), [childrenOf]);
   // Zones are not always at the top: a P6 import nests them under their stage
   // (Construction Phase > Stadium Part A), so collect them at any depth.
   const zoneOptions = useMemo(
-    () => [...childrenOf.values()].flat().filter((s) => s.scope_type === "zone"),
-    [childrenOf],
+    () => [...childrenOf.values()].flat().filter((s) => s.scope_type === roles.zone),
+    [childrenOf, roles.zone],
   );
   const { visibleIds, subzoneScope, phaseScope } = useMemo(
     () => resolveScheduleFilter(childrenOf, zoneFilter, subzoneFilter, phaseFilter),
     [childrenOf, zoneFilter, subzoneFilter, phaseFilter],
   );
   const subzoneOptions = useMemo(
-    () => (zoneFilter ? (childrenOf.get(zoneFilter) ?? []).filter((s) => s.scope_type === "building" || s.scope_type === "area") : []),
-    [childrenOf, zoneFilter],
+    () => (zoneFilter
+      ? (childrenOf.get(zoneFilter) ?? []).filter(
+          (s) => s.scope_type === roles.subzone || s.scope_type === "building" || s.scope_type === "area")
+      : []),
+    [childrenOf, zoneFilter, roles.subzone],
   );
   const phaseOptions = useMemo(
-    () => (subzoneScope ? (childrenOf.get(subzoneScope.id) ?? []).filter((s) => s.scope_type === "phase") : []),
+    () => (subzoneScope
+      ? (childrenOf.get(subzoneScope.id) ?? []).filter((s) => WORK_SCOPE_TYPES.includes(s.scope_type))
+      : []),
     [childrenOf, subzoneScope],
   );
   // Reuses the existing lazy per-scope activities endpoint — no global fetch needed.
@@ -394,6 +404,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
                 canManage={canManage} canSubmit={canSubmit}
                 visibleIds={visibleIds}
                 onlyTaskName={taskFilter} viewQuery={viewQuery} expandAll={expandAll}
+                zoneType={roles.zone}
                 onAddScope={(parentId, type) => setScopeModal({ parentId, scope: null, type })}
                 onEditScope={(scope) => setScopeModal({ parentId: scope.parent, scope, type: scope.scope_type })}
                 onDeleteScope={(scope) => del(`/projects/${projectId}/scopes/${scope.id}/`,

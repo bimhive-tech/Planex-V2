@@ -32,7 +32,7 @@ from decimal import Decimal
 
 import openpyxl
 
-from .models import Activity, ProjectScope
+from .models import WORK_SCOPE_TYPES, Activity, ProjectScope
 
 # Only the columns we actually read are required, so minor template variations
 # (extra/missing Primavera columns) still match.
@@ -401,17 +401,17 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     _BY_DEPTH = {0: Scope.ScopeType.STAGE, 1: Scope.ScopeType.ZONE, 2: Scope.ScopeType.AREA}
 
     def type_of(node, depth):
-        # Holding work always wins: that node is the work package, whatever depth
-        # it sits at, and the grid looks for activities under a Phase.
-        if node["activities"]:
-            return Scope.ScopeType.PHASE
         # What the file's own Planex Code legend says this segment is, when it
-        # says anything (see p6_id_schedule_import.slot_path). Depth is only a
-        # guess: on a schedule coded by discipline rather than by zone it
-        # promoted "Civil" to a stage and "Steel Work" to a zone purely
-        # because they were the first surviving segments (2026-09-07).
+        # says anything (see p6_id_schedule_import.slot_path) — the only
+        # statement here that isn't an inference, so nothing overrides it.
         if node.get("stype"):
             return node["stype"]
+        # Otherwise holding work wins: that node is the work package, whatever
+        # depth it sits at. Readers of work packages ask for WORK_SCOPE_TYPES,
+        # not for Phase specifically, so a legend-named Sub-discipline holding
+        # activities is found the same way this is.
+        if node["activities"]:
+            return Scope.ScopeType.PHASE
         return _BY_DEPTH.get(depth, Scope.ScopeType.AREA)
 
     def walk(node, parent, depth, grid):
@@ -423,7 +423,7 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         scope = Scope(company=company, project=project, parent=parent, scope_type=stype, schedule_import=schedule_import,
                       name=node["name"], label=node.get("label") or "", sort_order=len(scopes_by_depth[depth]),
                       planned_start=node.get("start"), planned_finish=node.get("finish"),
-                      discipline=_guess_discipline(node["name"]) if stype == Scope.ScopeType.PHASE else "")
+                      discipline=_guess_discipline(node["name"]) if stype in WORK_SCOPE_TYPES else "")
         scopes_by_depth[depth].append(scope)
 
         for task in node["activities"]:
@@ -505,7 +505,11 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         "stages": counts.get(Scope.ScopeType.STAGE, 0),
         "zones": counts.get(Scope.ScopeType.ZONE, 0),
         "subzones": counts.get(Scope.ScopeType.AREA, 0),
+        # Every level, so a Planex-coded file's own levels (part, level,
+        # discipline, …) still show up in the import summary rather than
+        # reading as an import that produced nothing.
         "phases": counts.get(Scope.ScopeType.PHASE, 0),
+        "levels": {str(k): v for k, v in sorted(counts.items()) if v},
         "milestones": milestones,
         "activities": len(activities),
         "overall_progress": project_overall_progress(project, schedule_import=schedule_import),

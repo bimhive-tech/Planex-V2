@@ -9,7 +9,9 @@ import re
 
 from django.db.models import Q, Sum
 
-from apps.projects.models import ProjectImage, ProjectScope, Submittal, Variation
+from apps.projects.models import (
+    PLACE_SCOPE_TYPES, WORK_SCOPE_TYPES, ProjectImage, ProjectScope, Submittal, Variation,
+)
 from apps.projects.services import (
     activity_progress_as_of, latest_schedule_import, project_overall_progress, scope_planned_map,
 )
@@ -21,6 +23,88 @@ def _f(value):
     """Decimal-or-None to float-or-None — the curve's series each cover a
     different span, so any of them can be blank in a given month."""
     return None if value is None else float(value)
+
+
+def _scope_roles(project, schedule_import=None):
+    """Which of THIS project's levels play the report's stage / zone / area
+    roles: `{"stage": type|None, "zone": type|None, "area": type|None}`.
+
+    The report layer asks for three things — the top grouping it charts, the
+    unit it reports progress per, and the sub-unit it breaks that unit into —
+    and used to name them by literal scope type. That only fits a tree shaped
+    stage > zone > area. A Planex-coded P6 file nests whichever of the
+    legend's twelve slots it actually uses, so Cairo Airport comes in as
+    part > level > discipline > sub-discipline and every `scope_type=ZONE`
+    query matched nothing: progress-by-zone, the hierarchy, the per-unit
+    table, the Gantt and the detailed grid all rendered empty (2026-09-08).
+
+    A zone is the reporting unit wherever a project has one, so a tree that
+    names its zones keeps exactly the roles it has always had — including the
+    zone-tracker shape, where zone is the ROOT and reading by depth alone
+    would have demoted it. Otherwise the unit is whichever level most of the
+    work actually sits in, and stage/area are read from what sits directly
+    above and below THAT — by parent, not by depth. Depth doesn't survive a
+    ragged tree: Cairo codes a part on most rows but not all, so its levels
+    appear at depth 1 and depth 0 both, and "shallowest wins" made the part
+    the unit and left the stage empty.
+
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it."""
+    from collections import Counter
+
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    rows = list(scopes.values_list("id", "parent_id", "scope_type"))
+    ZONE, AREA = ProjectScope.ScopeType.ZONE, ProjectScope.ScopeType.AREA
+    if not rows:
+        return {"stage": ProjectScope.ScopeType.STAGE, "zone": ZONE, "area": AREA}
+
+    parent = {str(sid): (str(pid) if pid else None) for sid, pid, _ in rows}
+    stype = {str(sid): st for sid, _, st in rows}
+
+    def place_above(sid):
+        """The nearest place-typed ancestor's id, or None."""
+        seen, cur = set(), parent.get(sid)
+        while cur is not None and cur not in seen:
+            if stype.get(cur) in PLACE_SCOPE_TYPES:
+                return cur
+            seen.add(cur)
+            cur = parent.get(cur)
+        return None
+
+    above = {sid: place_above(sid) for sid in stype}
+
+    def type_above(sid):
+        holder = above.get(sid)
+        return stype.get(holder) if holder else None
+
+    places = {st for st in stype.values() if st in PLACE_SCOPE_TYPES}
+    if not places:
+        return {"stage": None, "zone": None, "area": None}
+
+    if ZONE in places:
+        zone = ZONE
+    else:
+        # The level most of the work actually sits in. Falling back to the
+        # place holding the most OTHER places covers a tree whose work isn't
+        # placed at all, where there is no better answer than the deepest.
+        held = Counter(t for sid, st in stype.items()
+                       if st in WORK_SCOPE_TYPES and (t := type_above(sid)))
+        if not held:
+            held = Counter(t for sid, st in stype.items()
+                           if st in PLACE_SCOPE_TYPES and (t := type_above(sid)))
+        zone = held.most_common(1)[0][0] if held else sorted(places)[0]
+
+    # What sits directly above the unit, and directly below it. A level nested
+    # in itself (zones under zones) names neither role.
+    stage_counts = Counter(t for sid, st in stype.items()
+                           if st == zone and (t := type_above(sid)) and t != zone)
+    below = Counter(st for sid, st in stype.items()
+                    if st in PLACE_SCOPE_TYPES and st != zone and type_above(sid) == zone)
+    # AREA keeps its role wherever it exists, so a tree with both a building
+    # and an area level doesn't quietly swap which one gets charted.
+    area = AREA if AREA in below else (below.most_common(1)[0][0] if below else None)
+    return {"stage": stage_counts.most_common(1)[0][0] if stage_counts else None,
+            "zone": zone, "area": area}
 
 
 def _planned_progress(project, as_of, use_imported=False):
@@ -162,7 +246,7 @@ def _scope_context(project, scope_ids, schedule_import=None):
     for sid, pid, _st in rows:
         if pid:
             children.setdefault(str(pid), []).append(str(sid))
-    zone_type = ProjectScope.ScopeType.ZONE
+    zone_type = _scope_roles(project, schedule_import)["zone"]
     for sid in parent:
         cur = sid
         while cur is not None and scope_type.get(cur) != zone_type:
@@ -290,7 +374,8 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
     predicate, scope_to_zone = _scope_context(project, scope_ids, schedule_import)
     zones = list(
         ProjectScope.objects.filter(
-            project=project, scope_type=ProjectScope.ScopeType.ZONE, schedule_import=schedule_import
+            project=project, scope_type=_scope_roles(project, schedule_import)["zone"],
+            schedule_import=schedule_import
         ).order_by("sort_order", "name").values_list("id", "name", "parent_id")
     )
     order = {str(z): i for i, (z, _, _) in enumerate(zones)}
@@ -393,8 +478,9 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
 
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
     # see _zone_rows's docstring for why (Stage can sit above Zone).
+    roles = _scope_roles(project, schedule_import)
     zones = sorted(
-        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.ZONE),
+        (s for s in scopes.values() if s.scope_type == roles["zone"]),
         key=lambda s: (s.sort_order, s.name),
     )
     # See _disambiguated_names's docstring — the same "Z(A)" repeated under
@@ -502,8 +588,9 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
             e += ce
         return b, e
 
+    roles = _scope_roles(project, schedule_import)
     stages = sorted(
-        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.STAGE),
+        (s for s in scopes.values() if s.scope_type == roles["stage"]),
         key=lambda s: (s.sort_order, s.name),
     )
     rows = []
@@ -530,7 +617,7 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         for zid in sorted(children.get(sid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
             for aid_ in sorted(children.get(zid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
                 child = scopes[aid_]
-                if child.scope_type != ProjectScope.ScopeType.AREA or not weight.get(aid_):
+                if child.scope_type != roles["area"] or not weight.get(aid_):
                     continue
                 areas.append({
                     # Labelled with its zone, not just its own name — see
@@ -690,13 +777,36 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     work packages. The client asked for the tree's own phases instead, which is
     also what their scope tree shows under each unit (2026-09-02).
 
-    Units with no phases are omitted. `schedule_import` pins the batch — see
-    build_report_context's own resolution of it."""
+    A "unit" is the nearest PLACE the work package sits in, not simply its
+    parent: a Planex-coded file can put a discipline between the two (Cairo
+    Airport nests level > discipline > sub-discipline), and keying on the
+    parent then reported "Civil" and "MEP" as the units instead of the levels
+    they are work on (2026-09-08). Work packages coded with no place at all
+    have no unit and are left out, same as before.
+
+    `schedule_import` pins the batch — see build_report_context's own
+    resolution of it."""
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
 
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    rows_ = list(scopes.values_list("id", "parent_id", "scope_type"))
+    parent_of = {str(sid): (str(pid) if pid else None) for sid, pid, _ in rows_}
+    type_of = {str(sid): st for sid, _, st in rows_}
+
+    def unit_of(sid):
+        """The nearest place-typed ancestor, or None when nothing above this
+        work package says where it is."""
+        seen = set()
+        cur = parent_of.get(sid)
+        while cur is not None and cur not in seen:
+            if type_of.get(cur) in PLACE_SCOPE_TYPES:
+                return cur
+            seen.add(cur)
+            cur = parent_of.get(cur)
+        return None
+
     phases = {
-        str(s.id): s for s in scopes.filter(scope_type=ProjectScope.ScopeType.PHASE)
+        str(s.id): s for s in scopes.filter(scope_type__in=WORK_SCOPE_TYPES)
     }
     if not phases:
         return [], []
@@ -709,11 +819,13 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         sid = str(sid)
         phase = phases.get(sid)
-        if not phase or phase.parent_id is None or not predicate(sid, aid):
+        if not phase or not predicate(sid, aid):
+            continue
+        unit_id = unit_of(sid)
+        if unit_id is None:
             continue
         key = phase.label or phase.name
         seen_order.setdefault(key, (phase.sort_order, key))
-        unit_id = str(phase.parent_id)
         w = float(weight)
         prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
         unit_w.setdefault(unit_id, {}).setdefault(key, 0.0)
@@ -814,7 +926,7 @@ def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
     # see _zone_rows's docstring for why (Stage can sit above Zone).
     zones = sorted(
-        (s for s in scopes.values() if s.scope_type == ProjectScope.ScopeType.ZONE),
+        (s for s in scopes.values() if s.scope_type == _scope_roles(project, schedule_import)["zone"]),
         key=lambda s: (s.sort_order, s.name),
     )
 
@@ -952,7 +1064,7 @@ def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
             continue
         subzone_ids = list(ProjectScope.objects.filter(parent_id=zone.id).values_list("id", flat=True))
         phase_ids = list(ProjectScope.objects.filter(
-            parent_id__in=subzone_ids, scope_type=ProjectScope.ScopeType.PHASE
+            parent_id__in=subzone_ids, scope_type__in=WORK_SCOPE_TYPES
         ).values_list("id", flat=True))
         acts = [a for a in Activity.objects.filter(scope_id__in=phase_ids).values(
             "id", "scope_id", "name", "phase_name", "progress_percent", "row_index", "subzone_index", "subzone_code")

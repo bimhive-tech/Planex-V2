@@ -6,11 +6,22 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import type { Activity, Scope } from "@/types/project";
+import type { Activity, Scope, ScopeType } from "@/types/project";
 import { ScopeActivities } from "./ScopeActivities";
 import styles from "./scheduleTree.module.css";
 
-const NEXT_TYPE: Record<string, string> = { stage: "zone", phase: "zone", zone: "building", building: "area", area: "area" };
+// What "Add sub-level" offers by default under each level — the Planex Code
+// legend's own nesting order (area > sub-area > phase > zone > part > unit >
+// level > discipline > sub-discipline), with the older zone > building > phase
+// shape kept as-is. Only a default: any type can still be picked in the form.
+const NEXT_TYPE: Record<string, string> = {
+  // Unchanged for the levels that already existed — a zone-tracker tree still
+  // offers Building under a Zone and Area under a Building.
+  stage: "zone", phase: "zone", zone: "building", building: "area", area: "area",
+  // The Planex Code legend's own nesting for the levels it adds.
+  sub_area: "stage", part: "unit", unit: "level", level: "discipline",
+  discipline: "sub_discipline", sub_discipline: "sub_discipline",
+};
 
 export interface ScopeNodeProps {
   scope: Scope;
@@ -32,6 +43,10 @@ export interface ScopeNodeProps {
   expandAll: { open: boolean; seq: number } | null;
   // As-of / month view mode query (?mode=…&as_of=…), "" for the current view.
   viewQuery: string;
+  // The level THIS project reports per — the Excel grid is offered on it. A
+  // Planex-coded P6 file names its own levels, so it isn't always "zone".
+  // See lib/scopeRoles.
+  zoneType: ScopeType | null;
   onAddScope: (parentId: string, type: string) => void;
   onEditScope: (scope: Scope) => void;
   onDeleteScope: (scope: Scope) => void;
@@ -43,7 +58,8 @@ export interface ScopeNodeProps {
 }
 
 export function ScopeNode(props: ScopeNodeProps) {
-  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage, visibleIds, expandAll } = props;
+  const { scope, depth, childrenOf, progressOf, activityCountOf, canManage, visibleIds, expandAll,
+          zoneType } = props;
   const childScopes = (childrenOf.get(scope.id) ?? []).filter((c) => !visibleIds || visibleIds.has(c.id));
   const activityCount = activityCountOf[scope.id] ?? 0;
   // Collapse nodes with many children/tasks by default — unless a Zone/Subzone/
@@ -76,7 +92,7 @@ export function ScopeNode(props: ScopeNodeProps) {
         <span className={styles.scopeName}>{scope.label || scope.name}</span>
         <div className={styles.bar}><span className={styles.barFill} style={{ ["--pct" as string]: `${pct}%` }} /></div>
         <span className={`${styles.pct} tnum`}>{pct}%</span>
-        {scope.scope_type === "zone" && childScopes.length > 0 && (
+        {scope.scope_type === zoneType && childScopes.length > 0 && (
           <button className={styles.gridBtn} title="Open Excel grid" aria-label="Open Excel grid"
             onClick={() => props.onOpenGrid(scope.id, scope.label || scope.name)}>
             <Icon name="dashboard" size={14} />

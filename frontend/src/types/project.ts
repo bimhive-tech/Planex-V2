@@ -169,7 +169,13 @@ export interface ProgressBreakdown {
   not_started: number;
 }
 
-export type ScopeType = "stage" | "phase" | "zone" | "building" | "area";
+// One per level a schedule can name. The last six complete the Planex Code
+// legend (area, sub-area, phase, zone, part, unit, level, discipline,
+// sub-discipline), so a coded P6 file's tree carries every level it uses.
+// Keep in step with ProjectScope.ScopeType in apps/projects/models.py.
+export type ScopeType =
+  | "stage" | "phase" | "zone" | "building" | "area" | "task"
+  | "sub_area" | "part" | "unit" | "level" | "discipline" | "sub_discipline";
 
 export type ScopeDiscipline = "concrete" | "architecture" | "electrical" | "mechanical" | "other" | "";
 

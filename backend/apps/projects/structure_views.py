@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 from .access import accessible_scope_ids
 from .imports import import_workbook
-from .models import Activity, Project, ProjectScope, ScheduleImport
+from .models import WORK_SCOPE_TYPES, Activity, Project, ProjectScope, ScheduleImport
 from .serializers import (
     ActivitySerializer,
     ActivityWriteSerializer,
@@ -239,7 +239,7 @@ class ProjectZoneGridView(APIView):
         # under this zone's phase scopes.
         subzone_ids = list(zone.children.values_list("id", flat=True))
         phase_ids = list(ProjectScope.objects.filter(
-            parent_id__in=subzone_ids, scope_type=ProjectScope.ScopeType.PHASE
+            parent_id__in=subzone_ids, scope_type__in=WORK_SCOPE_TYPES
         ).values_list("id", flat=True))
         acts = list(Activity.objects.filter(scope_id__in=phase_ids).values(
             "id", "name", "phase_name", "weight", "progress_percent",

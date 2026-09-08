@@ -1,6 +1,8 @@
 "use client";
 
-// Create / rename a scope node (phase, zone, building, area) in the hierarchy.
+// Create / rename a scope node in the hierarchy. The choices mirror
+// ProjectScope.ScopeType: the original five plus the Planex Code legend's own
+// levels, so a hand-built tree can match what a coded P6 import produces.
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/ui/Modal";
@@ -12,11 +14,17 @@ import type { Scope } from "@/types/project";
 import styles from "./projectForm.module.css";
 
 const SCOPE_TYPES = [
-  { value: "stage", label: "Stage" },
-  { value: "phase", label: "Phase" },
-  { value: "zone", label: "Zone" },
-  { value: "building", label: "Building" },
   { value: "area", label: "Area" },
+  { value: "sub_area", label: "Sub-area" },
+  { value: "stage", label: "Stage" },
+  { value: "zone", label: "Zone" },
+  { value: "part", label: "Part" },
+  { value: "unit", label: "Unit" },
+  { value: "level", label: "Level" },
+  { value: "building", label: "Building" },
+  { value: "discipline", label: "Discipline" },
+  { value: "sub_discipline", label: "Sub-discipline" },
+  { value: "phase", label: "Phase" },
 ];
 
 const DISCIPLINES = [

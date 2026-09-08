@@ -228,13 +228,15 @@ ALL_TOOLS = {**READ_TOOLS, **PROPOSE_TOOLS}
 
 
 # ── OpenAI function-calling schemas ─────────────────────────────────────────
-# A tree node: {name, scope_type: stage|zone|area|phase|building|task,
+# A tree node: {name, scope_type: one of ProjectScope.ScopeType (kept in step
+# with it below — import_tree validates against the model's own choices),
 # start?, finish?, is_milestone?, activities: [{name, progress_percent, weight,
 # start?, finish?}], children: [node, ...]}. Leave activities only on nodes
 # that hold actual work (mirrors how Planex's own hierarchy works); everything
 # else is a grouping node with children.
 _TREE_NODE_DESC = (
-    "A node: {name, scope_type (one of stage/zone/area/phase/building/task), "
+    "A node: {name, scope_type (where the work is: area/sub_area/stage/zone/part/"
+    "unit/level/building; or what it is: discipline/sub_discipline/phase/task), "
     "start (YYYY-MM-DD, optional), finish (optional), is_milestone (bool, optional — "
     "a milestone has no cost/duration/children, just a date), "
     "activities: [{name, progress_percent (0-100), weight (relative size, e.g. cost or "
