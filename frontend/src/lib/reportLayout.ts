@@ -102,10 +102,16 @@ export type TableColWidths = number[] | null;
  * shipped, i.e. hidden rows already removed. */
 export type TableTintRows = number[];
 
+/** Body rows that ARE headers. A table too wide for the page is cut into
+ * groups of columns stacked down it, and every group after the first carries
+ * its own header inline — see pdf_canvas._split_wide_columns. Indices into
+ * `rows` as shipped. */
+export type TableHeaderRows = number[];
+
 export type TableDataResult =
-  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
-  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
-  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows }
+  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
+  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
+  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
   | { status: "no_data"; style: TableStyle };
 export type TableDataMap = Record<string, TableDataResult>;
 

@@ -963,6 +963,69 @@ TABLE_COL_WIDTHS_MM = {
 }
 
 
+# A per-unit table's columns are the schedule's own work packages, and a real
+# schedule names a lot of them: Cairo Airport has 24 against 12 units. Those 25
+# columns across A4 leave ~7mm each, so every header wrapped to one character
+# per line and the header row grew tall enough to push a 12-row table across
+# ten continuation pages (2026-09-08). Too-wide tables are cut into groups of
+# columns stacked down the page instead, with the label column repeated.
+_WIDE_LABEL_COL_MM = 34
+_WIDE_MIN_COL_MM = 20
+
+
+def _split_wide_columns(header, rows, avail_width):
+    """`(header, rows, header_rows)` — a table too wide to read, cut into
+    groups of columns stacked down the page.
+
+    Column 0 is the row label and repeats in every group. Every group after
+    the first carries its own header as a BODY row, whose index is returned in
+    `header_rows` so both renderers style it like the real header instead of
+    as data. Groups are evened out rather than filled greedily — 24 columns
+    become 6+6+6+6, not 7+7+7+3 — and the last one is padded so the table
+    stays rectangular.
+
+    Returns its input unchanged when the table already fits, which is every
+    table but this one today."""
+    import math
+
+    data_cols = len(header) - 1
+    if data_cols < 2 or not avail_width:
+        return header, rows, []
+    room = avail_width / mm - _WIDE_LABEL_COL_MM
+    per_group = max(1, int(room // _WIDE_MIN_COL_MM))
+    if data_cols <= per_group:
+        return header, rows, []
+
+    size = math.ceil(data_cols / math.ceil(data_cols / per_group))
+    groups = [list(range(i, min(i + size, len(header))))
+              for i in range(1, len(header), size)]
+    width = 1 + size
+
+    def line(label, cells):
+        return [label] + cells + [""] * (width - 1 - len(cells))
+
+    out_rows, header_rows = [], []
+    for gi, idx in enumerate(groups):
+        if gi:
+            header_rows.append(len(out_rows))
+            out_rows.append(line(header[0], [header[i] for i in idx]))
+        for r in rows:
+            out_rows.append(line(r[0], [r[i] for i in idx]))
+    return line(header[0], [header[i] for i in groups[0]]), out_rows, header_rows
+
+
+def _label_first_widths(n_cols, avail_width):
+    """`(points, fractions)` for a table whose first column is a row label and
+    whose rest share what's left — the shape every split group has."""
+    if not avail_width or n_cols < 2:
+        return None, None
+    label = _WIDE_LABEL_COL_MM * mm
+    rest = max(0.0, avail_width - label) / (n_cols - 1)
+    points = [label] + [rest] * (n_cols - 1)
+    total = sum(points) or 1.0
+    return points, [round(v / total, 6) for v in points]
+
+
 def _source_col_widths(source, avail_width):
     """`TABLE_COL_WIDTHS_MM` as reportlab points for `source`, or None."""
     mm_widths = TABLE_COL_WIDTHS_MM.get(source)
@@ -1277,10 +1340,17 @@ def resolve_table(
         header = [labels["col_unit"]] + [enum_label(cfg, c) for c in columns]
         rows = [[r["name"]] + [_pct_or_dash(v) for v in r["values"]] for r in discipline]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
+        # Split AFTER the overrides: they address the source's own row/column
+        # indices, which the split rewrites.
+        header, rows, header_rows = _split_wide_columns(header, rows, avail_width)
+        points, fractions = (_label_first_widths(len(header), avail_width)
+                             if header_rows else (None, None))
         if raw:
             return {"kind": "data", "header": header, "rows": rows,
-                    "col_widths": _source_col_fractions(source, avail_width, hidden_cols)}
-        return _data_table(cfg, styles, header, rows, avail_width=avail_width)
+                    "col_widths": fractions or _source_col_fractions(source, avail_width, hidden_cols),
+                    "header_rows": header_rows}
+        return _data_table(cfg, styles, header, rows, col_widths=points,
+                           avail_width=avail_width, header_rows=header_rows)
 
     if source == "progress_compare":
         zones = [z for z in (ctx.get("zones") or []) if z.get("planned") is not None]

@@ -4341,3 +4341,88 @@ class MilestoneBatchPinningTests(TestCase):
         the on-or-before one."""
         titles = self._titles(datetime.date(2026, 7, 30))
         self.assertNotIn("Handover of another job's building", titles)
+
+
+class WideTableColumnSplitTests(SimpleTestCase):
+    """A per-unit table's columns are the schedule's own work packages, and a
+    real schedule names a lot of them. Cairo Airport has 24 against 12 units:
+    those 25 columns across A4 left ~7mm each, so every header wrapped to one
+    character per line and the header row grew tall enough to push a 12-row
+    table across ten continuation pages (2026-09-08)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    AVAIL = 180 * mm
+
+    def _wide(self, n_cols=24, n_rows=12):
+        header = ["Unit"] + [f"Package {i}" for i in range(1, n_cols + 1)]
+        rows = [[f"U{r}"] + [f"{r}.{i}" for i in range(1, n_cols + 1)] for r in range(1, n_rows + 1)]
+        return header, rows
+
+    def test_a_table_that_already_fits_is_untouched(self):
+        from .pdf_canvas import _split_wide_columns
+
+        header, rows = self._wide(n_cols=4, n_rows=3)
+        self.assertEqual(_split_wide_columns(header, rows, self.AVAIL), (header, rows, []))
+
+    def test_a_wide_table_becomes_stacked_groups_with_the_label_repeated(self):
+        from .pdf_canvas import _split_wide_columns
+
+        header, rows = self._wide()
+        new_header, new_rows, header_rows = _split_wide_columns(header, rows, self.AVAIL)
+        # 24 columns even out into 6+6+6+6, not 7+7+7+3.
+        self.assertEqual(new_header, ["Unit"] + [f"Package {i}" for i in range(1, 7)])
+        self.assertEqual(header_rows, [12, 25, 38])
+        self.assertEqual(len(new_rows), 12 * 4 + 3)      # 4 groups, 3 repeated headers
+        self.assertEqual(new_rows[12], ["Unit"] + [f"Package {i}" for i in range(7, 13)])
+        self.assertEqual(new_rows[13], ["U1", "1.7", "1.8", "1.9", "1.10", "1.11", "1.12"])
+        # The label column repeats, so every group can be read on its own.
+        self.assertTrue(all(r[0] for r in new_rows))
+
+    def test_every_row_keeps_the_same_width(self):
+        """A last group holding fewer columns than the rest is padded — a
+        ragged row would shift reportlab's whole column grid."""
+        from .pdf_canvas import _split_wide_columns
+
+        header, rows = self._wide(n_cols=20)
+        new_header, new_rows, _ = _split_wide_columns(header, rows, self.AVAIL)
+        self.assertTrue(all(len(r) == len(new_header) for r in new_rows))
+
+    def test_no_value_is_lost_or_repeated(self):
+        from .pdf_canvas import _split_wide_columns
+
+        header, rows = self._wide()
+        _, new_rows, header_rows = _split_wide_columns(header, rows, self.AVAIL)
+        body = [r for i, r in enumerate(new_rows) if i not in set(header_rows)]
+        seen = [c for r in body for c in r[1:] if c]
+        self.assertEqual(len(seen), len(set(seen)))                 # nothing duplicated
+        self.assertEqual(len(seen), 24 * 12)                        # nothing dropped
+
+    def test_the_split_narrows_the_real_report_table(self):
+        """End to end: the same context that produced 25 columns at ~7mm."""
+        ctx = _full_ctx()
+        ctx["discipline_columns"] = [f"Package {i}" for i in range(1, 25)]
+        ctx["discipline"] = [{"name": f"L.{u}", "values": [50.0] * 24} for u in range(12)]
+        raw = resolve_table("discipline_progress", default_config(), ctx, {"item": None},
+                            avail_width=self.AVAIL, raw=True)
+        self.assertEqual(len(raw["header"]), 7)
+        self.assertTrue(raw["header_rows"])
+        widths_mm = [f * self.AVAIL / mm for f in raw["col_widths"]]
+        self.assertTrue(all(w >= 20 for w in widths_mm[1:]), widths_mm)
+
+    def test_the_canvas_and_the_pdf_get_the_same_rows(self):
+        """The parity invariant: the Customize preview draws what the PDF
+        draws, so the split has to happen once, before they diverge."""
+        ctx = _full_ctx()
+        ctx["discipline_columns"] = [f"Package {i}" for i in range(1, 25)]
+        ctx["discipline"] = [{"name": f"L.{u}", "values": [50.0] * 24} for u in range(12)]
+        cfg = default_config()
+        raw = resolve_table("discipline_progress", cfg, ctx, {"item": None},
+                            avail_width=self.AVAIL, raw=True)
+        table = resolve_table("discipline_progress", cfg, ctx, {"item": None}, avail_width=self.AVAIL)
+        self.assertEqual(len(table._cellvalues), len(raw["rows"]) + 1)     # + the header row
+        self.assertEqual(len(table._cellvalues[0]), len(raw["header"]))

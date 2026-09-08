@@ -377,7 +377,7 @@ def element_row_heights(heights_mm, hidden_rows, body_rows, header_row=True):
 
 def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
                 col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None,
-                tint_rows=None):
+                tint_rows=None, header_rows=None):
     """Header row plus flat body rows.
     `col_widths_frac`/`row_heights_mm` are the element's own dragged column
     widths and row heights, still in the ORIGINAL index space (see
@@ -389,6 +389,12 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
     the ones under them rather than sitting alongside them, so the reader can
     see at a glance which lines are the roll-up (the zone-dashboard table's
     stage/zone header rows). Zebra striping skips them so the two don't fight.
+
+    `header_rows` are BODY row indices that ARE headers — a table too wide for
+    the page is cut into groups of columns stacked down it, and every group
+    after the first carries its own header inline (see
+    pdf_canvas._split_wide_columns). Styled exactly like the real header row,
+    and skipped by zebra for the same reason.
     """
     col_widths = element_col_widths(col_widths_frac, hidden_cols, avail_width, len(header)) or col_widths
     c, tcfg = cfg["colors"], cfg["table"]
@@ -399,10 +405,21 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
     # المشروع التعاقدية") was shaped whole and then re-wrapped by reportlab
     # left-to-right, putting its first word on the last line — the same defect
     # the body values were already protected from (2026-08-30).
-    data = [[Paragraph(_wrap_shape(h, head.fontName, head.fontSize, max_widths[i])
-                       if max_widths and max_widths[i] else shape(h), head)
-             for i, h in enumerate(header)]]
-    for row in rows:
+    def head_cells(cells):
+        return [Paragraph(_wrap_shape(h, head.fontName, head.fontSize, max_widths[i])
+                          if max_widths and max_widths[i] else shape(h), head)
+                for i, h in enumerate(cells)]
+
+    headed = set(header_rows or ())
+    data = [head_cells(header)]
+    for ri, row in enumerate(rows):
+        # A repeated header is built from the HEADER style, not merely styled
+        # like one: a Paragraph carries its own colour and font, so reportlab's
+        # TEXTCOLOR/FONTNAME never reach it and the text stayed body-dark on
+        # the dark header fill.
+        if ri in headed:
+            data.append(head_cells(row))
+            continue
         data.append([
             _aligned(styles["body"], cell, force=TA_CENTER, max_width=(max_widths[i] if max_widths else None))
             for i, cell in enumerate(row)
@@ -418,10 +435,16 @@ def _data_table(cfg, styles, header, rows, col_widths=None, avail_width=None,
     if tcfg.get("border"):
         style.append(("GRID", (0, 0), (-1, -1), 0.6, hexcolor(c["table_border"])))
     tinted = {i + 1 for i in (tint_rows or ())}      # body index -> data index
+    headed_data = {i + 1 for i in headed}
     if tcfg.get("zebra"):
         for i in range(2, len(data), 2):
-            if i not in tinted:
+            if i not in tinted and i not in headed_data:
                 style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c["table_row_alt"])))
+    # Colour and font come from the header paragraph style above; only the fill
+    # is the table's to draw.
+    for i in sorted(headed_data):
+        if i < len(data):
+            style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c["table_header_bg"])))
     for i in sorted(tinted):
         if i < len(data):
             style.append(("BACKGROUND", (0, i), (-1, i), hexcolor(c.get("table_summary_bg", "#DCE6F1"))))
