@@ -892,6 +892,12 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     return d
 
 
+# How close two end-of-line callouts have to be, in points, before the second
+# is stacked above the first (6pt text, "100.00%" wide).
+_CALLOUT_MIN_DX = 26
+_CALLOUT_MIN_DY = 7
+
+
 def _finish_scurve(d, chart, series, swatches, cfg, width, height):
     """Axes, line colours, end-of-line callouts and legend — shared by the
     dashboard's own four-series curve and the snapshot-derived one."""
@@ -917,6 +923,7 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
     # guesswork otherwise, and that end figure is the number the report is
     # actually about.
     step = chart.width / max(1, len(series) - 1)
+    placed = []                      # (x, y) of every callout already drawn
     for row, (color, _) in enumerate(swatches):
         values = chart.data[row]
         last = next((i for i in range(len(values) - 1, -1, -1) if values[i] is not None), None)
@@ -925,6 +932,15 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
         value = values[last]
         x = chart.x + last * step
         y = chart.y + chart.height * (min(100.0, max(0.0, value)) / 100.0)
+        # Two lines can end at the same figure — a planned curve and a
+        # remaining curve both reach 100% — and their callouts then printed
+        # over each other as "100.00%100.00%". Stack a colliding one above
+        # its neighbour rather than dropping it: which line each belongs to
+        # is still readable from its colour.
+        while any(abs(x - px) < _CALLOUT_MIN_DX and abs(y - py) < _CALLOUT_MIN_DY
+                  for px, py in placed):
+            y += _CALLOUT_MIN_DY
+        placed.append((x, y))
         # Nudge in from the right edge so a final-column label isn't clipped.
         anchor = "end" if last >= len(values) - 1 else "start"
         d.add(String(x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,

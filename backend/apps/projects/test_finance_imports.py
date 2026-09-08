@@ -156,3 +156,49 @@ class InvoiceTotalsRowTests(SimpleTestCase):
 
         self.assertTrue(_is_total_row([None, "الاجمالي", None, 1.0]))
         self.assertFalse(_is_total_row(["Zone", "Item A", None, 1.0] + [None] * 60 + ["اجمالي"]))
+
+
+class CurveLabelWordingTests(SimpleTestCase):
+    """The row labels are the project team's own wording and vary per
+    workbook. Two real files built from the same template disagree on three
+    of the four rows, and needling on the first file's exact phrasing left
+    the airport project importing its actual line alone — so its S-curve came
+    out blank on 53 real months of progress (2026-09-08)."""
+
+    MONTHS = [datetime.datetime(2022, 1, 1), datetime.datetime(2022, 2, 1)]
+
+    # Verbatim from the two files.
+    TEMPLATE_WORDING = ["Cummulative Early Budget  Expense  %", "Cummulative Late Budget  %",
+                        "Cummulative Actual Cost  %", "Cumm Remaining  Cost%"]
+    AIRPORT_WORDING = ["Cummulative Early Planned %", "Cummulative Late Panned %",
+                       "Cummulative Actual  %", "Cummulative Remaining %"]
+
+    def _sheet(self, wording):
+        # The cost row of the same name sits directly above each percentage
+        # row in both files; only the "%" tells them apart.
+        rows = [["Spreadsheet Field", *self.MONTHS]]
+        for label, value in zip(wording, (0.10, 0.08, 0.09, 0.50)):
+            rows.append([label.replace(" %", " Cost").replace("%", " Cost"), 100, 200])
+            rows.append([label, value, value * 2])
+        return _workbook(rows)
+
+    def test_both_real_wordings_yield_all_four_series(self):
+        for name, wording in (("template", self.TEMPLATE_WORDING), ("airport", self.AIRPORT_WORDING)):
+            with self.subTest(file=name):
+                data = parse_progress_curve(self._sheet(wording))
+                self.assertEqual(
+                    sorted(data[datetime.date(2022, 1, 1)]),
+                    ["actual", "early_planned", "late_planned", "remaining"])
+
+    def test_the_percentage_row_is_taken_not_the_cost_row_above_it(self):
+        data = parse_progress_curve(self._sheet(self.AIRPORT_WORDING))
+        first = data[datetime.date(2022, 1, 1)]
+        self.assertEqual(first["early_planned"], 10.0)     # 0.10 -> 10%, not 100
+        self.assertEqual(first["remaining"], 50.0)
+
+    def test_a_corrected_spelling_still_matches(self):
+        """"Cummulative" is a typo both files share; matching the whole word
+        would break the day someone fixes it."""
+        data = parse_progress_curve(self._sheet(
+            [w.replace("Cummulative", "Cumulative") for w in self.AIRPORT_WORDING]))
+        self.assertEqual(len(data[datetime.date(2022, 1, 1)]), 4)

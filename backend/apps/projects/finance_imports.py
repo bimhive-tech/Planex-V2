@@ -178,14 +178,27 @@ def parse_cashflow(upload):
 
 
 # The dashboard's "progress curve" sheet is transposed: month dates run across
-# one header row and each series is a row beneath it. Matched on the distinctive
-# part of each label, since the sheet's own wording is inconsistent about
-# spacing ("Cummulative Actual Cost  %") and spelling.
+# one header row and each series is a row beneath it.
+#
+# Matched on the least each label can be trusted to carry, because the wording
+# is the project team's own and varies per workbook. Two real files of the same
+# template disagree on every row but one:
+#
+#   Cummulative Early Budget Expense  %   vs   Cummulative Early Planned %
+#   Cummulative Late Budget  %            vs   Cummulative Late Panned %
+#   Cummulative Actual Cost  %            vs   Cummulative Actual  %
+#   Cumm Remaining  Cost%                 vs   Cummulative Remaining %
+#
+# Needling on "cummulative early budget" matched the first and not the second,
+# so the airport project imported its actual line alone and its S-curve came
+# out blank (2026-09-08). "cum" rather than "cummulative" also survives the
+# spelling being corrected, and the "%" is what separates each cumulative
+# PERCENTAGE row from the cost row of the same name directly above it.
 _CURVE_SERIES = {
-    "early_planned": ("cummulative early budget", "%"),
-    "late_planned": ("cummulative late budget", "%"),
-    "actual": ("cummulative actual", "%"),
-    "remaining": ("cumm remaining", "%"),
+    "early_planned": ("cum", "early", "%"),
+    "late_planned": ("cum", "late", "%"),
+    "actual": ("cum", "actual", "%"),
+    "remaining": ("cum", "remaining", "%"),
 }
 
 

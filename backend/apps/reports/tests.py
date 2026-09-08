@@ -4489,3 +4489,40 @@ class ImportedCurveSeriesTests(SimpleTestCase):
         derived, and one without a planned figure has nothing to compare."""
         ctx = self._ctx("snapshots", actual=[0, 10, 20, 30, 40, 50])
         self.assertIsNone(self._chart(ctx))
+
+
+class ScurveCalloutCollisionTests(SimpleTestCase):
+    """Two lines can end at the same figure — a planned curve and a remaining
+    curve both reach 100% — and their end-of-line callouts printed on top of
+    each other as "100.00%100.00%" (2026-09-08)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    def _labels(self, **series):
+        from reportlab.graphics.shapes import String
+
+        from .pdf_charts import scurve_chart
+
+        days = [datetime.date(2026, m, 1) for m in range(1, 5)]
+        ctx = {"scurve_source": "imported", "as_of": days[-1], "scurve": [
+            {"date": d, "planned": None, "late_planned": None, "actual": None, "forecast": None,
+             **{k: v[i] for k, v in series.items()}}
+            for i, d in enumerate(days)]}
+        cfg = default_config()
+        d = scurve_chart(cfg, ctx, 160 * mm, cfg["labels"])
+        return [o for o in d.contents if isinstance(o, String) and o.text.endswith("%")]
+
+    def test_two_lines_ending_at_the_same_value_do_not_overlap(self):
+        labels = self._labels(planned=[10, 40, 70, 100], forecast=[10, 40, 70, 100])
+        both = [s for s in labels if s.text == "100.00%"]
+        self.assertEqual(len(both), 2)                       # neither is dropped
+        self.assertNotEqual(both[0].y, both[1].y)            # and they are stacked
+
+    def test_lines_ending_far_apart_are_left_where_they_are(self):
+        labels = self._labels(planned=[10, 40, 70, 100], actual=[5, 15, 25, 30])
+        ys = sorted(s.y for s in labels)
+        self.assertGreater(ys[1] - ys[0], 7)                 # untouched, not nudged together
