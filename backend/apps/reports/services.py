@@ -1273,7 +1273,14 @@ def build_report_context(report):
             }
             for c in curve
         ]
+        # Said outright rather than left for the chart to infer from which
+        # series happen to be filled — an imported curve carrying only its
+        # actual line looked, to that inference, like no imported curve at
+        # all, and the chart fell through to the snapshot-derived path, found
+        # no planned value on any point and drew nothing (2026-09-08).
+        scurve_source = "imported"
     else:
+        scurve_source = "snapshots"
         scurve = [
             {
                 "date": s["date"],
@@ -1394,6 +1401,7 @@ def build_report_context(report):
         "submittals": submittals,
         "delays": delays,
         "scurve": scurve,
+        "scurve_source": scurve_source,
         # The report's own as-of date, so a chart can tell "already happened"
         # from "still ahead" — the progress curve splits its actual line from
         # its forecast run-out here (see pdf_charts.scurve_chart).

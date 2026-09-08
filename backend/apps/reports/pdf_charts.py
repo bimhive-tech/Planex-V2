@@ -952,7 +952,7 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     # the planned pair stops at the baseline finish, actual at the data date,
     # remaining only runs on from there — so unlike the derived curve below it
     # must keep every month, not just the ones carrying a planned value.
-    has_curve = any(p.get("late_planned") is not None for p in points)
+    has_curve = ctx.get("scurve_source") == "imported"
     series = points if has_curve else [p for p in points if p.get("planned") is not None]
     if len(series) < 2:
         return None
@@ -974,18 +974,27 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
         palette = cfg["colors"].get("chart_palette") or []
         late_color = palette[2] if len(palette) > 2 else cfg["colors"].get("gauge_average", "#9BBB59")
         remaining_color = palette[5] if len(palette) > 5 else cfg["colors"].get("gauge_warn", "#F79646")
-        chart.data = [
-            [p.get("planned") for p in series],
-            [p.get("late_planned") for p in series],
-            actual,
-            [p.get("forecast") for p in series],
+        # Only the series the sheet actually filled. A workbook can carry any
+        # subset — the planned pair stops at the baseline finish, remaining
+        # only starts after the data date, and one arrived with nothing but
+        # its actual line — and an all-empty row is a legend entry naming a
+        # line that was never drawn.
+        candidates = [
+            ([p.get("planned") for p in series], cfg["colors"]["chart_planned"],
+             labels.get("scurve_early_planned", "Cummulative Early Planned %")),
+            ([p.get("late_planned") for p in series], late_color,
+             labels.get("scurve_late_planned", "Cummulative Late Planned %")),
+            (actual, cfg["colors"]["chart_actual"],
+             labels.get("scurve_actual", "Cummulative Actual %")),
+            ([p.get("forecast") for p in series], remaining_color,
+             labels.get("scurve_remaining", "Cummulative Remaining %")),
         ]
-        swatches = [
-            (cfg["colors"]["chart_planned"], labels.get("scurve_early_planned", "Cummulative Early Planned %")),
-            (late_color, labels.get("scurve_late_planned", "Cummulative Late Planned %")),
-            (cfg["colors"]["chart_actual"], labels.get("scurve_actual", "Cummulative Actual %")),
-            (remaining_color, labels.get("scurve_remaining", "Cummulative Remaining %")),
-        ]
+        drawn = [(values, color, label) for values, color, label in candidates
+                 if any(v is not None for v in values)]
+        if not drawn:
+            return None
+        chart.data = [values for values, _, _ in drawn]
+        swatches = [(color, label) for _, color, label in drawn]
         return _finish_scurve(d, chart, series, swatches, cfg, width, height)
 
     # Split at the report's as-of date, not at the last snapshot: a project

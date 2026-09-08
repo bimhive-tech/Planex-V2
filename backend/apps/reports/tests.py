@@ -4426,3 +4426,66 @@ class WideTableColumnSplitTests(SimpleTestCase):
         table = resolve_table("discipline_progress", cfg, ctx, {"item": None}, avail_width=self.AVAIL)
         self.assertEqual(len(table._cellvalues), len(raw["rows"]) + 1)     # + the header row
         self.assertEqual(len(table._cellvalues[0]), len(raw["header"]))
+
+
+class ImportedCurveSeriesTests(SimpleTestCase):
+    """The S-curve prefers the dashboard's own progress-curve sheet, and a
+    workbook can fill any subset of its four series. One arrived carrying
+    nothing but its actual line: the chart decided "imported curve?" by
+    looking for a late-planned value, found none, fell through to the
+    snapshot-derived path, filtered to points with a planned value, had none
+    left, and drew nothing at all — a blank «منحنى الإنجاز» page on a project
+    with 53 real months of progress (2026-09-08)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .pdf_base import ensure_fonts
+        ensure_fonts()
+
+    def _ctx(self, source, **series):
+        days = [datetime.date(2026, m, 1) for m in range(1, 7)]
+        return {
+            "scurve_source": source,
+            "scurve": [
+                {"date": d, "planned": None, "late_planned": None, "actual": None, "forecast": None,
+                 **{k: v[i] for k, v in series.items()}}
+                for i, d in enumerate(days)
+            ],
+            "as_of": days[-1],
+        }
+
+    def _chart(self, ctx):
+        from .pdf_charts import scurve_chart
+
+        cfg = default_config()
+        return scurve_chart(cfg, ctx, 160 * mm, cfg["labels"])
+
+    def test_an_imported_curve_with_only_an_actual_line_still_draws(self):
+        ctx = self._ctx("imported", actual=[0, 10, 20, 30, 40, 50])
+        self.assertIsNotNone(self._chart(ctx))
+
+    def test_only_the_series_the_sheet_filled_reach_the_legend(self):
+        """An all-empty row is a legend entry naming a line never drawn."""
+        ctx = self._ctx("imported", actual=[0, 10, 20, 30, 40, 50])
+        d = self._chart(ctx)
+        chart = next(o for o in d.contents if hasattr(o, "data"))
+        self.assertEqual(len(chart.data), 1)
+
+    def test_a_full_four_series_curve_is_unchanged(self):
+        ctx = self._ctx(
+            "imported",
+            planned=[0, 20, 40, 60, 80, 100], late_planned=[0, 15, 30, 45, 60, 75],
+            actual=[0, 10, 20, 30, 40, 50], forecast=[None, None, None, 60, 80, 100])
+        d = self._chart(ctx)
+        chart = next(o for o in d.contents if hasattr(o, "data"))
+        self.assertEqual(len(chart.data), 4)
+
+    def test_a_curve_with_no_values_at_all_draws_nothing(self):
+        self.assertIsNone(self._chart(self._ctx("imported")))
+
+    def test_the_snapshot_derived_curve_still_needs_a_planned_value(self):
+        """Unchanged for projects with no imported curve: those points are
+        derived, and one without a planned figure has nothing to compare."""
+        ctx = self._ctx("snapshots", actual=[0, 10, 20, 30, 40, 50])
+        self.assertIsNone(self._chart(ctx))
