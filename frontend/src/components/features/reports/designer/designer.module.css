@@ -988,14 +988,6 @@
   font-weight: 700;
 }
 
-/* A repeated header inside the body — the second and later column groups of a
-   table too wide for one page (_data_table's header_rows). Same treatment as
-   the real header row above it, and no zebra, for the same reason. */
-.tableLive[data-kind="data"] tr[data-head="on"] td {
-  background: var(--tableHeaderBg);
-  color: var(--tableHeaderText);
-  font-weight: 700;
-}
 
 /* "info" (project_info) — mirrors pdf_tables.py's _info_table: the label
    column always shaded, label right-aligned + trailing bullet, value

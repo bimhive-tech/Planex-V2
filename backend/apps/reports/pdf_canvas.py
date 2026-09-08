@@ -973,45 +973,57 @@ _WIDE_LABEL_COL_MM = 34
 _WIDE_MIN_COL_MM = 20
 
 
-def _split_wide_columns(header, rows, avail_width):
-    """`(header, rows, header_rows)` — a table too wide to read, cut into
-    groups of columns stacked down the page.
+def _column_groups(header, rows, avail_width):
+    """`[(header, rows), ...]` — a table too wide to read, cut into groups of
+    columns that each fit the page. One entry (the input) when it already
+    fits, which is every table but this one today.
 
-    Column 0 is the row label and repeats in every group. Every group after
-    the first carries its own header as a BODY row, whose index is returned in
-    `header_rows` so both renderers style it like the real header instead of
-    as data. Groups are evened out rather than filled greedily — 24 columns
-    become 6+6+6+6, not 7+7+7+3 — and the last one is padded so the table
-    stays rectangular.
-
-    Returns its input unchanged when the table already fits, which is every
-    table but this one today."""
+    Column 0 is the row label and repeats in every group so each reads on its
+    own. Groups are evened out rather than filled greedily — 24 columns become
+    6+6+6+6, not 7+7+7+3 — and every group is padded to the same width, since
+    a ragged row shifts reportlab's whole column grid."""
     import math
 
     data_cols = len(header) - 1
     if data_cols < 2 or not avail_width:
-        return header, rows, []
+        return [(header, rows)]
     room = avail_width / mm - _WIDE_LABEL_COL_MM
     per_group = max(1, int(room // _WIDE_MIN_COL_MM))
     if data_cols <= per_group:
-        return header, rows, []
+        return [(header, rows)]
 
     size = math.ceil(data_cols / math.ceil(data_cols / per_group))
-    groups = [list(range(i, min(i + size, len(header))))
-              for i in range(1, len(header), size)]
     width = 1 + size
 
     def line(label, cells):
         return [label] + cells + [""] * (width - 1 - len(cells))
 
-    out_rows, header_rows = [], []
-    for gi, idx in enumerate(groups):
-        if gi:
-            header_rows.append(len(out_rows))
-            out_rows.append(line(header[0], [header[i] for i in idx]))
-        for r in rows:
-            out_rows.append(line(r[0], [r[i] for i in idx]))
-    return line(header[0], [header[i] for i in groups[0]]), out_rows, header_rows
+    out = []
+    for start in range(1, len(header), size):
+        idx = list(range(start, min(start + size, len(header))))
+        out.append((line(header[0], [header[i] for i in idx]),
+                    [line(r[0], [r[i] for i in idx]) for r in rows]))
+    return out
+
+
+def _split_wide_columns(header, rows, avail_width):
+    """`_column_groups` stacked back into ONE table: `(header, rows,
+    header_rows)`, where every group after the first carries its own header as
+    a BODY row whose index is listed in `header_rows`.
+
+    Used where the caller can't put each group on its own page — a table
+    embedded in flowing rich text — and as the row layout both renderers
+    address by index. The canvas/PDF pages come from `_column_groups`
+    directly; see resolve_table's `as_parts`."""
+    groups = _column_groups(header, rows, avail_width)
+    if len(groups) == 1:
+        return header, rows, []
+    out_rows, header_rows = list(groups[0][1]), []
+    for group_header, group_rows in groups[1:]:
+        header_rows.append(len(out_rows))
+        out_rows.append(group_header)
+        out_rows.extend(group_rows)
+    return groups[0][0], out_rows, header_rows
 
 
 def _label_first_widths(n_cols, avail_width):
@@ -1064,6 +1076,7 @@ def _source_col_fractions(source, avail_width, hidden_cols=None):
 def resolve_table(
     source: str, cfg: dict, ctx: dict, scope: dict, avail_width: float = None, raw: bool = False,
     overrides: dict | None = None, style: dict | None = None, scope_zone_id: str | None = None,
+    as_parts: bool = False,
 ):
     """Build a ready-to-draw Table flowable for one of reportElements.ts's
     TABLE_SOURCES (plus the item-scoped `item.children`, available on a
@@ -1342,13 +1355,22 @@ def resolve_table(
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         # Split AFTER the overrides: they address the source's own row/column
         # indices, which the split rewrites.
-        header, rows, header_rows = _split_wide_columns(header, rows, avail_width)
-        points, fractions = (_label_first_widths(len(header), avail_width)
-                             if header_rows else (None, None))
+        groups = _column_groups(header, rows, avail_width)
+        points, fractions = (_label_first_widths(len(groups[0][0]), avail_width)
+                             if len(groups) > 1 else (None, None))
+        if as_parts and len(groups) > 1:
+            # One table per group, so the caller can give each its own page —
+            # the client asked for groups not to run on under one another.
+            return [_data_table(cfg, styles, gh, gr, col_widths=points, avail_width=avail_width)
+                    for gh, gr in groups]
         if raw:
-            return {"kind": "data", "header": header, "rows": rows,
+            # The element's own box holds the FIRST group and nothing else —
+            # the rest arrive as their own pages, so the canvas shows what the
+            # PDF prints instead of one long clipped table.
+            return {"kind": "data", "header": groups[0][0], "rows": groups[0][1],
                     "col_widths": fractions or _source_col_fractions(source, avail_width, hidden_cols),
-                    "header_rows": header_rows}
+                    "column_groups": [{"header": gh, "rows": gr} for gh, gr in groups[1:]]}
+        header, rows, header_rows = _split_wide_columns(header, rows, avail_width)
         return _data_table(cfg, styles, header, rows, col_widths=points,
                            avail_width=avail_width, header_rows=header_rows)
 
@@ -1802,21 +1824,32 @@ def _expand_table_overflow(instances: list, cfg: dict, ctx: dict, design: dict) 
             # specifically — simpler than re-splitting per chunk, at the
             # cost of a little unused space on continuation pages.
             content_h = h - (_CAPTION_H if props.get("show_caption") else 0) - (_TITLE_H if _table_or_chart_title(props, cfg) else 0)
-            table = resolve_table(
+            # A table too wide for the page comes back as one piece per
+            # column group, each of which gets its own page: the client asked
+            # for a new group to start a new page rather than run on under
+            # the previous one (2026-09-08). Everything else is one piece and
+            # behaves exactly as before.
+            parts = resolve_table(
                 source, cfg, ctx, inst.scope, avail_width=w, overrides=props.get("overrides"), style=props,
-                scope_zone_id=props.get("scope_zone_id"),
+                scope_zone_id=props.get("scope_zone_id"), as_parts=True,
             )
-            if table is None:
+            if parts is None:
                 continue
-            _, natural_h = table.wrap(w, content_h)
-            if natural_h <= content_h:
-                continue
+            if not isinstance(parts, list):
+                parts = [parts]
             # Continuation pages hold nothing but this table and reflow to
             # the full content area, so they fit far more rows than the
             # source box does — split them against that taller height.
             page_w_mm, _ = _page_size_mm(design, inst.page)
             _, _, _, cont_h = _continuation_box(el, design, page_w_mm, page_h_mm)
-            candidate = _split_table_chunks_balanced(table, w, content_h, rest_h=cont_h)
+            candidate = []
+            for i, part in enumerate(parts):
+                box_h = content_h if i == 0 else cont_h
+                _, natural_h = part.wrap(w, box_h)
+                if natural_h <= box_h:
+                    candidate.append(part)
+                else:
+                    candidate.extend(_split_table_chunks_balanced(part, w, box_h, rest_h=cont_h))
             if len(candidate) > 1:
                 overflow_el, chunks = el, candidate
                 break

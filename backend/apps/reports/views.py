@@ -596,13 +596,33 @@ class ReportViewSet(viewsets.ModelViewSet):
                     # (that row really was landing on its own orphaned,
                     # near-blank continuation page there), not just here.
                     header_rows = 1 if grid["kind"] != "info" else 0
+                    # A table too wide for the page is cut into groups of
+                    # COLUMNS, each starting its own page, and every group
+                    # after the first carries its own header as the row at
+                    # its start (see pdf_canvas._split_wide_columns). Those
+                    # pages show that header instead of the table's first —
+                    # printing group one's column names over group three's
+                    # numbers would be worse than no header at all.
+                    # Every row paired with the header that belongs to it. A
+                    # table too wide for the page is cut into groups of
+                    # COLUMNS, each starting its own page with its own column
+                    # names (see pdf_canvas._column_groups), so a chunk can no
+                    # longer assume the table's first header — printing group
+                    # one's column names over group three's numbers would be
+                    # worse than no header at all. Every other table is one
+                    # group, and this is the plain sequence it always was.
+                    seq = [(grid["header"], r) for r in rows]
+                    for group in grid.get("column_groups") or []:
+                        seq += [(group["header"], r) for r in group["rows"]]
                     offset = len(chunk0._cellvalues) - header_rows
                     chunks = []
                     for flowable in chunk_flowables[1:]:
                         count = len(flowable._cellvalues) - header_rows
+                        block = seq[offset:offset + count]
                         chunks.append({
-                            "status": "ok", "kind": grid["kind"], "header": grid["header"],
-                            "rows": rows[offset:offset + count], "style": style,
+                            "status": "ok", "kind": grid["kind"],
+                            "header": block[0][0] if block else grid["header"],
+                            "rows": [r for _, r in block], "style": style,
                             # Continuation pages are the same table, so they
                             # must keep its column proportions.
                             "col_widths": grid.get("col_widths"),

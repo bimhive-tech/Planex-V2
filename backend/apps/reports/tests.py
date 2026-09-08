@@ -4402,30 +4402,52 @@ class WideTableColumnSplitTests(SimpleTestCase):
         self.assertEqual(len(seen), len(set(seen)))                 # nothing duplicated
         self.assertEqual(len(seen), 24 * 12)                        # nothing dropped
 
-    def test_the_split_narrows_the_real_report_table(self):
-        """End to end: the same context that produced 25 columns at ~7mm."""
+    def _wide_ctx(self):
         ctx = _full_ctx()
         ctx["discipline_columns"] = [f"Package {i}" for i in range(1, 25)]
         ctx["discipline"] = [{"name": f"L.{u}", "values": [50.0] * 24} for u in range(12)]
-        raw = resolve_table("discipline_progress", default_config(), ctx, {"item": None},
+        return ctx
+
+    def test_the_split_narrows_the_real_report_table(self):
+        """End to end: the same context that produced 25 columns at ~7mm."""
+        raw = resolve_table("discipline_progress", default_config(), self._wide_ctx(), {"item": None},
                             avail_width=self.AVAIL, raw=True)
         self.assertEqual(len(raw["header"]), 7)
-        self.assertTrue(raw["header_rows"])
         widths_mm = [f * self.AVAIL / mm for f in raw["col_widths"]]
         self.assertTrue(all(w >= 20 for w in widths_mm[1:]), widths_mm)
 
-    def test_the_canvas_and_the_pdf_get_the_same_rows(self):
+    def test_the_element_holds_the_first_group_and_the_rest_are_their_own_pages(self):
+        """The client asked for a new column group to start a new page rather
+        than run on under the previous one (2026-09-08)."""
+        raw = resolve_table("discipline_progress", default_config(), self._wide_ctx(), {"item": None},
+                            avail_width=self.AVAIL, raw=True)
+        self.assertEqual(len(raw["rows"]), 12)                     # the units, once
+        self.assertEqual(len(raw["column_groups"]), 3)             # 24 columns -> 6+6+6+6
+        for group in raw["column_groups"]:
+            self.assertEqual(len(group["header"]), len(raw["header"]))
+            self.assertEqual(len(group["rows"]), 12)
+            self.assertNotEqual(group["header"], raw["header"])    # its own column names
+
+    def test_the_canvas_and_the_pdf_get_the_same_groups(self):
         """The parity invariant: the Customize preview draws what the PDF
         draws, so the split has to happen once, before they diverge."""
-        ctx = _full_ctx()
-        ctx["discipline_columns"] = [f"Package {i}" for i in range(1, 25)]
-        ctx["discipline"] = [{"name": f"L.{u}", "values": [50.0] * 24} for u in range(12)]
         cfg = default_config()
+        ctx = self._wide_ctx()
         raw = resolve_table("discipline_progress", cfg, ctx, {"item": None},
                             avail_width=self.AVAIL, raw=True)
-        table = resolve_table("discipline_progress", cfg, ctx, {"item": None}, avail_width=self.AVAIL)
-        self.assertEqual(len(table._cellvalues), len(raw["rows"]) + 1)     # + the header row
-        self.assertEqual(len(table._cellvalues[0]), len(raw["header"]))
+        parts = resolve_table("discipline_progress", cfg, ctx, {"item": None},
+                              avail_width=self.AVAIL, as_parts=True)
+        self.assertEqual(len(parts), 1 + len(raw["column_groups"]))
+        for part, group in zip(parts, [{"header": raw["header"], "rows": raw["rows"]}, *raw["column_groups"]]):
+            self.assertEqual(len(part._cellvalues), len(group["rows"]) + 1)
+            self.assertEqual(len(part._cellvalues[0]), len(group["header"]))
+
+    def test_a_table_that_fits_is_still_a_single_piece(self):
+        ctx = _full_ctx()
+        cfg = default_config()
+        parts = resolve_table("zone_progress", cfg, ctx, {"item": None},
+                              avail_width=self.AVAIL, as_parts=True)
+        self.assertFalse(isinstance(parts, list))
 
 
 class ImportedCurveSeriesTests(SimpleTestCase):

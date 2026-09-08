@@ -102,16 +102,19 @@ export type TableColWidths = number[] | null;
  * shipped, i.e. hidden rows already removed. */
 export type TableTintRows = number[];
 
-/** Body rows that ARE headers. A table too wide for the page is cut into
- * groups of columns stacked down it, and every group after the first carries
- * its own header inline — see pdf_canvas._split_wide_columns. Indices into
- * `rows` as shipped. */
-export type TableHeaderRows = number[];
+/** The further column groups of a table too wide for one page. Each starts
+ * its own continuation page carrying its own column names — see
+ * pdf_canvas._column_groups. The element's own box holds the first group,
+ * which is what `header`/`rows` above describe. */
+export interface TableColumnGroup {
+  header: string[];
+  rows: TableDataRow[];
+}
 
 export type TableDataResult =
-  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
-  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
-  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; header_rows?: TableHeaderRows }
+  | { status: "ok"; kind: "info"; header: null; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; column_groups?: TableColumnGroup[] }
+  | { status: "ok"; kind: "data"; header: string[]; rows: TableDataRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; column_groups?: TableColumnGroup[] }
+  | { status: "ok"; kind: "hierarchy"; header: string[]; rows: TableHierarchyRow[]; style: TableStyle; col_widths?: TableColWidths; tint_rows?: TableTintRows; column_groups?: TableColumnGroup[] }
   | { status: "no_data"; style: TableStyle };
 export type TableDataMap = Record<string, TableDataResult>;
 

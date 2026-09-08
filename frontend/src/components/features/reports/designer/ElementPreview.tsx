@@ -1347,9 +1347,6 @@ function LiveTableBody({
 
   const vars = tableStyleVars(live.style);
   const tint = new Set(live.tint_rows ?? []);
-  // Body rows that are really headers — a too-wide table's later column
-  // groups (see reportLayout's TableHeaderRows).
-  const headed = new Set(live.header_rows ?? []);
 
   if (live.kind === "info") {
     return (
@@ -1457,11 +1454,9 @@ function LiveTableBody({
             // with it — exactly what _data_table does (it skips tinted rows
             // when laying the zebra down).
             const tinted = tint.has(i);
-            const isHead = headed.has(i);
             return (
-              <tr key={i} data-tint={tinted ? "on" : undefined} data-head={isHead ? "on" : undefined}
-                  data-zebra={live.style.zebra && !tinted && !isHead && i % 2 === 1 ? "on" : undefined}
-                  {...rowProps(i)}>
+              <tr key={i} data-tint={tinted ? "on" : undefined}
+                  data-zebra={live.style.zebra && !tinted && i % 2 === 1 ? "on" : undefined} {...rowProps(i)}>
                 {commitHideRow && (
                   <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
                 )}
