@@ -27,8 +27,18 @@ def latest_schedule_import(project, as_of=None):
     back with its zones duplicated once per batch and its activity weights
     summed across all of them (found 2026-08-30 on a report dated 3 Mar 2026
     against batches dated 11/30 Aug 2026 — 15 zones rendered as 30). When
-    `as_of` is earlier than every batch, the earliest batch is the closest
-    thing to the requested date, so that's what it falls back to."""
+    `as_of` is earlier than every batch, the earliest DATE is the closest
+    thing to the requested date, so that's what it falls back to — but among
+    several imports sharing that date it takes the LAST one uploaded, same
+    tie-break as the on-or-before branch above. A re-import is a restatement
+    of the same schedule, not a second schedule, so the newest upload for a
+    date supersedes the earlier ones no matter which side of `as_of` it sits
+    on. Ordering the fallback by `created_at` ascending instead made a report
+    dated before its imports read the FIRST upload of that day: a July report
+    on a project imported twice on 7 Sep rendered the 08:55 upload — a
+    different project's workbook, uploaded by mistake and immediately
+    corrected at 09:01 — so the Cairo airport report came out full of
+    Mansoura's buildings and zones (2026-09-07)."""
     from .models import ScheduleImport
 
     qs = ScheduleImport.objects.filter(project=project)
@@ -36,7 +46,7 @@ def latest_schedule_import(project, as_of=None):
         on_or_before = qs.filter(date__lte=as_of).order_by("-date", "-created_at").first()
         if on_or_before is not None:
             return on_or_before
-        return qs.order_by("date", "created_at").first()
+        return qs.order_by("date", "-created_at").first()
     return qs.order_by("-date", "-created_at").first()
 
 

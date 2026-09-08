@@ -7,7 +7,7 @@ import copy
 import datetime
 import re
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from apps.projects.models import ProjectImage, ProjectScope, Submittal, Variation
 from apps.projects.services import (
@@ -1015,8 +1015,19 @@ def build_report_context(report):
     planned = _planned_progress(project, as_of, use_imported=(progress is None))
     duration = _duration(project, as_of)
 
+    # Pinned to the resolved batch like every other current-state read above.
+    # Milestones are upserted by (project, title) and never deleted, so an
+    # unpinned read accumulated every import's: an airport project whose first
+    # upload was the wrong workbook listed 264 of another job's handover dates
+    # («استلام عمارة (A15)» on a project with no buildings, 2026-09-07). Ones
+    # added by hand carry no batch and always show — they belong to the
+    # project, not to any import.
+    milestone_qs = project.milestones
+    if schedule_import is not None:
+        milestone_qs = milestone_qs.filter(
+            Q(schedule_import=schedule_import) | Q(schedule_import=None))
     milestones = list(
-        project.milestones.order_by("sort_order", "date").values("title", "date", "status")
+        milestone_qs.order_by("sort_order", "date").values("title", "date", "status")
     )
     snapshots = list(
         project.snapshots.order_by("date")

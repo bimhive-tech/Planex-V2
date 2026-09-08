@@ -4292,3 +4292,52 @@ class SubcontractorInfoRowTests(SimpleTestCase):
         self.assertIn("Sub-contractor", rows)
         # Sits with the other parties, right after the contractor's consultant.
         self.assertEqual(rows.index("Sub-contractor"), rows.index("Contractor's Consultant") + 1)
+
+
+class MilestoneBatchPinningTests(TestCase):
+    """Milestones are upserted by (project, title) and never deleted, so the
+    unpinned read they used to get accumulated every import's. An airport
+    project whose first upload was the wrong workbook listed 264 of another
+    job's per-building handover dates — «استلام عمارة (A15)» on a project
+    with no buildings (2026-09-07)."""
+
+    def setUp(self):
+        from apps.projects.models import Milestone, ScheduleImport
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Airport", project_type=Project.ProjectType.COMMERCIAL)
+        day = datetime.date(2026, 9, 7)
+        self.wrong = ScheduleImport.objects.create(
+            company=self.company, project=self.project, date=day, source="wrong.xlsx")
+        self.right = ScheduleImport.objects.create(
+            company=self.company, project=self.project, date=day, source="right.xlsx")
+        Milestone.objects.create(
+            company=self.company, project=self.project, schedule_import=self.wrong,
+            title="Handover of another job's building")
+        Milestone.objects.create(
+            company=self.company, project=self.project, schedule_import=self.right,
+            title="Terminal fit-out complete")
+        Milestone.objects.create(
+            company=self.company, project=self.project, title="Added by hand")
+
+    def _titles(self, report_date):
+        from .models import Report
+        from .services import build_report_context
+
+        report = Report.objects.create(
+            company=self.company, project=self.project, title="Monthly", report_date=report_date)
+        return [m["title"] for m in build_report_context(report)["milestones"]]
+
+    def test_only_the_resolved_batch_and_hand_added_ones_show(self):
+        titles = self._titles(datetime.date(2026, 9, 30))
+        self.assertIn("Terminal fit-out complete", titles)
+        self.assertIn("Added by hand", titles)   # belongs to the project, not an import
+        self.assertNotIn("Handover of another job's building", titles)
+
+    def test_a_report_dated_before_every_import_also_skips_the_stale_batch(self):
+        """The report that showed the symptom was dated July against two
+        September imports — the branch that resolves the closest batch, not
+        the on-or-before one."""
+        titles = self._titles(datetime.date(2026, 7, 30))
+        self.assertNotIn("Handover of another job's building", titles)

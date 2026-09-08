@@ -4,7 +4,7 @@ from rest_framework import serializers
 from django.conf import settings
 
 from .models import Activity, Project, ProjectImage, ProjectMember, ProjectScope, ScheduleImport
-from .services import project_overall_progress
+from .services import latest_schedule_import, project_overall_progress
 
 STAKEHOLDER_FIELDS = [
     "client_name", "consultant_name", "consultant_phone", "consultant_email",
@@ -74,12 +74,22 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     def get_overall_progress(self, obj):
         return project_overall_progress(obj)
 
+    def _current_activities(self, obj):
+        """The activities of the same batch `overall_progress` is computed
+        from. A re-import keeps the previous batch's rows (see ScheduleImport),
+        so counting them unpinned adds every generation together: an airport
+        project whose first upload was the wrong workbook reported 24,868
+        activities — 24,377 of them another job's — right beside a progress
+        figure taken from the 491 that are actually its own (2026-09-07)."""
+        batch = latest_schedule_import(obj)
+        return obj.activities.filter(schedule_import=batch) if batch else obj.activities
+
     def get_activity_count(self, obj):
-        return obj.activities.count()
+        return self._current_activities(obj).count()
 
     def get_progress_breakdown(self, obj):
         from django.db.models import Count, Q
-        agg = obj.activities.aggregate(
+        agg = self._current_activities(obj).aggregate(
             total=Count("id"),
             completed=Count("id", filter=Q(progress_percent__gte=100)),
             not_started=Count("id", filter=Q(progress_percent__lte=0)),

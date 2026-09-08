@@ -330,6 +330,31 @@ class P6ScheduleImportTests(TestCase):
         self.assertEqual(latest_schedule_import(project, as_of=datetime.date(2026, 1, 20)).date,
                          datetime.date(2026, 1, 15))
 
+    def test_a_report_predating_every_import_reads_the_latest_of_the_closest_day(self):
+        """A re-import restates the same schedule, so the last upload for a
+        date wins — including in the fallback taken when the report's own date
+        is earlier than every batch. Ordering that fallback by `created_at`
+        ascending picked the FIRST upload of the closest day instead: a July
+        report on a project imported twice on 7 Sep rendered the 08:55
+        upload — a different project's workbook, uploaded by mistake and
+        corrected six minutes later — so the airport report came out full of
+        the other project's buildings and zones (2026-09-07)."""
+        import datetime
+
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import latest_schedule_import
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        same_day = datetime.date(2026, 9, 7)
+        import_workbook(project, self._workbook(), source="wrong.xlsx", snapshot_date=same_day)
+        good = import_workbook(project, self._workbook(), source="right.xlsx", snapshot_date=same_day)
+
+        resolved = latest_schedule_import(project, as_of=datetime.date(2026, 7, 30))
+        self.assertEqual(str(resolved.id), good["schedule_import_id"])
+        self.assertEqual(resolved.source, "right.xlsx")
+
     def test_reimport_does_not_double_count_current_progress(self):
         """The real risk of keeping old batches around: every "current state"
         query must filter to the latest batch specifically, or a re-import
@@ -1047,6 +1072,33 @@ class ProjectApiTests(TestCase):
         detail = self.client.get(f"{base}/").json()
         self.assertEqual(detail["overall_progress"], 50.0)
         self.assertEqual(detail["activity_count"], 1)
+
+    def test_overview_counts_only_the_current_import(self):
+        """overall_progress was already pinned to the current batch while the
+        counts beside it were not, so the same card mixed the two: an airport
+        project whose first upload was the wrong workbook read "24,868
+        activities" — 24,377 of them another job's — next to a percentage taken
+        from the 491 that were actually its own (2026-09-07)."""
+        import datetime
+
+        from .models import Activity, ProjectScope, ScheduleImport
+
+        p = Project.objects.create(company=self.company_a, name="Airport", project_type="infrastructure")
+        scope = ProjectScope.objects.create(
+            company=self.company_a, project=p, scope_type="phase", name="Civil")
+        day = datetime.date(2026, 9, 7)
+        for source, count in (("wrong.xlsx", 3), ("right.xlsx", 1)):
+            batch = ScheduleImport.objects.create(
+                company=self.company_a, project=p, date=day, source=source)
+            for i in range(count):
+                Activity.objects.create(
+                    company=self.company_a, project=p, scope=scope, schedule_import=batch,
+                    name=f"{source} {i}", weight=1, progress_percent=100)
+
+        self.login("admin@acme.com")
+        detail = self.client.get(f"/api/projects/{p.id}/").json()
+        self.assertEqual(detail["activity_count"], 1)
+        self.assertEqual(detail["progress_breakdown"]["total"], 1)
 
     def test_viewer_cannot_edit_structure(self):
         p = Project.objects.create(company=self.company_a, name="Depot2", project_type="industrial")
