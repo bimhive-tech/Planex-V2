@@ -1,7 +1,7 @@
 "use client";
 
 // Visual schedule health: compares time elapsed vs work done, and plots start,
-// planned finish, revised finish and "today" on one track — the at-a-glance
+// planned finish and revised finish read from the legend below — the at-a-glance
 // picture a PM actually wants from the overview.
 import { formatDate } from "@/lib/format";
 import styles from "./scheduleTimeline.module.css";
@@ -16,7 +16,6 @@ export function ScheduleTimeline({ start, finish, revised, progress }: {
   }
   const s = new Date(start).getTime();
   const f = new Date(finish).getTime();
-  const r = revised ? new Date(revised).getTime() : null;
   // Floored to the start of the day (not Date.now()'s raw millisecond) so
   // "today" is stable across a render: this is a "use client" component,
   // but Next still renders it once on the server and once on the client
@@ -25,10 +24,6 @@ export function ScheduleTimeline({ start, finish, revised, progress }: {
   // trip React's hydration mismatch check. Day-granularity is also just
   // the right precision for a timeline showing whole days remaining.
   const now = Math.floor(Date.now() / DAY) * DAY;
-  const spanEnd = Math.max(f, r ?? f, now);
-  const span = Math.max(1, spanEnd - s);
-  const at = (t: number) => Math.max(0, Math.min(100, ((t - s) / span) * 100));
-
   const totalDays = Math.max(1, Math.round((f - s) / DAY));
   const elapsedDays = Math.max(0, Math.round((Math.min(now, f) - s) / DAY));
   const remaining = Math.round((f - now) / DAY);
@@ -48,15 +43,6 @@ export function ScheduleTimeline({ start, finish, revised, progress }: {
       <div className={styles.compare}>
         <Bar label="Time elapsed" pct={timePct} tone="time" />
         <Bar label="Work done" pct={workPct} tone="work" />
-      </div>
-
-      <div className={styles.track}>
-        <span className={styles.elapsed} style={{ ["--x" as string]: `${at(now)}%` }} />
-        <Marker x={at(f)} tone="planned" title={`Planned finish · ${formatDate(finish)}`} />
-        {r && revised && r !== f && (
-          <Marker x={at(r)} tone="revised" title={`Revised finish · ${formatDate(revised)}`} />
-        )}
-        <span className={styles.today} style={{ ["--x" as string]: `${at(now)}%` }} title="Today" />
       </div>
 
       <div className={styles.legend}>
@@ -81,10 +67,6 @@ function Bar({ label, pct, tone }: { label: string; pct: number; tone: string })
       <span className={`${styles.barPct} tnum`}>{pct}%</span>
     </div>
   );
-}
-
-function Marker({ x, tone, title }: { x: number; tone: string; title: string }) {
-  return <span className={`${styles.marker} ${styles[`mk_${tone}`]}`} style={{ ["--x" as string]: `${x}%` }} title={title} />;
 }
 
 function Leg({ tone, label, value }: { tone: string; label: string; value: string }) {

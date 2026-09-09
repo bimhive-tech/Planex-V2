@@ -404,3 +404,47 @@ class DashboardImportTests(TestCase):
         resp = self.client.post(f"/api/projects/{self.project.id}/dashboard/import/", {"file": upload})
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(sorted(resp.json()["imported"]), ["cashflow", "invoices"])
+
+
+class ProgressSeriesSourceTests(TestCase):
+    """The Overview's progress-over-time chart and the report's S-curve are the
+    same story, so they read the same data: the dashboard's own progress curve
+    where the workbook supplied one (client ask, 2026-09-09)."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial",
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
+
+    def _curve(self, rows):
+        for day, early, actual in rows:
+            ProgressCurvePoint.objects.create(
+                company=self.company, project=self.project, date=day,
+                early_planned=early, actual=actual)
+
+    def test_the_imported_curve_wins(self):
+        from .services import progress_series
+
+        self._curve([(datetime.date(2026, 1, 1), 10, 8), (datetime.date(2026, 2, 1), 30, 25)])
+        self.assertEqual(progress_series(self.project), [
+            {"date": datetime.date(2026, 1, 1), "overall_progress": 8.0, "planned": 10.0},
+            {"date": datetime.date(2026, 2, 1), "overall_progress": 25.0, "planned": 30.0},
+        ])
+
+    def test_a_month_the_curve_never_measured_is_left_out(self):
+        """Its actual line stops at the data date; drawing the rest as zero
+        would show the project falling off a cliff."""
+        from .services import progress_series
+
+        self._curve([(datetime.date(2026, 1, 1), 10, 8), (datetime.date(2026, 2, 1), 30, None)])
+        self.assertEqual([p["date"] for p in progress_series(self.project)],
+                         [datetime.date(2026, 1, 1)])
+
+    def test_without_a_curve_it_still_derives_from_readings(self):
+        """Unchanged for every project that has no imported curve."""
+        from .services import progress_series
+
+        series = progress_series(self.project)
+        self.assertTrue(series)                     # the live "today" point
+        self.assertIn("overall_progress", series[0])

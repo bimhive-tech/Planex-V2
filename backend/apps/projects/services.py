@@ -175,10 +175,28 @@ def progress_series(project, max_points=60) -> list:
       • each import snapshot (ProgressSnapshot) — reflects imported baselines,
       • a live "today" point from the current overall,
     so the chart moves whenever progress or the planned dates change. Planned is
-    derived from the project's dates, so editing them updates the baseline too."""
+    derived from the project's dates, so editing them updates the baseline too.
+
+    A project whose dashboard workbook supplied its own progress curve uses
+    THAT instead, exactly as the report's S-curve does — the client asked for
+    the Overview chart and the S-curve to tell the same story (2026-09-09).
+    It is the curve they publish, so anything derived here could only
+    contradict it. Months the curve leaves without an actual reading are left
+    out rather than drawn as zero."""
     from django.utils import timezone
 
     from .models import ProgressEntry
+
+    curve = list(project.curve_points.order_by("date")
+                 .values("date", "early_planned", "actual"))
+    if curve:
+        return [
+            {"date": c["date"],
+             "overall_progress": round(float(c["actual"]), 1),
+             "planned": (round(float(c["early_planned"]), 1)
+                         if c["early_planned"] is not None else None)}
+            for c in curve if c["actual"] is not None
+        ][-max_points:]
 
     actual = {}  # date -> overall %
 
