@@ -109,7 +109,7 @@ export function CashFlowPanel({ projectId, canManage }: { projectId: string; can
             <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
             <Button size="sm" variant="secondary" disabled={importing}
               onClick={() => fileRef.current?.click()}>
-              {importing ? "Importing…" : "Import Excel"}
+              {importing ? "Importing…" : "Import cash flow only"}
             </Button>
             {dirty && (
               <Button size="sm" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save changes"}</Button>

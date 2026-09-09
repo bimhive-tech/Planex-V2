@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.constants import Permission
 
-from .finance_imports import import_cashflow, import_invoices
+from .finance_imports import import_cashflow, import_dashboard, import_invoices
 from .models import CashFlowEntry, Invoice, Project
 
 MAX_IMPORT_BYTES = 40 * 1024 * 1024
@@ -110,6 +110,44 @@ class CashFlowImportView(APIView):
             raise ValidationError({"file": str(exc)})
         except Exception as exc:  # a corrupt workbook shouldn't 500
             raise ValidationError({"file": f"Couldn't read this workbook: {exc}"})
+        return Response(result)
+
+
+def _checked_upload(request):
+    """The request's uploaded workbook, or a 400 explaining what's wrong."""
+    upload = request.FILES.get("file")
+    if not upload:
+        raise ValidationError({"file": "No file uploaded."})
+    if not upload.name.lower().endswith((".xlsx", ".xlsm")):
+        raise ValidationError({"file": "Upload an .xlsx or .xlsm file."})
+    if upload.size > MAX_IMPORT_BYTES:
+        raise ValidationError({"file": "File is too large (max 40 MB)."})
+    return upload
+
+
+class DashboardImportView(APIView):
+    """One upload for the whole dashboard workbook — cash flow, the progress
+    curve behind the report's S-curve, and the invoice extracts.
+
+    The same file feeds all three and used to need uploading once per panel
+    (client ask, 2026-09-09). A workbook carrying only some of those sheets
+    imports what it has: parts whose layout isn't present come back under
+    `skipped` rather than failing the upload, so one missing sheet can't hide
+    what the others brought in."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, project_id):
+        project = _project(request, project_id)
+        _require_manage_finances(request)
+        upload = _checked_upload(request)
+        result = import_dashboard(project, upload)
+        if not result["imported"]:
+            # Nothing at all was recognised — that IS a failed upload, and the
+            # reasons are more use to the reader than a generic refusal.
+            raise ValidationError({"file": " ".join(result["skipped"].values())
+                                   or "Nothing in this workbook could be imported."})
         return Response(result)
 
 

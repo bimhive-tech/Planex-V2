@@ -16,6 +16,8 @@ import re
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
+import io
+
 import openpyxl
 from django.db import transaction
 
@@ -371,13 +373,19 @@ def _locate_extract_header(ws):
     sub-headers; group_row is the nearest row above it carrying the per-extract
     label (the label only occupies the first cell of its merged span — read_only
     cells outside that first cell come back None, same as every other merged
-    header in these trackers)."""
+    header in these trackers).
+
+    Rows are fetched defensively: `iter_rows` yields NOTHING for an empty
+    sheet, so `next()` on it raised StopIteration and took the whole invoice
+    import down. A blank sheet sitting anywhere before the tracker is enough,
+    which is common in a real workbook (2026-09-09)."""
+    def row_values(index):
+        return next(ws.iter_rows(min_row=index, max_row=index, values_only=True), ())
+
     for sub_row in range(1, min(ws.max_row, _EXTRACT_HEADER_SCAN_ROWS) + 1):
-        cells = [c.value for c in next(ws.iter_rows(min_row=sub_row, max_row=sub_row))]
-        if any(_is_total_works(v) for v in cells):
+        if any(_is_total_works(v) for v in row_values(sub_row)):
             for group_row in range(sub_row - 1, 0, -1):
-                grp = [c.value for c in next(ws.iter_rows(min_row=group_row, max_row=group_row))]
-                if any(isinstance(v, str) and v.strip() for v in grp):
+                if any(isinstance(v, str) and v.strip() for v in row_values(group_row)):
                     return group_row, sub_row
     return None
 
@@ -639,3 +647,47 @@ def import_invoices(project, upload):
                 )
                 created += 1
     return {"periods": len(periods), "created": created, "updated": updated, "skipped": skipped}
+
+
+# What one dashboard workbook can bring in, in the order it is attempted.
+# Each entry is (key, importer); adding a reader here is all it takes for the
+# single upload to cover another panel.
+_DASHBOARD_PARTS = (
+    ("cashflow", "import_cashflow"),
+    ("invoices", "import_invoices"),
+)
+
+
+def import_dashboard(project, upload):
+    """Import everything a dashboard workbook carries, from ONE upload.
+
+    The same file feeds the cash flow, the progress curve drawn as the report's
+    S-curve, and the invoice extracts, and each used to need its own upload to
+    its own endpoint — the client asked to stop uploading the same workbook
+    once per panel (2026-09-09).
+
+    Every part is independent: a workbook carrying only some of those sheets
+    imports what it has. A part whose layout simply isn't in the file is
+    reported as `skipped`, not as a failure, since that is the normal case for
+    a partial workbook; anything else is reported against its own key so one
+    unreadable sheet can't hide what the others did.
+    """
+    # Read once and hand each part its own stream: every reader closes the
+    # workbook it opened, which closes the shared upload underneath it, so the
+    # second part got an unreadable file and silently imported nothing.
+    upload.seek(0)
+    data = upload.read()
+
+    out = {"imported": {}, "skipped": {}}
+    for key, func_name in _DASHBOARD_PARTS:
+        importer = globals()[func_name]
+        try:
+            out["imported"][key] = importer(project, io.BytesIO(data))
+        except ValueError as exc:
+            # The readers raise ValueError precisely for "this workbook has no
+            # such layout", which is information, not an error.
+            out["skipped"][key] = str(exc)
+        except Exception as exc:                      # a corrupt sheet
+            out["skipped"][key] = f"Couldn't read this workbook: {exc}"
+    return out
+

@@ -1062,6 +1062,11 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
     return _finish_scurve(d, chart, series, swatches, cfg, width, height)
 
 
+# Six years of monthly bars still resolve on an A4-width panel; past that the
+# axis is unreadable whatever we do, so the oldest months give way.
+_CASHFLOW_MAX_MONTHS = 72
+
+
 def cashflow_chart(cfg, rows, width, labels, height=None):
     """The reference report's Cash flow panel: monthly planned/actual as bars
     AND cumulative planned/actual as lines, sharing one value axis
@@ -1073,7 +1078,13 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     the lines land on the same scale and gridlines as the bars — reportlab
     has no combo primitive, so a shared scale has to be imposed by hand
     rather than left to each chart's own auto-ranging."""
-    rows = rows[:36]
+    # Kept to the MOST RECENT months when a project runs long. Taking the
+    # first 36 instead cut a 52-month cash flow off at its 36th month: the
+    # airport project's own sheet ran to Oct 2026 and its report stopped at
+    # Jun 2025, hiding the whole recent end — the part a monthly report is
+    # actually about (2026-09-09). The cumulative figures are absolute, so a
+    # tail slice keeps them true.
+    rows = rows[-_CASHFLOW_MAX_MONTHS:]
     if not rows:
         return None
     height = height or 80 * mm

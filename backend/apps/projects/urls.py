@@ -22,6 +22,7 @@ from .delay_views import DelayDetailView, DelayListView
 from .variation_views import VariationDecisionView, VariationDetailView, VariationListView
 from .finance_views import (
     CashFlowImportView,
+    DashboardImportView,
     CashFlowView,
     InvoiceDetailView,
     InvoiceImageView,
@@ -97,6 +98,8 @@ urlpatterns = [
     path("projects/<uuid:project_id>/part-scopes/<uuid:entry_id>/", PartScopeDetailView.as_view(), name="project-part-scope"),
     path("projects/<uuid:project_id>/cashflow/", CashFlowView.as_view(), name="project-cashflow"),
     path("projects/<uuid:project_id>/cashflow/import/", CashFlowImportView.as_view(), name="project-cashflow-import"),
+    # One upload for the whole dashboard workbook — see DashboardImportView.
+    path("projects/<uuid:project_id>/dashboard/import/", DashboardImportView.as_view(), name="project-dashboard-import"),
     path("projects/<uuid:project_id>/invoices/", InvoiceListView.as_view(), name="project-invoices"),
     path("projects/<uuid:project_id>/invoices/import/", InvoiceImportView.as_view(), name="project-invoices-import"),
     path("projects/<uuid:project_id>/invoices/<uuid:invoice_id>/", InvoiceDetailView.as_view(), name="project-invoice"),

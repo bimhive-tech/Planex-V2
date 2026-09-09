@@ -75,7 +75,7 @@ export function InvoicesPanel({ projectId, canManage }: { projectId: string; can
           <div className={styles.headActions}>
             <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
             <Button size="sm" variant="secondary" disabled={importing} onClick={() => fileRef.current?.click()}>
-              {importing ? "Importing…" : "Import Excel"}
+              {importing ? "Importing…" : "Import invoices only"}
             </Button>
             <Button size="sm" leadingIcon={<Icon name="plus" size={15} />} onClick={() => setModal({ invoice: null })}>
               Add

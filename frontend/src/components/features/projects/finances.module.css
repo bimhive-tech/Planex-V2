@@ -225,3 +225,24 @@
   font-weight: 500;
   color: var(--text-secondary);
 }
+
+/* The one dashboard upload, above the sub-tabs — see DashboardImport. Its
+   message wraps onto its own line, so the row is a wrapping flex rather than
+   a fixed two-column strip. */
+.importBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.importHint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.importBar .importMsg {
+  flex-basis: 100%;
+  margin-bottom: 0;
+}

@@ -314,3 +314,93 @@ class ExtractBlockShapeTests(SimpleTestCase):
             [["الاجمالي", 300.0, 100.0]]))
         self.assertEqual(skipped, 0)
         self.assertEqual([(r["date"].month, r["value"]) for r in rows], [(1, 100.0), (3, 200.0)])
+
+
+class DashboardImportTests(TestCase):
+    """One upload for the whole workbook. The same dashboard feeds the cash
+    flow, the progress curve behind the report's S-curve and the invoice
+    extracts, and it used to need uploading once per panel (client ask,
+    2026-09-09)."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial")
+
+    def _upload(self, *sheets):
+        """A workbook carrying only the named sheets, so a partial one can be
+        tested as easily as a complete one."""
+        import io
+
+        wb = openpyxl.Workbook()
+        wb.active.title = "notes"          # a workbook must keep one sheet
+        if "cashflow" in sheets:
+            ws = wb.create_sheet("cashflow total")
+            # MIN_MONTHS date cells before the wide reader accepts a header.
+            ws.append(["Description", *(datetime.datetime(2026, m, 1) for m in range(1, 5))])
+            ws.append(["Planned Cash In /Month", 100, 200, 300, 400])
+            ws.append(["Invoices /Month", 50, 60, 70, 80])
+        if "curve" in sheets:
+            ws = wb.create_sheet("progress curve")
+            for row in ROWS:
+                ws.append(row)
+        if "invoices" in sheets:
+            ws = wb.create_sheet("مقارنة مستخلصات")
+            ws.append([None, None, "حتى 10 يناير - 2023", None])
+            ws.append([None, None, "رقم المستخلص", "اجمالي الأعمال"])
+            ws.append([None, "Item A", "مستخلص جاري (1)", 100.0])
+            ws.append([None, "الاجمالي", None, 100.0])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_one_upload_brings_in_every_part(self):
+        from .finance_imports import import_dashboard
+        from .models import CashFlowEntry, Invoice, ProgressCurvePoint
+
+        result = import_dashboard(self.project, self._upload("cashflow", "curve", "invoices"))
+        self.assertEqual(sorted(result["imported"]), ["cashflow", "invoices"])
+        self.assertEqual(result["skipped"], {})
+        self.assertEqual(CashFlowEntry.objects.filter(project=self.project).count(), 4)
+        self.assertEqual(ProgressCurvePoint.objects.filter(project=self.project).count(), 3)
+        self.assertEqual(Invoice.objects.filter(project=self.project).count(), 1)
+
+    def test_a_partial_workbook_imports_what_it_has(self):
+        """A missing sheet is information, not a failure — reporting it as one
+        would hide everything the upload DID bring in."""
+        from .finance_imports import import_dashboard
+        from .models import CashFlowEntry, Invoice
+
+        result = import_dashboard(self.project, self._upload("cashflow"))
+        self.assertEqual(list(result["imported"]), ["cashflow"])
+        self.assertEqual(list(result["skipped"]), ["invoices"])
+        self.assertEqual(CashFlowEntry.objects.filter(project=self.project).count(), 4)
+        self.assertEqual(Invoice.objects.filter(project=self.project).count(), 0)
+
+    def test_a_workbook_with_nothing_recognisable_imports_nothing(self):
+        from .finance_imports import import_dashboard
+
+        result = import_dashboard(self.project, self._upload())
+        self.assertEqual(result["imported"], {})
+        self.assertEqual(sorted(result["skipped"]), ["cashflow", "invoices"])
+
+    def test_the_endpoint_accepts_one_file_for_all_of_it(self):
+        from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, SeededRole
+        from django.urls import reverse
+
+        from apps.accounts.models import Membership, Role, User
+
+        role = Role.objects.create(company=self.company, name=SeededRole.COMPANY_ADMIN,
+                                   permissions=COMPANY_ADMIN_PERMISSIONS)
+        User.objects.create_user(email="a@acme.com", password="Str0ng!Passw0rd", company=self.company)
+        Membership.objects.create(
+            company=self.company, user=User.objects.get(email="a@acme.com"), role=role)
+        self.client.post(reverse("auth-login"),
+                         {"email": "a@acme.com", "password": "Str0ng!Passw0rd"},
+                         content_type="application/json")
+        upload = self._upload("cashflow", "curve", "invoices")
+        upload.name = "dashboard.xlsx"
+        resp = self.client.post(f"/api/projects/{self.project.id}/dashboard/import/", {"file": upload})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(sorted(resp.json()["imported"]), ["cashflow", "invoices"])
