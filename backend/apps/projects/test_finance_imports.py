@@ -286,3 +286,31 @@ class ExtractBlockShapeTests(SimpleTestCase):
             [["الاجمالي", 3742205096.51, 100.0]]))
         self.assertEqual([r["value"] for r in rows], [0.0, 100.0])
         self.assertEqual(skipped, 0)
+
+    def test_a_typo_in_one_heading_does_not_drop_the_extracts_after_it(self):
+        """A tracker's latest column is headed "حتى 15 يناير - 2025" where it
+        means 2026. Sorting on that date puts the largest figure in the sheet
+        in the middle, and every genuine extract after it then looks like it
+        went backwards — five real ones were dropped (2026-09-08). A
+        cumulative series only ever grows, so the order that never goes
+        backwards is the right one."""
+        rows, skipped = self._parse(self._sheet(
+            [("حتى 10 يناير - 2023", "اجمالي الأعمال"),
+             ("حتى 01 مارس - 2023", "اجمالي الأعمال"),
+             ("حتى 15 يناير - 2022", "اجمالي الأعمال")],   # the typo, physically last
+            [["Item A", 40.0, 120.0, 240.0], ["Item B", 60.0, 180.0, 360.0]],
+            [["الاجمالي", 100.0, 300.0, 600.0]]))
+        self.assertEqual(skipped, 0)
+        self.assertEqual([r["value"] for r in rows], [100.0, 200.0, 300.0])
+
+    def test_dates_still_win_when_they_are_consistent(self):
+        """A tracker that appends a column out of date order is the case the
+        date sort exists for — diffing in sheet order there would compare two
+        unrelated points in time."""
+        rows, skipped = self._parse(self._sheet(
+            [("حتى 01 مارس - 2023", "اجمالي الأعمال"),
+             ("حتى 10 يناير - 2023", "اجمالي الأعمال")],   # appended late, dated early
+            [["Item A", 300.0, 100.0]],
+            [["الاجمالي", 300.0, 100.0]]))
+        self.assertEqual(skipped, 0)
+        self.assertEqual([(r["date"].month, r["value"]) for r in rows], [(1, 100.0), (3, 200.0)])

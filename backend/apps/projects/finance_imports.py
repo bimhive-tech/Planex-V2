@@ -409,6 +409,35 @@ _TOTAL_ROW_LABELS = {"الاجمالي", "الإجمالي", "الاجمالى",
 _TOTAL_LABEL_MAX_COL = 3
 
 
+def _extract_order(dated):
+    """`dated` — [(column, name, date, cumulative)] — in the order the extracts
+    were actually submitted.
+
+    Neither the column order nor the dates can be trusted on their own. One
+    tracker appends a column out of date order, so diffing cumulative totals in
+    sheet order there compares two unrelated points in time; another carries a
+    typo'd year on its latest column ("حتى 15 يناير - 2025" for 2026), which
+    sorts the largest figure in the sheet to the middle and makes every real
+    extract after it look like it went backwards — five of them were dropped
+    (2026-09-08).
+
+    A cumulative series only ever grows, so that is the test: take whichever
+    order never goes backwards, preferring the dates when both hold. Neither
+    working leaves the dates, and the caller's own guard drops what still
+    contradicts itself."""
+    def key_date(t):
+        return (t[2] is None, t[2] or datetime.date.max, t[0])
+
+    def never_backwards(seq):
+        return all(a[3] <= b[3] for a, b in zip(seq, seq[1:]))
+
+    by_date = sorted(dated, key=key_date)
+    if never_backwards(by_date):
+        return by_date
+    by_column = sorted(dated, key=lambda t: t[0])
+    return by_column if never_backwards(by_column) else by_date
+
+
 def _numeric(value):
     """`value` as a float, or None when the cell isn't a number. Booleans are
     not numbers here — a "yes/no" column would otherwise total as 1s."""
@@ -545,20 +574,12 @@ def parse_invoice_extracts(upload):
                         if isinstance(n, str) and n.strip() and n.strip() not in _PLACEHOLDER_VALUES:
                             numbers[idx] = n.strip()
 
-            # Column order in the sheet is NOT reliable as extract order — the
-            # reference file has a late column physically placed after ones
-            # dated months later than it (a scope added to the tracker after
-            # the fact, appended rather than inserted in date order). Diffing
-            # cumulative totals in sheet order on a file like that produces
-            # nonsense: a "delta" between two unrelated points in time. Sort by
-            # the parsed date first — column position only breaks ties (kept
-            # stable) when two extracts share one date.
             # The sheet's own total wins where it has one; the item rows are
             # only added up for a tracker that carries no totals line.
             dated = [(idx, numbers.get(idx) or _extract_label_text(label),
                       _parse_extract_date(label), totals.get(idx, sums.get(idx, 0.0)))
                     for idx, _, label in periods]
-            dated.sort(key=lambda t: (t[2] is None, t[2] or datetime.date.max, t[0]))
+            dated = _extract_order(dated)
 
             # A cumulative-to-date total must not go backwards. It does, hard, in
             # trackers whose source formulas have quietly broken (this workbook
