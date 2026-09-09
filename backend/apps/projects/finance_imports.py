@@ -327,14 +327,32 @@ _ARABIC_MONTHS = {
     "اكتوبر": 10, "أكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12,
 }
 _EXTRACT_DATE_RX = re.compile(r"(\d{1,2})\s+([^\s\-]+)\s*-\s*(\d{4})")
-_TOTAL_WORKS_LABEL = "اجمالي الأعمال"
+# The per-extract money column. Most blocks head it "اجمالي الأعمال"; the
+# airport tracker heads its own latest one "اجمالي  المستخلص" (the extract's
+# total) instead — same column, same block shape, a different word. Matching
+# only the first name found that project's 19 named-but-empty columns and
+# missed the one filled block, so its invoices imported as nothing at all
+# (2026-09-08). Compared with whitespace collapsed: the real cells double
+# their internal spaces.
+_TOTAL_WORKS_LABELS = {"اجمالي الأعمال", "اجمالي المستخلص", "إجمالي الأعمال", "إجمالي المستخلص"}
 _EXTRACT_HEADER_SCAN_ROWS = 10
+
+
+def _is_total_works(value) -> bool:
+    return isinstance(value, str) and " ".join(value.split()) in _TOTAL_WORKS_LABELS
 
 
 def _parse_extract_date(label):
     """Best-effort parse of a "حتى 15 ديسمبر - 2023" style label. Real trackers
     have typos (a wrong year on a late column is common) — return None rather
-    than raise, so one bad label doesn't block the whole import."""
+    than raise, so one bad label doesn't block the whole import.
+
+    A block can head itself with a real date cell instead of that text, which
+    arrives here as a date and needs no parsing."""
+    if isinstance(label, datetime.datetime):
+        return label.date()
+    if isinstance(label, datetime.date):
+        return label
     m = _EXTRACT_DATE_RX.search(label or "")
     if not m:
         return None
@@ -356,12 +374,20 @@ def _locate_extract_header(ws):
     header in these trackers)."""
     for sub_row in range(1, min(ws.max_row, _EXTRACT_HEADER_SCAN_ROWS) + 1):
         cells = [c.value for c in next(ws.iter_rows(min_row=sub_row, max_row=sub_row))]
-        if any(isinstance(v, str) and v.strip() == _TOTAL_WORKS_LABEL for v in cells):
+        if any(_is_total_works(v) for v in cells):
             for group_row in range(sub_row - 1, 0, -1):
                 grp = [c.value for c in next(ws.iter_rows(min_row=group_row, max_row=group_row))]
                 if any(isinstance(v, str) and v.strip() for v in grp):
                     return group_row, sub_row
     return None
+
+
+def _extract_label_text(label) -> str:
+    """The group heading as a name, for a block whose rows carry no
+    "رقم المستخلص" to name it by."""
+    if isinstance(label, (datetime.date, datetime.datetime)):
+        return label.strftime("%d %b %Y")
+    return str(label or "")
 
 
 _EXTRACT_NUMBER_LABEL = "رقم المستخلص"
@@ -383,13 +409,56 @@ _TOTAL_ROW_LABELS = {"الاجمالي", "الإجمالي", "الاجمالى",
 _TOTAL_LABEL_MAX_COL = 3
 
 
+def _numeric(value):
+    """`value` as a float, or None when the cell isn't a number. Booleans are
+    not numbers here — a "yes/no" column would otherwise total as 1s."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _totals_the_items(stated, running) -> bool:
+    """Does a totals cell actually add up the item rows above it?
+
+    Three things in real trackers look like a grand total and are not, and
+    this one test rejects all three (2026-09-08):
+
+    - an intermediate subtotal ("إجمالي الكميات المنفذة") sitting part way
+      down with dozens of item rows still below it — it states a fraction of
+      the column, so it doesn't match;
+    - a hardcoded leftover on the totals line of a column whose item cells are
+      all empty (one tracker carries 3,742,205,096 there, 5.7x that project's
+      whole contract, and being the sheet's largest figure it suppressed every
+      genuine extract dated after it as "going backwards");
+    - the tax-inclusive line a sheet puts under its works total
+      ("الاجمالي شامل الضريبة" below "الاجمالي غير شامل الضريبة") — it is
+      bigger than the items by exactly the tax, so the works figure above it
+      is the one taken, which is also what a single-total tracker means.
+
+    Relative tolerance, because these columns are long sums of decimals."""
+    return abs(stated - running) <= max(1.0, abs(stated) * 1e-6)
+
+
 def _is_total_row(row) -> bool:
-    """True when a data row is the sheet's own totals line. Matched on the
-    WHOLE cell, never a substring — the value sub-header one row above is
-    "اجمالي الأعمال", which contains the same word — and only in the leading
-    label columns."""
+    """True when a data row is the sheet's own totals line.
+
+    Matched on how the label STARTS, and only in the leading label columns.
+    Real sheets qualify the word — "الاجمالي غير شامل الضريبة" (total
+    excluding tax) sits above "الاجمالي شامل الضريبة" — and requiring the
+    whole cell to equal "الاجمالي" matched neither, so the totals line was
+    summed along with the item rows above it: one extract column came out at
+    3.74 BILLION against a 656M contract and, being the largest figure in the
+    sheet, then suppressed every extract dated after it as "going backwards"
+    (2026-09-08).
+
+    Never a bare substring, and never past those first columns: the value
+    sub-header one row above is "اجمالي الأعمال", which carries the same
+    word, and the word also appears as a data heading deep in a real row."""
     for cell in row[:_TOTAL_LABEL_MAX_COL]:
-        if isinstance(cell, str) and cell.strip() in _TOTAL_ROW_LABELS:
+        if not isinstance(cell, str):
+            continue
+        text = " ".join(cell.split())
+        if any(text == word or text.startswith(word + " ") for word in _TOTAL_ROW_LABELS):
             return True
     return False
 
@@ -417,34 +486,60 @@ def parse_invoice_extracts(upload):
             # just the column heading and reads badly as a name.
             periods, label = [], ""
             for i, v in enumerate(group_cells):
-                if isinstance(v, str) and v.strip():
+                # A group heading is normally the "حتى 15 مارس - 2025" text, but
+                # a block can carry a real date cell instead — keep either, or
+                # the forward-fill hands that block the PREVIOUS block's date.
+                if isinstance(v, (datetime.date, datetime.datetime)):
+                    label = v
+                elif isinstance(v, str) and v.strip():
                     label = v.strip()
-                if i < len(sub_cells) and isinstance(sub_cells[i], str) \
-                        and sub_cells[i].strip() == _TOTAL_WORKS_LABEL and label:
+                if i < len(sub_cells) and _is_total_works(sub_cells[i]) and label:
                     number_col = i - 1 if i >= 1 and isinstance(sub_cells[i - 1], str) \
                         and sub_cells[i - 1].strip() == _EXTRACT_NUMBER_LABEL else None
-                    periods.append((i, number_col, label))
+                    # Prefer the heading over the block's OWN first column.
+                    # Forward-filling reaches this block's value column too, and
+                    # one tracker puts a different string there ("خلال الفترة من
+                    # بداية الاعمال حتى…") which overwrote the date the block
+                    # actually carries (2026-09-08).
+                    own = (group_cells[number_col]
+                           if number_col is not None and number_col < len(group_cells) else None)
+                    if isinstance(own, (datetime.date, datetime.datetime)):
+                        periods.append((i, number_col, own))
+                    elif isinstance(own, str) and own.strip():
+                        periods.append((i, number_col, own.strip()))
+                    else:
+                        periods.append((i, number_col, label))
             if not periods:
                 continue
 
             sums = defaultdict(float)
-            totals = {}   # value_col -> the sheet's own stated total, when it has one
             numbers = {}  # value_col -> first real "رقم المستخلص" text seen
+            # value_col -> the sheet's own stated total, accepted only where it
+            # actually totals the items above it (see _totals_the_items).
+            totals = {}
             for row in ws.iter_rows(min_row=sub_row + 1, values_only=True):
                 if _is_total_row(row):
-                    # Take the sheet's own figure and stop: it's authoritative,
-                    # and adding it to the running sum would double every
-                    # extract (see _TOTAL_ROW_LABELS).
-                    for idx, _, _ in periods:
-                        v = row[idx] if idx < len(row) else None
-                        if isinstance(v, (int, float)) and not isinstance(v, bool):
-                            totals[idx] = float(v)
-                    break
+                    # Authoritative where it applies: adding it to the running
+                    # sum would double every extract (see _TOTAL_ROW_LABELS).
+                    # A row that only LOOKS like a total is an ordinary line
+                    # and falls through to be counted as one — this tracker has
+                    # a real work item headed "إجمالي الكميات المنفذة", and
+                    # skipping it lost its 4,463,299 from the column.
+                    if any(_totals_the_items(v, sums.get(idx, 0.0))
+                           for idx, _, _ in periods
+                           if idx not in totals
+                           and (v := _numeric(row[idx] if idx < len(row) else None)) is not None):
+                        for idx, _, _ in periods:
+                            v = _numeric(row[idx] if idx < len(row) else None)
+                            if v is not None and idx not in totals                                     and _totals_the_items(v, sums.get(idx, 0.0)):
+                                totals[idx] = v
+                        continue
                 for idx, number_col, _ in periods:
-                    if idx < len(row):
-                        v = row[idx]
-                        if isinstance(v, (int, float)) and not isinstance(v, bool):
-                            sums[idx] += v
+                    # A column closed by its own stated total ignores whatever
+                    # follows — a sheet can carry stray rows below its total.
+                    v = None if idx in totals else _numeric(row[idx] if idx < len(row) else None)
+                    if v is not None:
+                        sums[idx] += v
                     if number_col is not None and idx not in numbers and number_col < len(row):
                         n = row[number_col]
                         if isinstance(n, str) and n.strip() and n.strip() not in _PLACEHOLDER_VALUES:
@@ -460,8 +555,8 @@ def parse_invoice_extracts(upload):
             # stable) when two extracts share one date.
             # The sheet's own total wins where it has one; the item rows are
             # only added up for a tracker that carries no totals line.
-            dated = [(idx, numbers.get(idx, label), _parse_extract_date(label),
-                      totals.get(idx, sums.get(idx, 0.0)))
+            dated = [(idx, numbers.get(idx) or _extract_label_text(label),
+                      _parse_extract_date(label), totals.get(idx, sums.get(idx, 0.0)))
                     for idx, _, label in periods]
             dated.sort(key=lambda t: (t[2] is None, t[2] or datetime.date.max, t[0]))
 

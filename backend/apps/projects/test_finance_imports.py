@@ -202,3 +202,87 @@ class CurveLabelWordingTests(SimpleTestCase):
         data = parse_progress_curve(self._sheet(
             [w.replace("Cummulative", "Cumulative") for w in self.AIRPORT_WORDING]))
         self.assertEqual(len(data[datetime.date(2022, 1, 1)]), 4)
+
+
+class ExtractBlockShapeTests(SimpleTestCase):
+    """Two real trackers of the same template disagree about almost every part
+    of an extract block, and the airport one imported no invoices at all until
+    each difference was handled (2026-09-08)."""
+
+    MONTHS = ["حتى 10 يناير - 2023", "حتى 01 مارس - 2023"]
+
+    def _sheet(self, blocks, body, totals=()):
+        """`blocks`: [(group heading, value sub-header)]. `body`/`totals`: rows
+        of [label, *per-block values]."""
+        rows = [[None, None], [None, None]]
+        for heading, value_label in blocks:
+            rows[0] += [heading, None]
+            rows[1] += ["رقم المستخلص", value_label]
+        for source in (body, totals):
+            for label, *values in source:
+                row = [None, label]
+                for v in values:
+                    row += ["مستخلص جاري (1)", v]
+                rows.append(row)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "مقارنة مستخلصات"
+        for r in rows:
+            ws.append(r)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def _parse(self, upload):
+        from .finance_imports import parse_invoice_extracts
+
+        return parse_invoice_extracts(upload)
+
+    def test_the_value_column_may_be_headed_total_of_the_extract(self):
+        """One tracker heads its filled block "اجمالي المستخلص" where every
+        other heads it "اجمالي الأعمال" — same column, different word."""
+        rows, _ = self._parse(self._sheet(
+            [(self.MONTHS[0], "اجمالي  المستخلص")],
+            [["Item A", 40.0], ["Item B", 60.0]]))
+        self.assertEqual([r["value"] for r in rows], [100.0])
+
+    def test_a_block_headed_with_a_real_date_keeps_that_date(self):
+        """Its heading is a date cell, not "حتى … - ….". Forward-filling from
+        the block to its left dated it months early and named it wrongly."""
+        rows, _ = self._parse(self._sheet(
+            [(self.MONTHS[0], "اجمالي الأعمال"), (datetime.datetime(2026, 7, 8), "اجمالي المستخلص")],
+            [["Item A", 40.0, 90.0]]))
+        self.assertEqual([r["date"] for r in rows],
+                         [datetime.date(2023, 1, 10), datetime.date(2026, 7, 8)])
+
+    def test_a_qualified_total_line_is_still_a_total(self):
+        """"الاجمالي غير شامل الضريبة" — requiring the bare word matched
+        neither it nor the tax-inclusive line under it, so both were summed
+        along with the items."""
+        rows, _ = self._parse(self._sheet(
+            [(self.MONTHS[0], "اجمالي الأعمال")],
+            [["Item A", 40.0], ["Item B", 60.0]],
+            [["الاجمالي غير شامل الضريبة", 100.0], ["الاجمالي شامل الضريبة", 114.0]]))
+        self.assertEqual([r["value"] for r in rows], [100.0])   # works, not tax-inclusive
+
+    def test_a_line_that_does_not_add_up_the_items_is_an_item(self):
+        """A real work item headed "إجمالي الكميات المنفذة" sits among the
+        rows. Treating it as a totals line dropped its value from the column."""
+        rows, _ = self._parse(self._sheet(
+            [(self.MONTHS[0], "اجمالي الأعمال")],
+            [["Item A", 40.0], ["إجمالي الكميات المنفذة", 5.0], ["Item B", 60.0]],
+            [["الاجمالي", 105.0]]))
+        self.assertEqual([r["value"] for r in rows], [105.0])
+
+    def test_a_total_over_an_empty_column_is_ignored(self):
+        """One tracker carries a hardcoded 3,742,205,096 on the totals line of
+        a column whose item cells are all empty — 5.7x that project's whole
+        contract. Being the sheet's largest figure, it suppressed every
+        genuine extract dated after it as "going backwards"."""
+        rows, skipped = self._parse(self._sheet(
+            [(self.MONTHS[0], "اجمالي الأعمال"), (self.MONTHS[1], "اجمالي الأعمال")],
+            [["Item A", None, 40.0], ["Item B", None, 60.0]],
+            [["الاجمالي", 3742205096.51, 100.0]]))
+        self.assertEqual([r["value"] for r in rows], [0.0, 100.0])
+        self.assertEqual(skipped, 0)
