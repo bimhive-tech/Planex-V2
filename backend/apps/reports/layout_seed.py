@@ -239,7 +239,7 @@ def _dashboard_page(cfg, design):
         _el("chart", sub["x"], bottom_y, half, bottom_h, _chart_props(cfg, "zone_progress", "column")),
         _el("chart", sub["x"] + half + GAP_MM, bottom_y, half, bottom_h, _chart_props(cfg, "scurve", "line")),
     ]
-    return _page("Executive Dashboard", els)
+    return _page("Project Progress", els)
 
 
 def _area_dashboard_page(cfg, design):
@@ -319,7 +319,7 @@ def seed_layout_from_sections(cfg: dict) -> dict:
 
     sections = cfg.get("sections", {})
     if sections.get("summary"):
-        pages.append(_field_page(cfg, design, "summary", "progress.overall", "Executive Summary"))
+        pages.append(_field_page(cfg, design, "summary", "progress.overall", "Summary"))
     if sections.get("project_info"):
         # A whole page of its own, so unlike the Summary panel's cramped copy
         # it can afford the sub-contractor row (see resolve_table).

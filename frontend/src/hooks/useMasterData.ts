@@ -12,7 +12,8 @@ interface NamedRow {
 }
 
 /** A consultant or contractor: picking one fills the project's phone/email
- * alongside the name. Clients carry a name only (see the master_data models). */
+ * alongside the name. Owners carry a name only (see the master_data models).
+ * The API path stays /clients/ — only what a reader sees is renamed. */
 export interface PartyRow {
   id: string;
   name: string;

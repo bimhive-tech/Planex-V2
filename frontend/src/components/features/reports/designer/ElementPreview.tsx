@@ -240,7 +240,7 @@ function projectInfoRows(data: ReportData): string[][] {
   const p = data.project;
   const dur = data.duration;
   const rows: [string, string][] = [
-    ["Name", p.name], ["Code", p.code ?? ""], ["Client", p.client],
+    ["Name", p.name], ["Code", p.code ?? ""], ["Owner", p.client],
     ["Consultant", p.consultant], ["Contractor", p.contractor], ["Type", p.type],
     ["Location", p.location], ["Value", money(p.budget, p.budget_currency ?? p.currency)],
     ["Contract value", money(p.contract_value, p.contract_value_currency ?? p.currency)],

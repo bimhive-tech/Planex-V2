@@ -4548,3 +4548,40 @@ class ScurveCalloutCollisionTests(SimpleTestCase):
         labels = self._labels(planned=[10, 40, 70, 100], actual=[5, 15, 25, 30])
         ys = sorted(s.y for s in labels)
         self.assertGreater(ys[1] - ys[0], 7)                 # untouched, not nudged together
+
+
+class OwnerWordingTests(SimpleTestCase):
+    """The planners call the party paying for the job the Owner, not the
+    client, and the report's own labels have to say so (register item A1)."""
+
+    def test_the_project_info_row_is_labelled_owner(self):
+        self.assertEqual(default_config()["labels"]["info_client"], "Owner")
+
+    def test_the_field_key_is_untouched(self):
+        """Only the wording changes: `client_name` on the model, `info_client`
+        as the label key, and /clients/ as the API path all stay, so nothing
+        that references them has to move."""
+        self.assertIn("info_client", default_config()["labels"])
+
+
+class SummaryAndDashboardHeadingTests(SimpleTestCase):
+    """Register items A2 and A3: the summary page header is just the word
+    summary, and the executive-status section is the project's progress."""
+
+    def test_summary_reads_summary(self):
+        self.assertEqual(default_config()["labels"]["summary"], "Summary")
+
+    def test_the_dashboard_section_is_project_progress(self):
+        self.assertEqual(default_config()["labels"]["dashboard"], "Project Progress")
+
+    def test_a_seeded_layout_names_those_pages_the_same_way(self):
+        """The page name and the heading printed on it come from the same
+        place, so a template made today can't disagree with its own header."""
+        from .layout_seed import seed_layout_from_sections
+
+        cfg = default_config()
+        names = [p["name"] for p in seed_layout_from_sections(cfg)["layout"]["pages"]]
+        self.assertIn("Summary", names)
+        self.assertIn("Project Progress", names)
+        self.assertNotIn("Executive Summary", names)
+        self.assertNotIn("Executive Dashboard", names)

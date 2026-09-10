@@ -1,6 +1,6 @@
 "use client";
 
-// One row-per-name CRUD list shared by Project Types, Priorities and Clients
+// One row-per-name CRUD list shared by Project Types, Priorities and Owners
 // (Settings -> Master Data) — every list whose row is just a name. Which
 // endpoint/copy to use is passed in via `resource`.
 import { useState, type CSSProperties } from "react";

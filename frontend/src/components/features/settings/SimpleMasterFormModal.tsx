@@ -1,6 +1,6 @@
 "use client";
 
-// Create/rename a name-only master-data row (Project Type, Priority or Client
+// Create/rename a name-only master-data row (Project Type, Priority or Owner
 // — same shape, so one modal covers them all via the `resource` prop).
 import { useEffect, useState } from "react";
 

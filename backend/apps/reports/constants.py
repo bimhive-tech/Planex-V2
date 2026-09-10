@@ -119,7 +119,7 @@ DEFAULT_CONFIG = {
     # Every visible heading/column/field label — editable so a template can be
     # fully Arabic, fully English, or anything between ("control everything").
     "labels": {
-        "summary": "Executive Summary",
+        "summary": "Summary",
         "project_info": "Project Information",
         "description": "Project Description",
         "progress_overview": "Overall Progress",
@@ -251,7 +251,7 @@ DEFAULT_CONFIG = {
         "activities": "activities",
         "planned": "Planned",
         "actual": "Actual",
-        "dashboard": "Executive Dashboard",
+        "dashboard": "Project Progress",
         "progress_report": "Project Progress Report",
         "duration_section": "Duration & Delay",
         "duration_days": "Project duration",
@@ -310,7 +310,7 @@ DEFAULT_CONFIG = {
         "status_resolved": "تم الحل",
         # Project-info row labels.
         "info_name": "Project name",
-        "info_client": "Owner / Client",
+        "info_client": "Owner",
         "info_consultant": "Consultant",
         "info_contractor": "Contractor",
         "info_type": "Type",

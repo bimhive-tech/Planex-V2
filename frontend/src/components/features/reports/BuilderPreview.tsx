@@ -88,7 +88,7 @@ function TocPage({ g, on }: { g: G; on: On }) {
 function InfoPage({ g }: { g: G }) {
   const rows: [string, string][] = [
     [g("labels.info_name", "Project name"), "{{name}}"],
-    [g("labels.info_client", "Client"), "{{client}}"],
+    [g("labels.info_client", "Owner"), "{{client}}"],
     [g("labels.info_consultant", "Consultant"), "{{consultant}}"],
     [g("labels.info_contractor", "Contractor"), "{{contractor}}"],
     [g("labels.info_budget", "Value"), "{{budget}}"],

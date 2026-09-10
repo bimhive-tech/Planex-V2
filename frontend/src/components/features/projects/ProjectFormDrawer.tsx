@@ -241,8 +241,8 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           Revised finish is derived from approved schedule Variations (SVOs) — edit it via the Variations tab.
         </p>
 
-        <p className={styles.section}>Client</p>
-        <PartySelect label="Client" name="client_name" value={form.client_name}
+        <p className={styles.section}>Owner</p>
+        <PartySelect label="Owner" name="client_name" value={form.client_name}
           options={clients} loading={clientsLoading} onPick={pickParty("client_name")} />
 
         <p className={styles.section}>Consultant</p>

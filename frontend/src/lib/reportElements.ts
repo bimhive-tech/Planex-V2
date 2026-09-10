@@ -39,7 +39,7 @@ export const CHART_TYPES = [
 export const FIELD_SOURCES = [
   { value: "project.name", label: "Project name" },
   { value: "project.code", label: "Project code" },
-  { value: "project.client", label: "Client" },
+  { value: "project.client", label: "Owner" },
   { value: "project.consultant", label: "Consultant" },
   { value: "project.contractor", label: "Contractor" },
   { value: "project.location", label: "Location" },

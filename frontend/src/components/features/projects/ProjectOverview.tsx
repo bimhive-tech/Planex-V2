@@ -171,7 +171,7 @@ export function ProjectOverview({ project: p, stats, canManage, onViewMilestones
         <div className={styles.side}>
           <section className={styles.card}>
             <CardHead icon="projects" title="Project Details" sub="Key information for this project." />
-            <Row label="Client">{p.client_name || "—"}</Row>
+            <Row label="Owner">{p.client_name || "—"}</Row>
             <Row label="Budget">{formatMoney(p.budget, p.budget_currency)}</Row>
             <Row label="Contract value">{formatMoney(p.contract_value, p.contract_value_currency)}</Row>
             <Row label="Approved value">{formatMoney(p.approved_value, p.approved_value_currency)}</Row>

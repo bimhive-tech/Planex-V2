@@ -19,7 +19,7 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: "currencies", label: "Currencies" },
   { key: "project-types", label: "Project Types" },
   { key: "project-priorities", label: "Priorities" },
-  { key: "clients", label: "Clients" },
+  { key: "clients", label: "Owners" },
   { key: "consultants", label: "Consultants" },
   { key: "contractors", label: "Contractors" },
   { key: "subcontractors", label: "Sub-contractors" },
@@ -64,7 +64,7 @@ export function MasterDataTab({ isPlatformAdmin, ownCompanyId }: Props) {
         />
       )}
       {section === "clients" && (
-        <SimpleMasterList resource="clients" label="client" labelPlural="clients" companyId={companyId} />
+        <SimpleMasterList resource="clients" label="owner" labelPlural="owners" companyId={companyId} />
       )}
       {section === "consultants" && (
         <PartyMasterList
