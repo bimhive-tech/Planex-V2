@@ -237,6 +237,67 @@ def scope_planned_cost_map(project, schedule_import=None):
     return {str(sid): sub.get(sid, 0.0) for sid in all_ids}
 
 
+def project_planned_progress(project, schedule_import=None):
+    """Planned progress: planned cost / budget, over the same activities.
+
+    The share of the money the BASELINE expected to have been earned by the
+    data date — the counterpart to project_earned_progress, and directly
+    comparable to it because both divide by the same budget.
+
+    Divided over only the rows planned cost is defined for (see
+    _planned_cost_rows), never the project's whole budget: including rows the
+    baseline says nothing about would quietly deflate the plan by their budget.
+
+    `None` when there is no baseline to cost. Verified against the Cairo
+    Airport export: 619,638,112.21 / 656,013,770.47 = 94.4550%, where the file
+    states its own Schedule % Complete as 94.45."""
+    cost = base = 0.0
+    for _sid, c, b in _planned_cost_rows(project, schedule_import):
+        cost += c
+        base += b
+    return cost / base * 100 if base else None
+
+
+def scope_planned_progress_map(project, schedule_import=None):
+    """{scope_id -> planned progress over that scope's whole subtree}, or None
+    when the batch has no baseline to cost — the same tree walk and the same
+    "cost over its own base" rule as project_planned_progress."""
+    direct_cost, direct_base = {}, {}
+    for sid, c, b in _planned_cost_rows(project, schedule_import):
+        direct_cost[sid] = direct_cost.get(sid, 0.0) + c
+        direct_base[sid] = direct_base.get(sid, 0.0) + b
+    if not direct_base:
+        return None
+
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    scopes = (project.scopes.filter(schedule_import=schedule_import)
+              if schedule_import else project.scopes.all())
+    children, all_ids, roots = {}, [], []
+    for sid, pid in scopes.values_list("id", "parent_id"):
+        all_ids.append(sid)
+        (roots if pid is None else children.setdefault(pid, [])).append(sid)
+
+    sub_cost, sub_base = {}, {}
+
+    def agg(sid):
+        c, b = direct_cost.get(sid, 0.0), direct_base.get(sid, 0.0)
+        for child in children.get(sid, []):
+            cc, cb = agg(child)
+            c += cc
+            b += cb
+        sub_cost[sid], sub_base[sid] = c, b
+        return c, b
+
+    for r in roots:
+        agg(r)
+
+    # No entry for a scope whose subtree carried none of the baseline — its
+    # callers fall back to their own date estimate, exactly as before.
+    return {str(sid): sub_cost[sid] / sub_base[sid] * 100
+            for sid in all_ids if sub_base.get(sid)}
+
+
 def project_earned_progress(project, schedule_import=None):
     """Actual progress as EARNED VALUE: sum(earned_value_cost) / sum(budgeted_cost).
 
@@ -455,6 +516,12 @@ def scope_planned_map(project, schedule_import=None) -> dict:
     """
     if schedule_import is None:
         schedule_import = latest_schedule_import(project)
+    # Planned cost over its own budget wherever the schedule carries cost, so
+    # every level matches the project headline and neither figure depends on
+    # which basis _weight_key happened to pick for this file.
+    planned = scope_planned_progress_map(project, schedule_import)
+    if planned is not None:
+        return planned
     activities = (project.activities.filter(schedule_import=schedule_import)
                   if schedule_import else project.activities.all())
     direct_w, direct_pw = {}, {}

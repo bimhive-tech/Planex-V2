@@ -1754,13 +1754,14 @@ class PlannedProgressOverrideTests(TestCase):
         from .services import _planned_progress
 
         # 2026-04-01 is ~25% through the contract calendar -- the imported 95%
-        # only comes through if the override actually wins.
-        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), use_imported=True)
+        # only comes through if the override actually wins. This project has no
+        # activities, so there is no planned cost to prefer ahead of it.
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), current=True)
         self.assertEqual(planned, 95.0)
 
     def test_series_call_ignores_the_imported_planned_figure(self):
         """The S-curve computes one point per historical snapshot date; without
-        `use_imported`, every point must stay live, not flatten to one number."""
+        `current`, every point must stay live, not flatten to one number."""
         from .services import _planned_progress
 
         planned = _planned_progress(self.project, datetime.date(2026, 4, 1))
@@ -1772,8 +1773,63 @@ class PlannedProgressOverrideTests(TestCase):
         self.project.imported_planned_progress_percent = None
         self.project.save(update_fields=["imported_planned_progress_percent"])
 
-        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), use_imported=True)
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), current=True)
         self.assertNotEqual(planned, 95.0)
+
+
+class PlannedProgressFromCostTests(TestCase):
+    """C5 — planned % is planned cost over budget, not elapsed calendar time."""
+
+    def setUp(self):
+        import datetime
+
+        from apps.accounts.models import Company
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
+            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31),
+            imported_planned_progress_percent=95.0)
+        zone = ProjectScope.objects.create(
+            company=self.company, project=self.project,
+            scope_type=ProjectScope.ScopeType.ZONE, name="Z1")
+        # 25% of 400k plus 100% of 600k = 700k planned of a 1M budget = 70%.
+        for pct, budget in ((25, 400000), (100, 600000)):
+            Activity.objects.create(
+                company=self.company, project=self.project, scope=zone,
+                name=f"A{pct}", weight=budget, progress_percent=0,
+                schedule_percent=pct, budgeted_cost=budget, earned_value_cost=0)
+
+    def test_planned_progress_is_cost_weighted_not_calendar(self):
+        """70% of the budget was due by the data date, on a contract only a
+        quarter elapsed and against a stated figure of 95% — so neither the
+        calendar nor the stated summary can be what produced it."""
+        import datetime
+
+        from .services import _planned_progress
+
+        planned = _planned_progress(self.project, datetime.date(2026, 4, 1), current=True)
+        self.assertAlmostEqual(planned, 70.0, places=6)
+
+    def test_scope_planned_map_agrees_with_the_project_figure(self):
+        """The zone holds every activity, so its planned % must equal the
+        project's — levels derived apart from each other would drift."""
+        from apps.projects.models import ProjectScope
+        from apps.projects.services import project_planned_progress, scope_planned_map
+
+        zone = ProjectScope.objects.get(project=self.project, name="Z1")
+        self.assertAlmostEqual(scope_planned_map(self.project)[str(zone.id)],
+                               project_planned_progress(self.project), places=6)
+
+    def test_the_series_call_still_walks_the_calendar(self):
+        """Only the current figure is cost-based; a historical S-curve point
+        stays a live calendar reading, or the curve flattens."""
+        import datetime
+
+        from .services import _planned_progress
+
+        self.assertNotEqual(_planned_progress(self.project, datetime.date(2026, 4, 1)), 70.0)
 
 
 class DisciplineRowsTests(TestCase):

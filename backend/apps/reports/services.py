@@ -14,7 +14,7 @@ from apps.projects.models import (
 )
 from apps.projects.services import (
     activity_progress_as_of, latest_schedule_import, project_overall_progress,
-    project_planned_cost, scope_planned_map,
+    project_planned_cost, project_planned_progress, scope_planned_map,
 )
 
 from .models import ReportImage
@@ -108,18 +108,36 @@ def _scope_roles(project, schedule_import=None):
             "zone": zone, "area": area}
 
 
-def _planned_progress(project, as_of, use_imported=False):
-    """Time-based planned % (0–100): how far along the contract calendar we are.
-    Matches the reference, where overdue scopes show planned = 100%.
+def _planned_progress(project, as_of, current=False):
+    """Planned % (0-100) — how much of the work the BASELINE says should be done.
 
-    `use_imported=True` prefers the project's own stated Schedule % Complete
-    when a real P6 import provided one — the same reasoning as
-    project_overall_progress's actual-progress override, and gated the same
-    way (only the report's single "current" figure, never a per-date series:
-    the S-curve calls this once per historical snapshot date and must always
-    compute live, or every point would show today's one imported number)."""
-    if use_imported and project.imported_planned_progress_percent is not None:
-        return float(project.imported_planned_progress_percent)
+    `current=True` is the report's single as-of figure, and takes planned cost
+    over budget (services.project_planned_progress): the share of the money the
+    baseline expected to have been earned, which is what the planners' own
+    dashboard quotes and what makes this directly comparable to actual
+    progress. It falls back to the project's stated Schedule % Complete, and
+    then to the calendar.
+
+    Without `current` it is time elapsed along the contract calendar, matching
+    the reference where an overdue scope reads 100%. That path exists for the
+    S-curve, which calls this once per historical snapshot date: those points
+    must each compute live, or every month on the curve would flatten to
+    today's single figure.
+
+    Elapsed time is a straight line between two dates, so it is only ever a
+    last resort — a cost-loaded programme is S-shaped, which is the whole
+    reason the cost-based figure is preferred above."""
+    if current:
+        # Planned cost over budget — the baseline's own share of the money,
+        # which is what the planners' dashboard quotes. Only ever for the
+        # report's ONE current figure: the S-curve calls this per historical
+        # snapshot date and must keep computing live, or every point on the
+        # curve would flatten to today's single number.
+        planned = project_planned_progress(project)
+        if planned is not None:
+            return planned
+        if project.imported_planned_progress_percent is not None:
+            return float(project.imported_planned_progress_percent)
     s, f = project.planned_start, project.planned_finish
     if not (s and f and as_of and f > s):
         return None
@@ -1145,7 +1163,10 @@ def build_report_context(report):
     overall = project_overall_progress(project, progress, schedule_import)
     breakdown = _breakdown(project, progress, schedule_import)
 
-    planned = _planned_progress(project, as_of, use_imported=(progress is None))
+    # `current=True` regardless of dated field entries: like actual progress,
+    # the planned figure now comes from the resolved import batch rather than
+    # from elapsed calendar time, so the two stay directly comparable.
+    planned = _planned_progress(project, as_of, current=True)
     duration = _duration(project, as_of)
 
     # Pinned to the resolved batch like every other current-state read above.

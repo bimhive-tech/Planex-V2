@@ -75,7 +75,7 @@ def get_project_insights(user, project_id, **_):
     return {
         "id": str(project.id), "name": project.name,
         "overall_progress": project_overall_progress(project),
-        "planned_progress": _planned_progress(project, today, use_imported=True),
+        "planned_progress": _planned_progress(project, today, current=True),
         "breakdown": breakdown,
         "duration": duration,
         "milestones": [
