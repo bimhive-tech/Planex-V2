@@ -125,6 +125,105 @@ class ToolsTests(TestCase):
         zone = ProjectScope.objects.get(project=self.project, name="Zone A")
         self.assertEqual(zone.activities.get().name, "Task 1")
 
+    def test_a_tree_import_lands_in_the_batch_readers_call_current(self):
+        """The rows must carry a batch of their own.
+
+        commit_tree used to write them with a null schedule_import while
+        deleting whatever was there before. On a project that already had an
+        import, every reader resolving "current" through latest_schedule_import
+        filtered the new rows straight back out -- so the import reported
+        success and left the project reading as empty, with the previous
+        generation gone for good.
+        """
+        from datetime import date as d
+
+        from apps.projects.models import Activity, ScheduleImport
+        from apps.projects.services import latest_schedule_import
+
+        # The project already has a real schedule import behind it.
+        previous = ScheduleImport.objects.create(
+            company=self.company, project=self.project,
+            date=d(2026, 1, 1), source="p6.xlsx")
+        for i in range(3):
+            ProjectScope.objects.create(
+                company=self.company, project=self.project, scope_type="zone",
+                name=f"Old Zone {i}", schedule_import=previous)
+
+        tree = [{
+            "name": "Stage A", "scope_type": "stage",
+            "children": [{
+                "name": "Zone A", "scope_type": "zone",
+                "activities": [{"name": "Task 1", "progress_percent": 50, "weight": 1}],
+            }],
+        }]
+        proposal = propose_import_tree(self.user, project_id=str(self.project.id), tree=tree)
+        commit_proposal(self.user, proposal)
+
+        current = latest_schedule_import(self.project)
+        self.assertIsNotNone(current)
+        self.assertNotEqual(current, previous)
+
+        # What the import wrote is what the project now reads as.
+        self.assertEqual(
+            set(ProjectScope.objects.filter(
+                project=self.project, schedule_import=current
+            ).values_list("name", flat=True)),
+            {"Stage A", "Zone A"})
+        self.assertEqual(
+            Activity.objects.filter(project=self.project, schedule_import=current).count(), 1)
+
+        # And the generation it superseded is still there, intact.
+        self.assertEqual(
+            ProjectScope.objects.filter(
+                project=self.project, schedule_import=previous).count(), 3)
+
+    def test_a_tree_import_does_not_restack_its_milestones(self):
+        """An untagged milestone means "added by hand, belongs to the project
+        rather than to any import", so it always shows. Leaving import-written
+        ones null put a fresh copy on the report every re-import -- the delete
+        never covered them, since it only removed scopes."""
+        from datetime import date as d
+
+        from django.db.models import Q
+
+        from apps.projects.models import Milestone
+        from apps.projects.services import latest_schedule_import
+
+        tree = [{"name": "Handover", "is_milestone": True, "start": d(2026, 6, 1)},
+                {"name": "Zone A", "scope_type": "zone", "activities": []}]
+
+        for _ in range(2):
+            proposal = propose_import_tree(self.user, project_id=str(self.project.id), tree=tree)
+            commit_proposal(self.user, proposal)
+
+        current = latest_schedule_import(self.project)
+        # Both copies are retained with their own batch...
+        self.assertEqual(Milestone.objects.filter(project=self.project).count(), 2)
+        # ...but the report, which shows this batch's plus any hand-added ones,
+        # sees "Handover" once rather than once per import.
+        shown = Milestone.objects.filter(project=self.project).filter(
+            Q(schedule_import=current) | Q(schedule_import=None))
+        self.assertEqual([m.title for m in shown], ["Handover"])
+
+    def test_a_rejected_node_writes_no_half_batch(self):
+        """A bad scope_type partway down raises -- and must leave nothing
+        behind, not a batch holding the nodes that happened to precede it."""
+        from apps.ai_assistant.import_tree import commit_tree
+
+        tree = [{"name": "Zone A", "scope_type": "zone", "activities": []},
+                {"name": "Mystery", "scope_type": "not-a-real-type"}]
+        from apps.projects.models import ScheduleImport
+        from apps.projects.services import latest_schedule_import
+
+        with self.assertRaises(ValueError):
+            commit_tree(self.project, tree)
+        self.assertEqual(ProjectScope.objects.filter(project=self.project).count(), 0)
+        # Not even the batch row: an empty one left behind would be the newest,
+        # so latest_schedule_import would hand every reader a batch holding
+        # nothing and the whole project would read as empty.
+        self.assertEqual(ScheduleImport.objects.filter(project=self.project).count(), 0)
+        self.assertIsNone(latest_schedule_import(self.project))
+
     def test_propose_import_tree_rejects_a_project_in_another_company(self):
         tree = [{"name": "Stage A", "scope_type": "stage"}]
         with self.assertRaises(PermissionDenied):

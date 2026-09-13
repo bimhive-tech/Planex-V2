@@ -203,7 +203,7 @@ def commit_proposal(user, proposal: dict):
     if action == "import_tree":
         project = _project_or_404(user, proposal["project_id"])
         require_ai_import_permission(user, project)
-        return commit_tree(project, proposal["tree"], replace=True)
+        return commit_tree(project, proposal["tree"], source="ai-import")
     if action == "import_via_rule":
         from apps.projects.p6_schedule_import import build_from_p6_schedule
 
