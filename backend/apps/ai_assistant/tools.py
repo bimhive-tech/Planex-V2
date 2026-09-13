@@ -210,7 +210,13 @@ def commit_proposal(user, proposal: dict):
         project = _project_or_404(user, proposal["project_id"])
         require_ai_import_permission(user, project)
         roots = tree_from_json_safe(proposal["tree_json"])
-        return build_from_p6_schedule(project, roots, replace=True, source="ai-import")
+        # No `replace`: a schedule import supersedes by batching, not by
+        # deleting (ScheduleImport is "one schedule import, as its own
+        # permanently-retained batch"). The kwarg meant `project.scopes.all().
+        # delete()` until versioned imports removed it, and readers now resolve
+        # "current" through latest_schedule_import instead. Called exactly as the
+        # deterministic P6 importer calls it (projects.imports).
+        return build_from_p6_schedule(project, roots, source="ai-import")
     raise ValueError(f"Unknown proposal action: {action!r}")
 
 

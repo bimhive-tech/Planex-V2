@@ -203,6 +203,53 @@ class ToolsTests(TestCase):
         zone = ProjectScope.objects.get(project=self.project, name="Zone A")
         self.assertEqual(set(zone.activities.values_list("name", flat=True)), {"Foundation", "Framing"})
 
+    def test_committing_a_second_time_supersedes_rather_than_doubles(self):
+        """A rule-based import supersedes the previous one.
+
+        It used to say so by passing `replace=True`, which meant
+        `project.scopes.all().delete()`. Versioned imports removed both the
+        kwarg and the delete: every import is now its own retained batch and
+        readers resolve "current" through the latest one. This pins the part a
+        reader actually sees -- importing twice must not show two generations
+        at once -- so the deleting behaviour can never be reintroduced to
+        "fix" a doubling that isn't there.
+        """
+        from apps.projects.models import ScheduleImport
+        from apps.projects.services import latest_schedule_import
+
+        rule = {"header_row_index": 0,
+                "columns": {"hierarchy_text": 0, "name": 1, "start": 2, "finish": 3,
+                            "progress_percent": 4, "weight": 5}}
+
+        def commit_once():
+            attachment = self._attachment_with_workbook(self._generic_rows())
+            proposal = propose_import_via_rule(
+                self.user, project_id=str(self.project.id),
+                attachment_id=str(attachment.id), rule=rule)
+            self.assertTrue(proposal["valid"], proposal.get("errors"))
+            return commit_proposal(self.user, proposal)
+
+        commit_once()
+        first = latest_schedule_import(self.project)
+        commit_once()
+
+        # Both batches are kept -- that is the point of versioning. Asserting on
+        # the older batch's own rows, not just the ScheduleImport count: a
+        # reintroduced `project.scopes.all().delete()` would leave the batch
+        # rows standing and empty them out underneath.
+        self.assertEqual(ScheduleImport.objects.filter(project=self.project).count(), 2)
+        self.assertEqual(
+            ProjectScope.objects.filter(project=self.project, schedule_import=first).count(), 4)
+
+        # But the project reads as one schedule, not two stacked on each other.
+        current = latest_schedule_import(self.project)
+        self.assertEqual(
+            ProjectScope.objects.filter(project=self.project, schedule_import=current).count(), 4)
+        zone = ProjectScope.objects.get(
+            project=self.project, name="Zone A", schedule_import=current)
+        self.assertEqual(set(zone.activities.values_list("name", flat=True)),
+                         {"Foundation", "Framing"})
+
     def test_propose_import_via_rule_rejects_bad_column_indices(self):
         attachment = self._attachment_with_workbook(self._generic_rows())
         rule = {"header_row_index": 0, "columns": {"hierarchy_text": 99, "name": 1}}
