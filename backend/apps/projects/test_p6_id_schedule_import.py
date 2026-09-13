@@ -490,13 +490,36 @@ class PlanexCodeLegendTests(SimpleTestCase):
     LEGEND = ["PN", "CON", "AR", "SUB AR", "PH", "Z", "P", "U", "LEV", "DEC", "SUB DEC", "NU"]
 
     def test_every_slot_keeps_its_own_level(self):
+        """Every structural slot the legend declares becomes a level, filled or
+        not, so the tree has one shape for the whole file. The third member of
+        each pair says whether the row left that slot blank."""
         from .p6_id_schedule_import import slot_path
 
         self.assertEqual(
             slot_path("CA-CON-0-0-0-0-P1-0-L.2A-MEP-Electrical Works-358", self.LEGEND),
-            [("P1", "part"), ("L.2A", "level"), ("MEP", "discipline"),
-             ("Electrical Works", "sub_discipline")],
+            [("0", "area", True), ("0", "sub_area", True), ("0", "stage", True),
+             ("0", "zone", True), ("P1", "part", False), ("0", "unit", True),
+             ("L.2A", "level", False), ("MEP", "discipline", False),
+             ("Electrical Works", "sub_discipline", False)],
         )
+
+    def test_the_named_slots_are_the_same_whatever_the_row_leaves_blank(self):
+        """The point of keeping the empties: a named slot sits at the same
+        depth on every row, so nothing below it shifts up."""
+        from .p6_id_schedule_import import slot_path
+
+        def named(code):
+            return [(v, t) for v, t, empty in slot_path(code, self.LEGEND) if not empty]
+
+        self.assertEqual(named("CA-CON-0-0-0-0-P1-0-L.2A-MEP-Electrical Works-358"),
+                         [("P1", "part"), ("L.2A", "level"), ("MEP", "discipline"),
+                          ("Electrical Works", "sub_discipline")])
+        # Same shape, one slot fewer filled - and the level stays at its depth.
+        depth_of = {t: i for i, (_v, t, _e)
+                    in enumerate(slot_path("CA-CON-0-0-0-0-P1-0-L.2A-MEP-X-1", self.LEGEND))}
+        other = {t: i for i, (_v, t, _e)
+                 in enumerate(slot_path("CA-CON-0-0-0-0-0-0-L.2-Civil-Y-2", self.LEGEND))}
+        self.assertEqual(depth_of["discipline"], other["discipline"])
 
     def test_a_slot_means_the_same_thing_with_or_without_its_neighbours(self):
         """The whole point: "L.2" is a Level whether or not the row also names
@@ -504,24 +527,32 @@ class PlanexCodeLegendTests(SimpleTestCase):
         positionally it was a zone on one row and a stage on the next."""
         from .p6_id_schedule_import import slot_path
 
-        self.assertEqual(slot_path("CA-CON-0-0-0-0-0-0-L.2-Civil-Block works-120", self.LEGEND),
+        def named(code):
+            return [(v, t) for v, t, empty in slot_path(code, self.LEGEND) if not empty]
+
+        self.assertEqual(named("CA-CON-0-0-0-0-0-0-L.2-Civil-Block works-120"),
                          [("L.2", "level"), ("Civil", "discipline"), ("Block works", "sub_discipline")])
-        self.assertEqual(slot_path("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1", self.LEGEND),
+        self.assertEqual(named("CA-CON-0-0-0-0-0-0-0-Civil-Pre Demolitioning-1"),
                          [("Civil", "discipline"), ("Pre Demolitioning", "sub_discipline")])
 
     def test_a_discipline_with_no_sub_discipline_stands_alone(self):
         from .p6_id_schedule_import import slot_path
 
-        self.assertEqual(slot_path("CA-CON-0-0-0-0-0-0-0-Landscape-0-628", self.LEGEND),
+        path = slot_path("CA-CON-0-0-0-0-0-0-0-Landscape-0-628", self.LEGEND)
+        self.assertEqual([(v, t) for v, t, empty in path if not empty],
                          [("Landscape", "discipline")])
+        # The sub-discipline slot is still there, standing for nothing.
+        self.assertEqual(path[-1], ("0", "sub_discipline", True))
 
     def test_the_legends_own_order_is_the_nesting_order(self):
         from .p6_id_schedule_import import slot_path
 
         self.assertEqual(
             slot_path("XX-CON-Area 1-Sub 2-PH2-Z(C)-0-Unit 4-0-MEP-0-7", self.LEGEND),
-            [("Area 1", "area"), ("Sub 2", "sub_area"), ("PH2", "stage"),
-             ("Z(C)", "zone"), ("Unit 4", "unit"), ("MEP", "discipline")],
+            [("Area 1", "area", False), ("Sub 2", "sub_area", False),
+             ("PH2", "stage", False), ("Z(C)", "zone", False), ("0", "part", True),
+             ("Unit 4", "unit", False), ("0", "level", True),
+             ("MEP", "discipline", False), ("0", "sub_discipline", True)],
         )
 
     def test_a_code_that_does_not_fill_the_legend_is_left_alone(self):
@@ -613,6 +644,8 @@ class LegendReadImportTests(TestCase):
         by_type = {}
         for s in ProjectScope.objects.filter(project=project):
             by_type.setdefault(s.scope_type, set()).add(s.name)
+        # Placeholders all share the code's own "0"; compare what is named.
+        by_type = {t: {n for n in names if n != "0"} for t, names in by_type.items()}
         self.assertEqual(by_type.get(ProjectScope.ScopeType.PART), {"P1", "P2"})
         self.assertEqual(by_type.get(ProjectScope.ScopeType.LEVEL), {"L.2", "L.2A"})
         self.assertEqual(by_type.get(ProjectScope.ScopeType.DISCIPLINE),
@@ -620,8 +653,54 @@ class LegendReadImportTests(TestCase):
         self.assertEqual(by_type.get(ProjectScope.ScopeType.SUB_DISCIPLINE),
                          {"Steel Works", "Electrical Works", "Pre Demolitioning", "Plumbing"})
         # Nothing is typed by position any more.
-        self.assertNotIn(ProjectScope.ScopeType.STAGE, by_type)
-        self.assertNotIn(ProjectScope.ScopeType.ZONE, by_type)
+        named = {t: {n for n in names if n != "0"} for t, names in by_type.items()}
+        self.assertFalse(named.get(ProjectScope.ScopeType.STAGE))
+        self.assertFalse(named.get(ProjectScope.ScopeType.ZONE))
+
+    def test_the_slots_this_file_never_fills_are_present_but_empty(self):
+        """E1: the legend declares a zone, so the tree has one - it just stands
+        for nothing. Keeping it is what stops the levels below shifting up."""
+        empties = ProjectScope.objects.filter(project=self._import(), is_placeholder=True)
+        self.assertTrue(empties.exists())
+        self.assertEqual({s.name for s in empties}, {"0"})
+        self.assertIn(ProjectScope.ScopeType.ZONE, {s.scope_type for s in empties})
+
+    def test_an_empty_level_reads_as_the_level_it_stands_for(self):
+        """Never the stored "0" - a report row has nothing else on it to say
+        which of the nine levels is the missing one."""
+        from apps.reports.services import _text
+
+        empty = ProjectScope.objects.filter(
+            project=self._import(), is_placeholder=True,
+            scope_type=ProjectScope.ScopeType.ZONE).first()
+        self.assertEqual(_text(empty), "No zone")
+
+    def test_a_row_whose_deepest_slot_is_empty_still_keeps_its_work(self):
+        """A discipline with no sub-discipline codes its last slot "0", so the
+        activity hangs off the placeholder. It must not be stranded there
+        unnamed, or the per-phase table grows a column called "0"."""
+        from apps.reports.services import _text
+
+        project = self._import()
+        holders = [s for s in ProjectScope.objects.filter(project=project, is_placeholder=True)
+                   if s.activities.exists()]
+        self.assertTrue(holders)
+        for s in holders:
+            self.assertTrue(_text(s).startswith("No "), _text(s))
+
+    def test_every_branch_reaches_the_work_at_the_same_depth(self):
+        """The defect this fixes: the same discipline sat at three different
+        depths in one file, because rows that skipped a slot lost the level."""
+        project = self._import()
+        depth = {}
+        for s in ProjectScope.objects.filter(
+                project=project, scope_type=ProjectScope.ScopeType.DISCIPLINE):
+            d, node = 0, s
+            while node.parent_id:
+                node = node.parent
+                d += 1
+            depth.setdefault(d, []).append(s.name)
+        self.assertEqual(len(depth), 1, f"disciplines at several depths: {depth}")
 
     def test_a_level_is_a_level_whether_or_not_a_part_is_coded(self):
         """Read positionally, "L.2" was the second surviving segment on rows
@@ -633,9 +712,17 @@ class LegendReadImportTests(TestCase):
         self.assertTrue(levels.exists())
         for level in levels:
             self.assertEqual(level.scope_type, ProjectScope.ScopeType.LEVEL)
-            # Under its part where one is coded, at the root where none is —
-            # never re-typed as something else either way.
-            self.assertIn(level.parent.scope_type if level.parent else None,
+            # Every level now sits at the same depth, so its immediate parent is
+            # always the unit slot. What identifies it is the nearest ancestor
+            # that actually NAMES something: its part where one is coded, and
+            # nothing at all where none is - never re-typed either way.
+            node, named = level.parent, None
+            while node is not None:
+                if not node.is_placeholder:
+                    named = node
+                    break
+                node = node.parent
+            self.assertIn(named.scope_type if named else None,
                           {ProjectScope.ScopeType.PART, None})
 
     def test_the_report_reads_its_roles_off_this_shape(self):
@@ -671,8 +758,12 @@ class LegendReadImportTests(TestCase):
         project = self._import()
         part = ProjectScope.objects.filter(project=project, name="P1").first()
         self.assertEqual(_text(part), "Part 1")
-        unlabelled = ProjectScope.objects.filter(project=project, label="").first()
-        if unlabelled is not None:            # falls back, never blank
+        # A NAMED level with no recovered heading falls back to its own name,
+        # never blank. Placeholders are excluded: they have no name to fall back
+        # to, and read as the level they stand for instead.
+        unlabelled = ProjectScope.objects.filter(
+            project=project, label="", is_placeholder=False).first()
+        if unlabelled is not None:
             self.assertEqual(_text(unlabelled), unlabelled.name)
 
 

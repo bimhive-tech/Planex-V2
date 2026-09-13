@@ -180,12 +180,17 @@ class ScopeTreeView(APIView):
                 else project.scopes.filter(parent__isnull=True)
         else:
             qs = project.scopes.filter(parent_id=parent)
-        children = list(qs.order_by("sort_order", "name").values("id", "name", "scope_type"))
+        children = list(qs.order_by("sort_order", "name")
+                          .values("id", "name", "label", "scope_type", "is_placeholder"))
         ids = [c["id"] for c in children]
         has_sub = set(ProjectScope.objects.filter(parent_id__in=ids).values_list("parent_id", flat=True))
         has_acts = set(Activity.objects.filter(scope_id__in=ids).values_list("scope_id", flat=True))
         return Response([
-            {"id": str(c["id"]), "name": c["name"], "type": c["scope_type"],
+            {"id": str(c["id"]),
+             "name": ProjectScope(scope_type=c["scope_type"], name=c["name"],
+                                  label=c["label"] or "",
+                                  is_placeholder=c["is_placeholder"]).display_name,
+             "is_placeholder": c["is_placeholder"], "type": c["scope_type"],
              "has_children": c["id"] in has_sub or c["id"] in has_acts}
             for c in children
         ])

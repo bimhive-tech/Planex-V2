@@ -143,11 +143,15 @@ class ProjectWriteSerializer(serializers.ModelSerializer):
 class ScopeSerializer(serializers.ModelSerializer):
     scope_type_display = serializers.CharField(source="get_scope_type_display", read_only=True)
     discipline_display = serializers.CharField(source="get_discipline_display", read_only=True)
+    # What the tree shows: the heading that names this level, or the level it
+    # stands for when it names nothing (see ProjectScope.display_name).
+    display_name = serializers.CharField(read_only=True)
 
     class Meta:
         model = ProjectScope
         fields = [
-            "id", "parent", "scope_type", "scope_type_display", "name", "label", "sort_order",
+            "id", "parent", "scope_type", "scope_type_display", "name", "label",
+            "display_name", "is_placeholder", "sort_order",
             "planned_start", "planned_finish", "revised_finish",
             "discipline", "discipline_display",
         ]

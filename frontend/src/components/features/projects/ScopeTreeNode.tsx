@@ -89,18 +89,20 @@ export function ScopeNode(props: ScopeNodeProps) {
           {hasChildren ? <Icon name="chevronDown" size={14} className={open ? "" : styles.caretClosed} /> : <span className={styles.dot} />}
         </button>
         <Badge tone="info">{scope.scope_type_display}</Badge>
-        <span className={styles.scopeName}>{scope.label || scope.name}</span>
+        <span className={`${styles.scopeName}${scope.is_placeholder ? ` ${styles.emptyLevel}` : ""}`}>
+          {scope.display_name}
+        </span>
         <div className={styles.bar}><span className={styles.barFill} style={{ ["--pct" as string]: `${pct}%` }} /></div>
         <span className={`${styles.pct} tnum`}>{pct}%</span>
         {scope.scope_type === zoneType && childScopes.length > 0 && (
           <button className={styles.gridBtn} title="Open Excel grid" aria-label="Open Excel grid"
-            onClick={() => props.onOpenGrid(scope.id, scope.label || scope.name)}>
+            onClick={() => props.onOpenGrid(scope.id, scope.display_name)}>
             <Icon name="dashboard" size={14} />
             <span>Grid</span>
           </button>
         )}
         <button className={styles.gridBtn} title="Progress photos" aria-label="Progress photos"
-          onClick={() => props.onOpenPhotos(scope.id, scope.label || scope.name)}>
+          onClick={() => props.onOpenPhotos(scope.id, scope.display_name)}>
           <Icon name="image" size={14} />
           <span>Photos</span>
         </button>

@@ -189,6 +189,16 @@ export interface Scope {
   // a code-driven P6 import could determine one — empty otherwise, in which
   // case `name` is already human-readable and should be shown instead.
   label: string;
+  /** What to show: the heading that names this level, or the level it stands
+   * for when it names nothing. Resolved on the backend (ProjectScope.
+   * display_name) so the report and the app can never word a node
+   * differently — never render `name` directly, a placeholder stores the
+   * code's own "0". */
+  display_name: string;
+  /** This level is declared by the project's code but this branch fills it
+   * with nothing. Kept so every branch has the same depth and the levels below
+   * never shift up. Carries no work of its own. */
+  is_placeholder: boolean;
   sort_order: number;
   planned_start: string | null;
   planned_finish: string | null;

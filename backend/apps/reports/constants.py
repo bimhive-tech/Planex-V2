@@ -217,6 +217,18 @@ DEFAULT_CONFIG = {
         "enum_electrical": "كهرباء",
         "enum_mechanical": "ميكانيكا",
         "enum_other": "أخرى",
+        # A level the project's code declares but this branch leaves empty
+        # (see reports.services.empty_level_text). Keyed like every other model
+        # value so a fully-Arabic template translates them the same way.
+        "enum_no_area": "بدون منطقة",
+        "enum_no_sub-area": "بدون منطقة فرعية",
+        "enum_no_stage": "بدون مرحلة",
+        "enum_no_zone": "بدون نطاق",
+        "enum_no_part": "بدون جزء",
+        "enum_no_unit": "بدون وحدة",
+        "enum_no_level": "بدون دور",
+        "enum_no_discipline": "بدون تخصص",
+        "enum_no_sub-discipline": "بدون تخصص فرعي",
         "enum_residential": "سكني",
         # Item-scoped chart sources (a repeating page's own zone/phase). Without
         # these, a title/caption falls back to the raw source key and prints

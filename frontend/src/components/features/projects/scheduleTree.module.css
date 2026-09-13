@@ -240,3 +240,10 @@
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* A level the project's code declares but this branch leaves empty. Present so
+   the tree keeps one shape, but it names nothing, so it recedes. */
+.emptyLevel {
+  color: var(--text-muted);
+  font-style: italic;
+}

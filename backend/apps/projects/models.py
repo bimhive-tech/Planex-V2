@@ -612,6 +612,12 @@ class ProjectScope(TimestampedModel):
     # matches or re-imports by this field, only by `name`, so it changing (or
     # being blank) between imports never affects import correctness.
     label = models.CharField(max_length=180, blank=True)
+    # This level exists in the project's own code legend but this branch fills
+    # it with nothing - "no zone" rather than no zone level at all. Kept as a
+    # real node so every branch has the same depth and the levels below it
+    # never shift up (see p6_id_schedule_import.slot_path). Carries no work and
+    # is skipped when deciding which levels play the report's roles.
+    is_placeholder = models.BooleanField(default=False)
     sort_order = models.PositiveIntegerField(default=0)
 
     # Optional own schedule (any node may carry one, independent of the
@@ -633,6 +639,23 @@ class ProjectScope(TimestampedModel):
             models.Index(fields=["project", "schedule_import"]),
         ]
         ordering = ["sort_order", "name"]
+
+    @property
+    def display_name(self) -> str:
+        """What a reader sees for this level, anywhere it appears.
+
+        Three cases in one place so the report and the app can never word the
+        same node differently: a level standing for nothing reads as the level
+        it stands for ("No zone"); a coded level reads as the WBS heading that
+        names it; anything else reads as its own name.
+
+        The placeholder wording is built from the scope type's own display
+        name, so a level added to the legend later needs no new string, and an
+        Arabic template translates it through the same `enum_*` labels every
+        other model value uses (reports.pdf_tables.enum_label)."""
+        if self.is_placeholder:
+            return f"No {self.get_scope_type_display().lower()}"
+        return (self.label or "").strip() or self.name
 
     def __str__(self):
         return f"{self.get_scope_type_display()}: {self.name}"

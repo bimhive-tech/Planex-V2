@@ -429,6 +429,7 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         counts[stype] += 1
         scope = Scope(company=company, project=project, parent=parent, scope_type=stype, schedule_import=schedule_import,
                       name=node["name"], label=node.get("label") or "", sort_order=len(scopes_by_depth[depth]),
+                      is_placeholder=bool(node.get("placeholder")),
                       planned_start=node.get("start"), planned_finish=node.get("finish"),
                       discipline=_guess_discipline(node["name"]) if stype in WORK_SCOPE_TYPES else "")
         scopes_by_depth[depth].append(scope)

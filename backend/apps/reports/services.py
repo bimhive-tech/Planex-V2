@@ -54,19 +54,26 @@ def _scope_roles(project, schedule_import=None):
     from collections import Counter
 
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
-    rows = list(scopes.values_list("id", "parent_id", "scope_type"))
+    rows = list(scopes.values_list("id", "parent_id", "scope_type", "is_placeholder"))
     ZONE, AREA = ProjectScope.ScopeType.ZONE, ProjectScope.ScopeType.AREA
     if not rows:
         return {"stage": ProjectScope.ScopeType.STAGE, "zone": ZONE, "area": AREA}
 
-    parent = {str(sid): (str(pid) if pid else None) for sid, pid, _ in rows}
-    stype = {str(sid): st for sid, _, st in rows}
+    parent = {str(sid): (str(pid) if pid else None) for sid, pid, _, _ in rows}
+    stype = {str(sid): st for sid, _, st, _ in rows}
+    # A level the code declares but this project never fills - "no zone" on
+    # every branch (see ProjectScope.is_placeholder). It exists so the tree
+    # keeps a constant depth, but it names nothing, so it cannot be the unit
+    # progress is reported per: Cairo Airport would report its whole 656M
+    # programme as one row called "No zone".
+    empty = {str(sid) for sid, _, _, ph in rows if ph}
+    real_types = {st for sid, _, st, ph in rows if not ph}
 
     def place_above(sid):
-        """The nearest place-typed ancestor's id, or None."""
+        """The nearest REAL place-typed ancestor's id, or None."""
         seen, cur = set(), parent.get(sid)
         while cur is not None and cur not in seen:
-            if stype.get(cur) in PLACE_SCOPE_TYPES:
+            if stype.get(cur) in PLACE_SCOPE_TYPES and cur not in empty:
                 return cur
             seen.add(cur)
             cur = parent.get(cur)
@@ -78,7 +85,7 @@ def _scope_roles(project, schedule_import=None):
         holder = above.get(sid)
         return stype.get(holder) if holder else None
 
-    places = {st for st in stype.values() if st in PLACE_SCOPE_TYPES}
+    places = {st for st in real_types if st in PLACE_SCOPE_TYPES}
     if not places:
         return {"stage": None, "zone": None, "area": None}
 
@@ -89,18 +96,22 @@ def _scope_roles(project, schedule_import=None):
         # place holding the most OTHER places covers a tree whose work isn't
         # placed at all, where there is no better answer than the deepest.
         held = Counter(t for sid, st in stype.items()
-                       if st in WORK_SCOPE_TYPES and (t := type_above(sid)))
+                       if st in WORK_SCOPE_TYPES and sid not in empty
+                       and (t := type_above(sid)))
         if not held:
             held = Counter(t for sid, st in stype.items()
-                           if st in PLACE_SCOPE_TYPES and (t := type_above(sid)))
+                           if st in PLACE_SCOPE_TYPES and sid not in empty
+                           and (t := type_above(sid)))
         zone = held.most_common(1)[0][0] if held else sorted(places)[0]
 
     # What sits directly above the unit, and directly below it. A level nested
     # in itself (zones under zones) names neither role.
     stage_counts = Counter(t for sid, st in stype.items()
-                           if st == zone and (t := type_above(sid)) and t != zone)
+                           if st == zone and sid not in empty
+                           and (t := type_above(sid)) and t != zone)
     below = Counter(st for sid, st in stype.items()
-                    if st in PLACE_SCOPE_TYPES and st != zone and type_above(sid) == zone)
+                    if st in PLACE_SCOPE_TYPES and st != zone and sid not in empty
+                    and type_above(sid) == zone)
     # AREA keeps its role wherever it exists, so a tree with both a building
     # and an area level doesn't quietly swap which one gets charted.
     area = AREA if AREA in below else (below.most_common(1)[0][0] if below else None)
@@ -366,6 +377,10 @@ def _text(scope) -> str:
     with the WBS heading that names it (p6_id_schedule_import._headings_by_slot)
     and stores it as `label`; this is where that reaches the page (2026-09-08).
     Left as the name wherever no heading was recovered."""
+    # One definition, on the model — a placeholder's stored name is the code's
+    # own "0" and must never reach a reader.
+    if hasattr(scope, "display_name"):
+        return scope.display_name
     return (getattr(scope, "label", "") or "").strip() or scope.name
 
 
@@ -828,17 +843,19 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
 
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
-    rows_ = list(scopes.values_list("id", "parent_id", "scope_type"))
-    parent_of = {str(sid): (str(pid) if pid else None) for sid, pid, _ in rows_}
-    type_of = {str(sid): st for sid, _, st in rows_}
+    rows_ = list(scopes.values_list("id", "parent_id", "scope_type", "is_placeholder"))
+    parent_of = {str(sid): (str(pid) if pid else None) for sid, pid, _, _ in rows_}
+    type_of = {str(sid): st for sid, _, st, _ in rows_}
+    empty_of = {str(sid) for sid, _, _, ph in rows_ if ph}
 
     def unit_of(sid):
-        """The nearest place-typed ancestor, or None when nothing above this
-        work package says where it is."""
+        """The nearest ancestor that actually NAMES a place, or None when
+        nothing above this work package says where it is. A placeholder level
+        says only that the code has a slot there, so it is walked past."""
         seen = set()
         cur = parent_of.get(sid)
         while cur is not None and cur not in seen:
-            if type_of.get(cur) in PLACE_SCOPE_TYPES:
+            if type_of.get(cur) in PLACE_SCOPE_TYPES and cur not in empty_of:
                 return cur
             seen.add(cur)
             cur = parent_of.get(cur)
@@ -863,7 +880,9 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
         unit_id = unit_of(sid)
         if unit_id is None:
             continue
-        key = phase.label or phase.name
+        # _text, not the raw name: a work package standing for nothing stores
+        # the code's own "0" and must not head a column with it.
+        key = _text(phase)
         seen_order.setdefault(key, (phase.sort_order, key))
         w = float(weight)
         prog = progress.get(str(aid), float(prog)) if progress is not None else float(prog)

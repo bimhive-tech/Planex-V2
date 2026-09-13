@@ -37,7 +37,10 @@ export function scopeRoles(childrenOf: Map<string | null, Scope[]>): ScopeRoles 
   const shallowest = new Map<ScopeType, number>();
   const walk = (parent: string | null, depth: number) => {
     for (const s of childrenOf.get(parent) ?? []) {
-      if (PLACE_SCOPE_TYPES.includes(s.scope_type)) {
+      // A level standing for nothing can't be the unit progress is reported
+      // per — every branch has one, so the filter would offer a single "No
+      // zone" covering the whole project. Mirrors _scope_roles on the backend.
+      if (!s.is_placeholder && PLACE_SCOPE_TYPES.includes(s.scope_type)) {
         const seen = shallowest.get(s.scope_type);
         if (seen === undefined || depth < seen) shallowest.set(s.scope_type, depth);
       }

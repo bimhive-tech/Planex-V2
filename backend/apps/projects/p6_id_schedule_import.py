@@ -97,6 +97,12 @@ def legend_slots(wb) -> list:
     return []
 
 
+# What an empty slot is called in the tree. The file's own token for "nothing
+# here", so the stored name stays the code's own vocabulary and re-import
+# matching never depends on display wording.
+PLACEHOLDER_NAME = "0"
+
+
 def slot_path(code: str, slots: list) -> list:
     """[(name, scope_type)] for the structural slots one code actually fills,
     in the order the legend declares them — or [] when `code` doesn't fill the
@@ -123,9 +129,16 @@ def slot_path(code: str, slots: list) -> list:
     out = []
     for value, slot in zip(parts, slots):
         stype = _SLOT_SCOPE_TYPE.get(slot.strip().lower())
-        if not stype or not value or value == "0" or value.lower() in _PLACEHOLDER_WORDS:
+        if not stype:
+            # PN / CON / NU name the project, a constant tag and the activity's
+            # own number. They are not levels.
             continue
-        out.append((value, stype))
+        empty = not value or value == "0" or value.lower() in _PLACEHOLDER_WORDS
+        # An empty slot is KEPT, not skipped. Dropping it is what let one
+        # discipline sit at three different depths in the same file, shifting
+        # every level below it up or down depending on the row - Cairo Airport
+        # codes 492 leaf rows in six different shapes.
+        out.append((PLACEHOLDER_NAME if empty else value, stype, empty))
     return out
 
 
@@ -180,12 +193,13 @@ def _looks_like_planex_code(rows, code_col) -> bool:
     return seen > 0 and hits / seen >= _MATCH_RATIO
 
 
-def _new_group(name: str, stype: str | None = None) -> dict:
+def _new_group(name: str, stype: str | None = None, placeholder: bool = False) -> dict:
     # `stype` is set only when the file's own legend says what this segment is
     # (see slot_path); otherwise it stays None and the tree falls back to
     # typing by depth (p6_schedule_import's _BY_DEPTH).
     return {"name": name[:180] or "Uncategorized", "label": None, "children": [], "activities": [],
-            "start": None, "finish": None, "pct": None, "schedule_pct": None, "stype": stype}
+            "start": None, "finish": None, "pct": None, "schedule_pct": None, "stype": stype,
+            "placeholder": placeholder}
 
 
 def _headings_by_slot(observed) -> dict:
@@ -408,7 +422,7 @@ def parse_id_schedule_sheets(wb):
         by_path: dict[tuple, dict] = {}
         roots: list[dict] = []
 
-        def node_for(path: tuple, stypes: tuple = ()) -> dict:
+        def node_for(path: tuple, stypes: tuple = (), empties: tuple = ()) -> dict:
             """Get-or-create the group node at `path`, creating any missing
             ancestors along the way so an out-of-order file still nests
             correctly. `stypes` pairs with `path` when the legend named each
@@ -420,7 +434,9 @@ def parse_id_schedule_sheets(wb):
             for i, seg in enumerate(path):
                 built = built + (seg,)
                 if built not in by_path:
-                    by_path[built] = _new_group(seg, stypes[i] if i < len(stypes) else None)
+                    by_path[built] = _new_group(
+                        seg, stypes[i] if i < len(stypes) else None,
+                        empties[i] if i < len(empties) else False)
                     parent_children.append(by_path[built])
                 parent_children = by_path[built]["children"]
             return by_path[path]
@@ -477,11 +493,12 @@ def parse_id_schedule_sheets(wb):
             # declares; the positional fallback otherwise (see slot_path).
             slotted = slot_path(raw_code, legend)
             if slotted:
-                path = tuple(name for name, _ in slotted)
-                stypes = tuple(st for _, st in slotted)
+                path = tuple(name for name, _, _ in slotted)
+                stypes = tuple(st for _, st, _ in slotted)
+                empties = tuple(e for _, _, e in slotted)
             else:
                 path = tuple(segment_path(raw_code))
-                stypes = ()
+                stypes = empties = ()
             if not path:
                 continue
             matched_any = True
@@ -498,7 +515,7 @@ def parse_id_schedule_sheets(wb):
                 "schedule_pct": _to_pct_optional(row[sched_pct_c]) if sched_pct_c is not None
                                 and sched_pct_c < len(row) else None,
             }
-            node_for(path, stypes)["activities"].append(task)
+            node_for(path, stypes, empties)["activities"].append(task)
             if slotted:
                 # Keyed by the heading PATH, not by depth: the same depth
                 # holds different kinds of heading in different branches, so
@@ -507,8 +524,11 @@ def parse_id_schedule_sheets(wb):
                 for _, text in heading_stack:
                     path_so_far += (text,)
                     per = heading_observed.setdefault(path_so_far, {})
-                    for value, stype in slotted:
-                        per.setdefault(stype, set()).add(value)
+                    for value, stype, empty in slotted:
+                        # A slot this row left blank names nothing, so it must
+                        # not claim a WBS heading.
+                        if not empty:
+                            per.setdefault(stype, set()).add(value)
             else:
                 _label_ancestors(by_path, path, heading_stack)
 
