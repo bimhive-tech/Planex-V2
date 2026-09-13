@@ -164,7 +164,7 @@ def project_overall_progress(project, progress=None, schedule_import=None) -> fl
             id__in=list(progress.keys())
         ).values_list("id", "weight", "progress_percent"):
             psum += float(w) * (progress[str(aid)] - float(cur))
-    return round(psum / wsum, 1)
+    return psum / wsum
 
 
 def _planned_cost_rows(project, schedule_import=None):
@@ -411,7 +411,7 @@ def _planned_at(project, on):
     if not (s and f and on and f > s):
         return None
     frac = (on - s).days / (f - s).days
-    return round(max(0.0, min(1.0, frac)) * 100, 1)
+    return max(0.0, min(1.0, frac)) * 100
 
 
 def progress_series(project, max_points=60) -> list:
@@ -438,8 +438,8 @@ def progress_series(project, max_points=60) -> list:
     if curve:
         return [
             {"date": c["date"],
-             "overall_progress": round(float(c["actual"]), 1),
-             "planned": (round(float(c["early_planned"]), 1)
+             "overall_progress": float(c["actual"]),
+             "planned": (float(c["early_planned"])
                          if c["early_planned"] is not None else None)}
             for c in curve if c["actual"] is not None
         ][-max_points:]
@@ -466,7 +466,7 @@ def progress_series(project, max_points=60) -> list:
 
     dates = sorted(actual)[-max_points:]
     return [
-        {"date": d, "overall_progress": round(actual[d], 1), "planned": _planned_at(project, d)}
+        {"date": d, "overall_progress": actual[d], "planned": _planned_at(project, d)}
         for d in dates
     ]
 
@@ -503,7 +503,7 @@ def view_progress_map(project, mode, as_of):
         for aid, cur in activities.values_list("id", "progress_percent"):
             s = str(aid)
             c = float(cur)
-            out[s] = round(end.get(s, c) - start.get(s, c), 2)
+            out[s] = end.get(s, c) - start.get(s, c)
         return out
     return None
 
@@ -584,7 +584,7 @@ def scope_planned_map(project, schedule_import=None) -> dict:
 
     # No entry (rather than 0.0) for a scope whose subtree carried none of the
     # column — 0% planned and "unknown" are very different things on a report.
-    return {str(sid): round(sub_pw[sid] / sub_w[sid], 1)
+    return {str(sid): sub_pw[sid] / sub_w[sid]
             for sid in all_ids if sub_w.get(sid)}
 
 
@@ -635,6 +635,6 @@ def scope_progress_map(project, progress=None, schedule_import=None) -> dict:
         agg(r)
 
     return {
-        str(sid): (round(sub_pw[sid] / sub_w[sid], 1) if sub_w.get(sid) else 0.0)
+        str(sid): (sub_pw[sid] / sub_w[sid] if sub_w.get(sid) else 0.0)
         for sid in all_ids
     }

@@ -6,6 +6,14 @@ full page border, boxed header (logo | project | logo) + report-line, blue
 underlined section headings, bordered info table, and planned/actual charts."""
 import copy
 
+# Decimal places a percentage is PRINTED to. Nothing rounds on the way in
+# any more (C2), so this is the single place the report decides how much of
+# that precision a reader sees. Two, because that is what the planners' own
+# dashboard quotes and what their figures get checked against: 59.55, not
+# 59.5. Money keeps its own precision at each call site - a contract value
+# and an invoice extract are read very differently.
+PERCENT_DECIMALS = 2
+
 DEFAULT_CONFIG = {
     # "auto" guesses Arabic/English from the project name and labels (the old,
     # implicit behavior — kept as the default so existing templates render

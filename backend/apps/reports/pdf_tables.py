@@ -8,6 +8,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Table, TableStyle
 
+from .constants import PERCENT_DECIMALS
 from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
 
 NOTE_HEIGHT = 4 * mm  # space reserved under a truncated table for the "+N more" note
@@ -147,8 +148,14 @@ def _fmt_date(d):
     return d.strftime("%d %b %Y") if d else "—"
 
 
+def fmt_percent(v) -> str:
+    """A percentage at the report's stated precision - the one place deciding
+    how much of the now-unrounded figure a reader actually sees."""
+    return f"{v:.{PERCENT_DECIMALS}f}%"
+
+
 def _pct_or_dash(v):
-    return f"{v:.1f}%" if v is not None else "—"
+    return fmt_percent(v) if v is not None else "—"
 
 
 def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None, hidden_cols=None):

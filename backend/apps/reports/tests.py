@@ -231,7 +231,7 @@ class PdfTests(SimpleTestCase):
         doc = fitz.open(stream=data, filetype="pdf")
         full_text = "".join(page.get_text() for page in doc)
         self.assertIn("Zone B", full_text)
-        self.assertIn("75.0%", full_text)
+        self.assertIn("75.00%", full_text)
 
     def test_respects_section_toggles(self):
         cfg = default_config()
@@ -623,7 +623,7 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertIn("Bold intro", full_text)
         self.assertIn("Outro paragraph", full_text)
         self.assertIn("Zone B", full_text)  # a real row from the resolved table embed
-        self.assertIn("75.0%", full_text)
+        self.assertIn("75.00%", full_text)
 
     def test_description_element_without_html_falls_back_to_the_project(self):
         """No authored props.html doesn't mean nothing renders — it means
@@ -902,7 +902,7 @@ class ResolveTableTests(SimpleTestCase):
             {"id": "z2", "name": "Zone B", "progress": 40.0},
         ]}
         grid = resolve_table("zone_progress", cfg, ctx, {"item": None}, raw=True, scope_zone_id="z2")
-        self.assertEqual(grid["rows"], [["Zone B", "40.0%"]])
+        self.assertEqual(grid["rows"], [["Zone B", "40.00%"]])
 
     def test_scope_zone_id_matching_nothing_returns_none(self):
         cfg = default_config()
@@ -964,7 +964,7 @@ class ResolveTableTests(SimpleTestCase):
         table = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
                                overrides={"r0c0": "Custom Zone Name"})
         self.assertEqual(self._cell_text(table, 1, 0), "Custom Zone Name")  # row 0 = header, row 1 = first zone
-        self.assertEqual(self._cell_text(table, 1, 1), "90.0%")  # untouched cell in the same row
+        self.assertEqual(self._cell_text(table, 1, 1), "90.00%")  # untouched cell in the same row
 
     def test_info_kind_override_reaches_the_real_pdf_table(self):
         # _full_ctx() is Arabic (rtl) — _info_table swaps the rendered column
@@ -979,7 +979,7 @@ class ResolveTableTests(SimpleTestCase):
         table = resolve_table("hierarchy_progress", default_config(), _full_ctx(), {"item": None},
                                overrides={"r0c1": "Custom%"})
         self.assertEqual(self._cell_text(table, 1, 1), "Custom%")  # row 0 = header, row 1 = the zone row
-        self.assertEqual(self._cell_text(table, 1, 2), "85.0%")  # untouched "previous" cell in the same row
+        self.assertEqual(self._cell_text(table, 1, 2), "85.00%")  # untouched "previous" cell in the same row
 
     def test_item_scoped_source_returns_none_until_phase_2(self):
         self.assertIsNone(resolve_table("item.children", default_config(), _full_ctx(), {"item": None}))
@@ -1045,7 +1045,7 @@ class ResolveTableTests(SimpleTestCase):
         # just this raw preview.
         grid = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
                               raw=True, style={"hidden_rows": [0]})
-        self.assertEqual(grid["rows"], [["Zone B", "75.0%"]])  # zone 0 (المنطقة الأولى) is gone
+        self.assertEqual(grid["rows"], [["Zone B", "75.00%"]])  # zone 0 (المنطقة الأولى) is gone
 
     def test_hidden_rows_and_overrides_share_the_same_original_index_space(self):
         # Hiding row 0 and overriding row 1's cell — the override must still
@@ -1053,7 +1053,7 @@ class ResolveTableTests(SimpleTestCase):
         # shift onto a different row once the visible list is shorter.
         grid = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
                               raw=True, style={"hidden_rows": [0]}, overrides={"r1c0": "Renamed Zone"})
-        self.assertEqual(grid["rows"], [["Renamed Zone", "75.0%"]])
+        self.assertEqual(grid["rows"], [["Renamed Zone", "75.00%"]])
 
     def test_hidden_rows_reaches_the_real_pdf_table(self):
         table = resolve_table("zone_progress", default_config(), _full_ctx(), {"item": None},
@@ -1564,11 +1564,11 @@ class RepeatBindingTests(SimpleTestCase):
     def test_item_name_and_progress_from_a_zone(self):
         scope = {"item": {"name": "Zone A", "progress": 88.5}, "index": 0, "count": 2}
         self.assertEqual(resolve_field("item.name", {}, scope, page_no=1), "Zone A")
-        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "88.5%")
+        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "88.50%")
 
     def test_item_progress_falls_back_to_actual_for_area_dashboards(self):
         scope = {"item": {"name": "Zone A", "actual": 72.0}, "index": 0, "count": 1}
-        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "72.0%")
+        self.assertEqual(resolve_field("item.progress", {}, scope, page_no=1), "72.00%")
 
     def test_item_index_is_one_based_and_item_count_reflects_total(self):
         scope = {"item": {"name": "X"}, "index": 2, "count": 5}
@@ -4018,7 +4018,7 @@ class CanvasColumnWidthParityTests(TestCase):
                             avail_width=178 * MM, raw=True)
         self.assertEqual(raw["tint_rows"], [0, 1])           # the stage and zone rows
         self.assertTrue(raw["rows"][0][0].endswith("Structure"))
-        self.assertEqual(raw["rows"][0][1], "40.0%")         # carrying its own figures
+        self.assertEqual(raw["rows"][0][1], "40.00%")         # carrying its own figures
 
         # Hiding the stage row must move the tint with it, not leave it on the
         # unit row that slid up into its place.
@@ -4142,7 +4142,7 @@ class ProgressSheetLayoutTests(SimpleTestCase):
         raw = resolve_table("progress_sheet", cfg, self._ctx(), {"item": None},
                             avail_width=265 * MM, raw=True)
         # planned, actual, this-month (actual-previous), previous, factor, variance
-        self.assertEqual(raw["rows"][0][3:], ["100.0%", "96.9%", "0.3%", "96.6%", "96.9%", "-3.1%"])
+        self.assertEqual(raw["rows"][0][3:], ["100.00%", "96.90%", "0.30%", "96.60%", "96.90%", "-3.10%"])
 
 
 class StageAreaBarsTests(TestCase):

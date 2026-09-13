@@ -142,7 +142,7 @@ def _planned_progress(project, as_of, current=False):
     if not (s and f and as_of and f > s):
         return None
     frac = (as_of - s).days / (f - s).days
-    return round(max(0.0, min(1.0, frac)) * 100, 1)
+    return max(0.0, min(1.0, frac)) * 100
 
 
 def _duration_for(s, f, revised_finish, as_of, planned_pct=None, actual_pct=None):
@@ -431,7 +431,7 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
         sw[zone] = sw.get(zone, 0.0) + w
         spw[zone] = spw.get(zone, 0.0) + w * prog
 
-    rows = [{"id": z, "name": zone_name[z], "progress": round(spw[z] / sw[z], 1) if sw[z] else 0.0}
+    rows = [{"id": z, "name": zone_name[z], "progress": spw[z] / sw[z] if sw[z] else 0.0}
             for z in sw]
     rows.sort(key=lambda r: order.get(r["id"], 999))
     return rows
@@ -463,7 +463,7 @@ def _scope_planned_progress(scope, project, as_of, planned_map=None):
     if not (start and finish and as_of and finish > start):
         return None
     frac = (as_of - start).days / (finish - start).days
-    return round(max(0.0, min(1.0, frac)) * 100, 1)
+    return max(0.0, min(1.0, frac)) * 100
 
 
 def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=None, schedule_import=None):
@@ -511,7 +511,7 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
 
     def pct(sid):
         w = weight.get(sid, 0.0)
-        return round(pweight[sid] / w, 1) if w else None
+        return pweight[sid] / w if w else None
 
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
     # see _zone_rows's docstring for why (Stage can sit above Zone).
@@ -616,7 +616,7 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
 
     def pct(sid):
         w = weight.get(sid, 0.0)
-        return round(pweight[sid] / w, 1) if w else None
+        return pweight[sid] / w if w else None
 
     def cost(sid):
         """(budgeted, earned) over this scope's whole subtree."""
@@ -737,7 +737,7 @@ def _financial_percent_complete(project, schedule_import=None):
     budget = float(agg["b"] or 0)
     if not budget:
         return None
-    return round(float(agg["e"] or 0) / budget * 100, 1)
+    return float(agg["e"] or 0) / budget * 100
 
 
 def _boq_financial_progress(project, limit=12, schedule_import=None):
@@ -790,8 +790,8 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
         earned = float(r["earned"] or 0)
         out.append({
             "name": r["phase_name"],
-            "budget_share": round(budget / total_budget * 100, 1),
-            "financial_percent": round(earned / total_budget * 100, 1),
+            "budget_share": budget / total_budget * 100,
+            "financial_percent": earned / total_budget * 100,
             # The money itself, for a chart that plots amounts rather than
             # shares — a budget line means more read as a figure than as a
             # percentage of something (2026-09-03).
@@ -887,7 +887,7 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
         row = {"name": unit_display.get(uid, _text(units[uid])), "values": []}
         for key in columns:
             w = by_phase.get(key, 0.0)
-            row["values"].append(round(unit_pw[uid][key] / w, 1) if w else None)
+            row["values"].append(unit_pw[uid][key] / w if w else None)
         rows.append(row)
     return columns, rows
 

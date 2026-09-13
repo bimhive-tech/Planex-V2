@@ -28,7 +28,7 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.tableofcontents import TableOfContents
 
-from .constants import merged_config
+from .constants import PERCENT_DECIMALS, merged_config
 from .richtext import html_to_flowables
 from .services import _zone_grids
 from .pdf_base import (
@@ -515,7 +515,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         story += major(labels["summary"])
         b = ctx["breakdown"]
         story.append(_aligned(styles["body"],
-            f"{p['name']} — {ctx['overall']:.1f}% — {b['total']} {labels['activities']}.",
+            f"{p['name']} — {ctx['overall']:.{PERCENT_DECIMALS}f}% — {b['total']} {labels['activities']}.",
             force=TA_RIGHT if rtl else TA_LEFT))
         story.append(Spacer(1, 4))
         act = labels["activities"]
@@ -598,7 +598,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
         # When the dashboard is on it owns the headline visuals; here we keep
         # only the text + tables so the same donut/pie/bars/s-curve aren't repeated.
         if sections.get("progress_overview"):
-            story.append(_aligned(styles["sub"], f"{ctx['overall']:.1f}%  {labels['overall_complete']}", force=TA_CENTER))
+            story.append(_aligned(styles["sub"], f"{ctx['overall']:.{PERCENT_DECIMALS}f}%  {labels['overall_complete']}", force=TA_CENTER))
             donut = None if dash_on else overall_donut(cfg, ctx, fw, labels)
             story += _captioned(cfg, styles, donut, labels["progress_overview"], fig) + ([Spacer(1, 8)] if donut else [])
         if sections.get("progress_chart") and not dash_on:
@@ -631,9 +631,9 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
                                           _captioned(cfg, styles, curve, labels["scurve"], fig) + [Spacer(1, 10)]))
         if sections.get("progress_compare") and any(z.get("planned") is not None for z in ctx["zones"]):
             rows = [[z["name"],
-                     f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
-                     f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
-                     f"{z['progress']:.1f}%"] for z in ctx["zones"]]
+                     f"{z['planned']:.{PERCENT_DECIMALS}f}%" if z.get("planned") is not None else "—",
+                     f"{z['previous']:.{PERCENT_DECIMALS}f}%" if z.get("previous") is not None else "—",
+                     f"{z['progress']:.{PERCENT_DECIMALS}f}%"] for z in ctx["zones"]]
             story.append(KeepTogether(_sub_heading(styles, labels["progress_compare"]) + [
                 _data_table(cfg, styles,
                     [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]],
@@ -641,7 +641,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
 
     if sections.get("zone_progress") and ctx["zones"]:
         story += major(labels["zone_progress"])
-        rows = [[z["name"], f"{z['progress']:.1f}%"] for z in ctx["zones"]]
+        rows = [[z["name"], f"{z['progress']:.{PERCENT_DECIMALS}f}%"] for z in ctx["zones"]]
         story.append(_data_table(cfg, styles, [labels["col_zone"], labels["col_progress"]], rows,
                                  col_widths=[None, 40 * mm], avail_width=fw))
 
@@ -712,7 +712,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
 
     if sections.get("timeline") and ctx["snapshots"]:
         story += major(labels["timeline"])
-        rows = [[_fmt_date(s["date"]), f"{float(s['overall_progress']):.1f}%", s["source"] or "—"] for s in ctx["snapshots"]]
+        rows = [[_fmt_date(s["date"]), f"{float(s['overall_progress']):.{PERCENT_DECIMALS}f}%", s["source"] or "—"] for s in ctx["snapshots"]]
         story.append(_data_table(cfg, styles, [labels["col_date"], labels["col_progress"], labels["col_source"]],
                                  rows, col_widths=[34 * mm, 32 * mm, None], avail_width=fw))
 

@@ -488,9 +488,9 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     if project_schedule_pct is None:
         sched_w = sum(float(a.weight) for a in activities if a.schedule_percent is not None)
         if sched_w:
-            project_schedule_pct = round(sum(
+            project_schedule_pct = sum(
                 float(a.weight) * float(a.schedule_percent)
-                for a in activities if a.schedule_percent is not None) / sched_w, 2)
+                for a in activities if a.schedule_percent is not None) / sched_w
 
     project.imported_progress_percent = Decimal(str(project_pct)) if project_pct is not None else None
     project.imported_planned_progress_percent = (

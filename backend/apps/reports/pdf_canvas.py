@@ -18,7 +18,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import Frame, Paragraph
 
-from .constants import merged_config
+from .constants import PERCENT_DECIMALS, merged_config
 from .pdf_base import BOLD, FONT_NAME, ensure_fonts, format_money, hexcolor, resolve_arabic, shape, storage_image_reader
 from .pdf_charts import (
     area_progress_chart,
@@ -913,8 +913,8 @@ def resolve_field(source: str, ctx: dict, scope: dict, page_no: int, page_title:
         "report.title": report.get("title"),
         "report.number": report.get("number"),
         "report.date": _fmt_date(report.get("date")) if report.get("date") else "",
-        "progress.overall": f"{overall:.1f}%" if overall is not None else "",
-        "progress.planned": f"{planned:.1f}%" if planned is not None else "",
+        "progress.overall": f"{overall:.{PERCENT_DECIMALS}f}%" if overall is not None else "",
+        "progress.planned": f"{planned:.{PERCENT_DECIMALS}f}%" if planned is not None else "",
         "page.number": str(page_no),
     }
     return str(values.get(source, "") or "")
@@ -937,7 +937,7 @@ def _resolve_item_field(source: str, scope: dict) -> str:
     if key in ("progress", "planned", "previous"):
         # zones use "progress"; areas/area_dashboards use "actual" for the same idea.
         value = item.get(key) if key != "progress" else (item.get("progress") if "progress" in item else item.get("actual"))
-        return f"{value:.1f}%" if value is not None else ""
+        return f"{value:.{PERCENT_DECIMALS}f}%" if value is not None else ""
     return ""
 
 
@@ -1145,8 +1145,8 @@ def resolve_table(
         if not children:
             return None
         rows = [[c["name"],
-                 f"{c['actual']:.1f}%" if c.get("actual") is not None else "—",
-                 f"{c['planned']:.1f}%" if c.get("planned") is not None else "—"] for c in children]
+                 f"{c['actual']:.{PERCENT_DECIMALS}f}%" if c.get("actual") is not None else "—",
+                 f"{c['planned']:.{PERCENT_DECIMALS}f}%" if c.get("planned") is not None else "—"] for c in children]
         # Head the table with which stage and zone it covers, each carrying its
         # OWN rolled-up figures rather than blank cells — those are the totals
         # the rows beneath them add up to, and leaving them empty made the two
@@ -1155,8 +1155,8 @@ def resolve_table(
         # it saying which of fifteen zones it belongs to.
         def _summary_row(label, name, actual, planned):
             return [f"{label}: {name}",
-                    f"{actual:.1f}%" if actual is not None else "—",
-                    f"{planned:.1f}%" if planned is not None else "—"]
+                    f"{actual:.{PERCENT_DECIMALS}f}%" if actual is not None else "—",
+                    f"{planned:.{PERCENT_DECIMALS}f}%" if planned is not None else "—"]
 
         summary = []
         if item.get("stage"):
@@ -1264,7 +1264,7 @@ def resolve_table(
             zones = [z for z in zones if z.get("id") == scope_zone_id]
         if not zones:
             return None
-        rows = [[z["name"], f"{z['progress']:.1f}%"] for z in zones]
+        rows = [[z["name"], f"{z['progress']:.{PERCENT_DECIMALS}f}%"] for z in zones]
         header = [labels["col_zone"], labels["col_progress"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
@@ -1379,9 +1379,9 @@ def resolve_table(
         if not zones:
             return None
         rows = [[z["name"],
-                 f"{z['planned']:.1f}%" if z.get("planned") is not None else "—",
-                 f"{z['previous']:.1f}%" if z.get("previous") is not None else "—",
-                 f"{z['progress']:.1f}%"] for z in zones]
+                 f"{z['planned']:.{PERCENT_DECIMALS}f}%" if z.get("planned") is not None else "—",
+                 f"{z['previous']:.{PERCENT_DECIMALS}f}%" if z.get("previous") is not None else "—",
+                 f"{z['progress']:.{PERCENT_DECIMALS}f}%"] for z in zones]
         header = [labels["col_zone"], labels["col_planned"], labels["col_previous"], labels["col_actual"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
@@ -1524,7 +1524,7 @@ def _resolve_detailed_progress_table(cfg, ctx, styles, avail_width=None, raw=Fal
     grid = grids[0]
     labels = cfg["labels"]
     header = [labels.get("col_task", "Task")] + grid["columns"][:8]
-    rows = [[r["name"]] + ["" if c is None else f"{c:.1f}%" for c in r["cells"][:8]] for r in grid["rows"]]
+    rows = [[r["name"]] + ["" if c is None else f"{c:.{PERCENT_DECIMALS}f}%" for c in r["cells"][:8]] for r in grid["rows"]]
     apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
     if raw:
         return {"kind": "data", "header": header, "rows": rows,
