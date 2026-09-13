@@ -533,6 +533,69 @@ class P6ScheduleImportTests(TestCase):
         self.assertEqual(result["overall_progress"], project_overall_progress(project))
         self.assertGreater(result["overall_progress"], 0)
 
+    def test_planned_cost_time_phases_the_budget_over_the_baseline(self):
+        """Planned cost is BCWS: each activity's budget scaled by its own
+        baseline percentage, then summed — not the whole budget, and not a flat
+        share of it. The fixture's leaves are 50% of 1M, 0% of 9M and 100% of
+        10M, so the plan expected 10.5M of the 20M budget by now."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import project_planned_cost
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        self.assertEqual(project_planned_cost(project), 10_500_000.0)
+
+    def test_planned_cost_rolls_up_through_the_scope_tree(self):
+        """Every scope carries its whole subtree's planned cost, so the tree
+        sums to the project figure rather than each level being computed apart
+        from the others."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import ProjectScope
+        from .services import project_planned_cost, scope_planned_cost_map
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        by_scope = scope_planned_cost_map(project)
+        roots = ProjectScope.objects.filter(project=project, parent__isnull=True)
+        self.assertEqual(sum(by_scope[str(r.id)] for r in roots),
+                         project_planned_cost(project))
+
+    def test_planned_cost_is_none_without_a_baseline_to_cost(self):
+        """A source with no cost columns has no plan to price, and reports that
+        as absent rather than as zero spend."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import project_planned_cost, scope_planned_cost_map
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(drop_cost_columns=True), source="P6.xlsx")
+
+        self.assertIsNone(project_planned_cost(project))
+        self.assertIsNone(scope_planned_cost_map(project))
+
+    def test_leaf_activities_keep_their_own_baseline_percentage(self):
+        """Schedule % Complete was read off WBS rows only, so every leaf of an
+        indentation-scheme import carried a null and planned cost could not be
+        computed for the file at all."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .models import Activity
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        import_workbook(project, self._workbook(), source="P6.xlsx")
+
+        painting = Activity.objects.get(project=project, name="Painting")
+        self.assertEqual(float(painting.schedule_percent), 100.0)
+        self.assertFalse(Activity.objects.filter(project=project, schedule_percent=None).exists())
+
     def test_as_of_view_ignores_the_stated_overall_progress(self):
         """The stated figure is a single point in time (import time) -- an
         as-of/historical report must still compute live, not report import-day's

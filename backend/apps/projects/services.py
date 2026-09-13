@@ -167,6 +167,76 @@ def project_overall_progress(project, progress=None, schedule_import=None) -> fl
     return round(psum / wsum, 1)
 
 
+def _planned_cost_rows(project, schedule_import=None):
+    """(scope_id, planned cost, budget) per activity carrying BOTH the baseline
+    percentage and a budget — the only rows planned cost is defined for.
+
+    An activity with a budget but no `schedule_percent` is left out of both
+    figures rather than counted as zero planned: "the baseline says nothing
+    about this row" and "the baseline says this row should not have started"
+    are different claims, and averaging them together understates the plan."""
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    for sid, pct, budget in (activities.exclude(schedule_percent=None)
+                             .exclude(budgeted_cost=None)
+                             .values_list("scope_id", "schedule_percent", "budgeted_cost")):
+        budget = float(budget)
+        yield sid, float(pct) / 100 * budget, budget
+
+
+def project_planned_cost(project, schedule_import=None):
+    """Planned cost — BCWS, the Planned Value of earned-value analysis:
+    sum(schedule_percent x budgeted_cost) across the batch's activities.
+
+    Where `project_earned_progress` says what the money has bought, this says
+    what the BASELINE expected to have been spent by the data date. It is
+    per-activity by construction: the budget is time-phased over each row's own
+    baseline percentage and only then summed, so a front-loaded programme reads
+    differently from a flat one over the same dates.
+
+    `None` when no activity carries both columns — a zone tracker imports
+    neither, and a source with budgets but no baseline percentage has no plan
+    to cost. Verified against the Cairo Airport export: 619,638,112.21 of a
+    656,013,770.47 budget."""
+    total = sum(cost for _sid, cost, _budget in _planned_cost_rows(project, schedule_import))
+    return total if total else None
+
+
+def scope_planned_cost_map(project, schedule_import=None):
+    """{scope_id -> planned cost over that scope's whole subtree}, or None when
+    the batch has nothing to cost — same rule as project_planned_cost, one
+    level down, and the same tree walk every other roll-up here uses."""
+    direct = {}
+    for sid, cost, _budget in _planned_cost_rows(project, schedule_import):
+        direct[sid] = direct.get(sid, 0.0) + cost
+    if not direct:
+        return None
+
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    scopes = (project.scopes.filter(schedule_import=schedule_import)
+              if schedule_import else project.scopes.all())
+    children, all_ids, roots = {}, [], []
+    for sid, pid in scopes.values_list("id", "parent_id"):
+        all_ids.append(sid)
+        (roots if pid is None else children.setdefault(pid, [])).append(sid)
+
+    sub = {}
+
+    def agg(sid):
+        total = direct.get(sid, 0.0)
+        for child in children.get(sid, []):
+            total += agg(child)
+        sub[sid] = total
+        return total
+
+    for r in roots:
+        agg(r)
+    return {str(sid): sub.get(sid, 0.0) for sid in all_ids}
+
+
 def project_earned_progress(project, schedule_import=None):
     """Actual progress as EARNED VALUE: sum(earned_value_cost) / sum(budgeted_cost).
 

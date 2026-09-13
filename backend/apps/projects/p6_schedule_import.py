@@ -176,6 +176,13 @@ def parse_p6_schedule_sheets(wb):
                     "schedule_variance": _num(row, variance_c),
                     "baseline_duration": _int(row, bl_dur_c), "actual_duration": _int(row, actual_dur_c),
                     "spi": _num(row, spi_c),
+                    # The baseline's own view of this row, needed per activity to
+                    # weight planned cost by budget (services.project_planned_cost).
+                    # Read only off WBS rows before, so every leaf of an
+                    # indentation-scheme import carried a null and the whole file
+                    # could produce no planned cost at all.
+                    "schedule_pct": _to_pct_optional(row[sched_c]) if sched_c is not None
+                                    and sched_c < len(row) else None,
                 })
                 continue
 

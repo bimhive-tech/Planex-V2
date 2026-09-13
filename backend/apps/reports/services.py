@@ -13,7 +13,8 @@ from apps.projects.models import (
     PLACE_SCOPE_TYPES, WORK_SCOPE_TYPES, ProjectImage, ProjectScope, Submittal, Variation,
 )
 from apps.projects.services import (
-    activity_progress_as_of, latest_schedule_import, project_overall_progress, scope_planned_map,
+    activity_progress_as_of, latest_schedule_import, project_overall_progress,
+    project_planned_cost, scope_planned_map,
 )
 
 from .models import ReportImage
@@ -1205,6 +1206,9 @@ def build_report_context(report):
     discipline_columns, discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
     boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
     financial_percent_complete = _financial_percent_complete(project, schedule_import)
+    # BCWS — what the baseline says should have been spent by now. None for a
+    # source carrying no baseline percentage or no budget.
+    planned_cost = project_planned_cost(project, schedule_import)
 
     # Per-phase (STAGE scope) rollups — backs the reference report's own
     # per-phase dashboard pages. Same inputs as `hierarchy`, one level up.
@@ -1405,6 +1409,7 @@ def build_report_context(report):
         "discipline_columns": discipline_columns,
         "boq_financial_progress": boq_financial_progress,
         "financial_percent_complete": financial_percent_complete,
+        "planned_cost": planned_cost,
         "area_dashboards": area_dashboards,
         "phase_dashboards": phase_dashboards,
         "critical_path": critical_path,
