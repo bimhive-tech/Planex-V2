@@ -33,7 +33,7 @@ class ReportListSerializer(serializers.ModelSerializer):
             "id", "title", "report_number", "report_date", "status",
             "project", "project_name", "template", "template_name",
             "period_start", "period_finish", "description", "description_html",
-            "scope_ids", "layout_override", "created_at",
+            "scope_ids", "schedule_import", "layout_override", "created_at",
         ]
 
 
@@ -43,9 +43,25 @@ class ReportWriteSerializer(serializers.ModelSerializer):
         fields = [
             "id", "project", "template", "title", "report_number", "report_date",
             "period_start", "period_finish", "description", "description_html",
-            "scope_ids", "status", "layout_override",
+            "scope_ids", "schedule_import", "status", "layout_override",
         ]
         read_only_fields = ["id"]
+
+    def validate_schedule_import(self, value):
+        """A report can only pin an import belonging to its own project.
+
+        Without this, a valid import id from ANOTHER project (or another
+        tenant's) would be accepted and the report would render that
+        project's schedule under this project's name."""
+        if value is None:
+            return value
+        request = self.context.get("request")
+        if request is not None and value.company_id != request.user.company_id:
+            raise serializers.ValidationError("That import belongs to a different project.")
+        project = self.initial_data.get("project") or getattr(self.instance, "project_id", None)
+        if project and str(value.project_id) != str(project):
+            raise serializers.ValidationError("That import belongs to a different project.")
+        return value
 
     def validate_description_html(self, value):
         """Whitelist the rich-text HTML before it's stored or re-rendered."""

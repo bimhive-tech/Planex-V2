@@ -40,6 +40,8 @@ export interface ReportRow {
   description: string;
   description_html: string;
   scope_ids: string[];
+  /** Pinned schedule-import batch, or null to resolve it from the report date. */
+  schedule_import?: string | null;
   layout_override: ReportLayoutOverride | null;
   created_at: string;
 }

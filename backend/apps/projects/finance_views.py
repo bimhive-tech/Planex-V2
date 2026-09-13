@@ -17,7 +17,7 @@ from rest_framework.views import APIView
 from apps.accounts.constants import Permission
 
 from .finance_imports import import_cashflow, import_dashboard, import_invoices
-from .models import CashFlowEntry, Invoice, Project
+from .models import CashFlowEntry, DashboardImport, Invoice, Project
 
 MAX_IMPORT_BYTES = 40 * 1024 * 1024
 
@@ -125,6 +125,23 @@ def _checked_upload(request):
     return upload
 
 
+class DashboardImportSerializer(serializers.ModelSerializer):
+    """One past dashboard upload, for the Finances tab's history list."""
+
+    uploaded_by_name = serializers.CharField(
+        source="uploaded_by.full_name", read_only=True, default="")
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DashboardImport
+        fields = ["id", "source", "created_at", "uploaded_by_name", "summary", "file_url"]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        return f"/api/projects/{obj.project_id}/dashboard/imports/{obj.id}/file/"
+
+
 class DashboardImportView(APIView):
     """One upload for the whole dashboard workbook — cash flow, the progress
     curve behind the report's S-curve, and the invoice extracts.
@@ -148,6 +165,17 @@ class DashboardImportView(APIView):
             # reasons are more use to the reader than a generic refusal.
             raise ValidationError({"file": " ".join(result["skipped"].values())
                                    or "Nothing in this workbook could be imported."})
+        # Record the upload only once it has actually imported something, so
+        # the history is a list of what changed the project's figures rather
+        # than of every file anyone tried. Keeping the workbook makes the row
+        # answerable — "where did these invoice figures come from?" ends in a
+        # download, not in asking whoever uploaded it.
+        record = DashboardImport(
+            company=project.company, project=project,
+            source=(upload.name or "")[:200], uploaded_by=request.user, summary=result)
+        upload.seek(0)
+        record.file.save(upload.name or "dashboard.xlsx", upload, save=False)
+        record.save()
         return Response(result)
 
 
@@ -258,3 +286,41 @@ class InvoiceImageView(APIView):
             raise Http404
         content_type = mimetypes.guess_type(invoice.image.name)[0] or "application/octet-stream"
         return FileResponse(invoice.image.open("rb"), content_type=content_type)
+
+
+class DashboardImportHistoryView(APIView):
+    """What dashboard workbooks have been imported into this project — file,
+    when, and who uploaded it (register item D2).
+
+    Read-only. These rows are a log of uploads, not retained batches: the cash
+    flow, curve points and invoices a workbook wrote are replaced or upserted
+    by the next one, so there is nothing here to restore or switch between.
+    Small list (one row per upload), so no pagination."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        project = _project(request, project_id)
+        _require_view_finances(request)
+        rows = project.dashboard_imports.select_related("uploaded_by")[:50]
+        return Response(DashboardImportSerializer(rows, many=True).data)
+
+
+class DashboardImportFileView(APIView):
+    """Stream one past dashboard workbook — same private, tenant-scoped
+    pattern as ScheduleImportFileView."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, import_id):
+        project = _project(request, project_id)
+        _require_view_finances(request)
+        try:
+            record = project.dashboard_imports.get(pk=import_id)
+        except (DashboardImport.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Import not found.")
+        if not record.file:
+            raise Http404
+        content_type = mimetypes.guess_type(record.file.name)[0] or "application/octet-stream"
+        return FileResponse(record.file.open("rb"), content_type=content_type,
+                            filename=record.source or "dashboard.xlsx")

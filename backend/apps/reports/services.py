@@ -1194,7 +1194,11 @@ def build_report_context(report):
     # no longer deletes the previous batch, so without this every report
     # would silently start double-counting activities from every batch ever
     # imported combined, the moment a project gets re-imported a second time.
-    schedule_import = latest_schedule_import(project, as_of=as_of)
+    # A report pinned to a batch reads that batch; otherwise resolve by date,
+    # exactly as before (register item D3 exposes the choice, it doesn't change
+    # the default). A pinned batch that was later deleted comes back as NULL
+    # via SET_NULL, so this falls through to the date the same way.
+    schedule_import = report.schedule_import or latest_schedule_import(project, as_of=as_of)
     # Part Scope is a log (see PartScope's docstring) — the report shows
     # whichever entry is most recent, ordered by the model's own Meta.
     latest_part = project.part_scopes.first()
@@ -1470,6 +1474,11 @@ def build_report_context(report):
             "currency": project.display_currency,
             "notes": project.notes,
         },
+        # Which import's activities every figure above was computed from —
+        # resolved once at the top of this function, whether the report pinned
+        # one or it was picked by date (register item D3). None only when the
+        # project has never had a schedule import at all.
+        "schedule_import_id": str(schedule_import.id) if schedule_import else None,
         "overall": overall,
         "planned": planned,
         "previous_overall": prev_overall,

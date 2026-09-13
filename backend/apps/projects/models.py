@@ -556,6 +556,51 @@ class ScheduleImport(TimestampedModel):
         return f"{self.project_id} @ {self.date}"
 
 
+def dashboard_import_file_key(instance, filename):
+    """Keyed by the import's own id so re-uploading doesn't overwrite the
+    previous workbook — every past dashboard import stays downloadable, the
+    same way a schedule import's does."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in (filename or "") else "xlsx"
+    return f"projects/{instance.project_id}/dashboard-imports/{instance.id}.{ext}"
+
+
+class DashboardImport(TimestampedModel):
+    """One dashboard-workbook upload, recorded so the Finances tab can show
+    what has been imported before -- file, date and who uploaded it.
+
+    A schedule import has always been its own retained batch, so the Schedule
+    tab could show its history; the dashboard upload left no trace at all,
+    which meant nobody could answer "where did these invoice figures come
+    from?" without asking whoever uploaded them (client ask, 2026-09-13).
+
+    This is a log, not a batch: unlike ScheduleImport nothing points back at
+    it, because the rows it writes (cash-flow months, invoices, curve points)
+    are replaced or upserted wholesale on the next import rather than kept as
+    separate generations. Deleting a row here therefore takes no project data
+    with it -- it only forgets that the upload happened.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="dashboard_imports")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="dashboard_imports")
+    source = models.CharField(max_length=200, blank=True)  # original filename
+    file = models.FileField(upload_to=dashboard_import_file_key, null=True, blank=True)
+    uploaded_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="dashboard_imports")
+    # What this upload actually brought in, exactly as the importer reported
+    # it: {"imported": {...}, "skipped": {...}}. Stored rather than recomputed
+    # because the workbook it came from can be replaced by a later one.
+    summary = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["project", "-created_at"])]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.project_id} dashboard @ {self.created_at:%Y-%m-%d}"
+
+
 class ProjectScope(TimestampedModel):
     """A node in a project's flexible work hierarchy
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""

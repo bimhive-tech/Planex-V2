@@ -45,6 +45,19 @@ class Report(TimestampedModel):
     title = models.CharField(max_length=200)
     report_number = models.CharField(max_length=60, blank=True)
     report_date = models.DateField(null=True, blank=True)  # the report's "as-of" date
+    # Which schedule-import batch this report reads. NULL keeps the original
+    # behaviour and stays the default: resolve it from `report_date`, so a
+    # report left alone floats to whatever import is current (see
+    # apps.projects.services.latest_schedule_import). Setting it pins the
+    # report to one batch instead -- the same choice the report was already
+    # making silently, now the user's to make (register item D3).
+    #
+    # SET_NULL, not CASCADE: deleting an import must not delete the reports
+    # that happened to read it. They fall back to resolving by date, which is
+    # what they would have done had nobody pinned them.
+    schedule_import = models.ForeignKey(
+        "projects.ScheduleImport", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="reports")
     period_start = models.DateField(null=True, blank=True)
     period_finish = models.DateField(null=True, blank=True)
     # Per-report narrative; falls back to the project's description when blank.

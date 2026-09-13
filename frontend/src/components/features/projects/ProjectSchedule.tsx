@@ -12,7 +12,10 @@ import { StateView } from "@/components/ui/StateView";
 import { api, ApiError } from "@/lib/api";
 import { useFetch } from "@/hooks/useFetch";
 import { scopeRoles, WORK_SCOPE_TYPES } from "@/lib/scopeRoles";
-import type { Activity, ProjectStructure, ScheduleImportSummary, Scope } from "@/types/project";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import type {
+  Activity, ProjectStructure, ScheduleImportImpact, ScheduleImportSummary, Scope,
+} from "@/types/project";
 import { ScopeFormModal } from "./ScopeFormModal";
 import { ActivityFormModal } from "./ActivityFormModal";
 import { ZoneGridView } from "./ZoneGridView";
@@ -96,6 +99,8 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   // The date THIS schedule's data is as of — not necessarily today. Blank
   // lets the backend infer one from the filename, falling back to today.
   const [importDate, setImportDate] = useState("");
+  // The import the delete dialog is open for, with what deleting it would take.
+  const [deletingImport, setDeletingImport] = useState<ScheduleImportImpact | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [zoneFilter, setZoneFilter] = useState("");
@@ -127,33 +132,35 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
     }
   }
 
-  /** Delete the import currently chosen in the picker (blank = the latest).
+  /** Open the delete confirmation for the import chosen in the picker.
    *
    * Re-importing keeps every previous batch on purpose, so an upload that was
    * simply the wrong file otherwise stays stacked under the project's totals
-   * with no way back (client ask, 2026-09-07). Its scopes and activities go
-   * with it server-side. */
-  async function handleDeleteImport() {
+   * with no way back (client ask, 2026-09-07). What goes with it is asked of
+   * the server first rather than guessed: the picker row knows the activity
+   * count, but not the milestones, nor which reports are pinned to this batch
+   * and will quietly start reading a different schedule (register item D4). */
+  async function askDeleteImport() {
     const chosen = scheduleImports?.find((si) => (importId ? si.id === importId : si.is_current));
     if (!chosen) return;
-    const ok = window.confirm(
-      `Delete the schedule import dated ${chosen.date}?
-
-`
-      + `Its ${chosen.activity_count} activities and their scopes will be removed. `
-      + `This can't be undone.`);
-    if (!ok) return;
     setActionError(null);
     setImportMsg(null);
     try {
-      await api.del(`/projects/${projectId}/schedule-imports/${chosen.id}/`);
-      setImportMsg(`Deleted the import dated ${chosen.date}.`);
-      setImportId("");   // whatever remains is latest now
-      reload();
-      reloadImports();
+      const impact = await api.get<ScheduleImportImpact>(
+        `/projects/${projectId}/schedule-imports/${chosen.id}/`);
+      setDeletingImport(impact);
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Couldn't delete that import.");
+      setActionError(err instanceof ApiError ? err.message : "Couldn't check that import.");
     }
+  }
+
+  async function confirmDeleteImport() {
+    if (!deletingImport) return;
+    await api.del(`/projects/${projectId}/schedule-imports/${deletingImport.id}/`);
+    setImportMsg(`Deleted the import dated ${deletingImport.date}.`);
+    setImportId("");   // whatever remains is latest now
+    reload();
+    reloadImports();
   }
 
   const { childrenOf, progressOf, activityCountOf } = useMemo(() => buildTree(data), [data]);
@@ -338,7 +345,7 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
             </select>
           )}
           {canManage && scheduleImports && scheduleImports.length > 0 && (
-            <Button size="sm" variant="secondary" onClick={handleDeleteImport}
+            <Button size="sm" variant="secondary" onClick={askDeleteImport}
               title="Delete the schedule import shown in the picker, and everything it brought in">
               Delete import
             </Button>
@@ -439,6 +446,29 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
           onClose={() => setPhotosScope(null)}
         />
       )}
+      <ConfirmModal
+        open={!!deletingImport}
+        title="Delete this schedule import?"
+        description={deletingImport
+          ? `The import dated ${deletingImport.date}${deletingImport.source ? ` (${deletingImport.source})` : ""} and everything it brought in.`
+          : ""}
+        consequences={deletingImport ? [
+          `${deletingImport.activities.toLocaleString()} activities and ${deletingImport.scopes.toLocaleString()} scopes go with it`,
+          ...(deletingImport.milestones
+            ? [`${deletingImport.milestones.toLocaleString()} milestones this import created go too`] : []),
+          ...(deletingImport.snapshots
+            ? [`${deletingImport.snapshots.toLocaleString()} progress snapshot(s) recorded on that date`] : []),
+          // Named separately because nothing is deleted here — the reports
+          // stay, but stop reading this schedule, which is a change happening
+          // underneath whoever pinned them.
+          ...(deletingImport.pinned_reports
+            ? [`${deletingImport.pinned_reports.toLocaleString()} report(s) pinned to this import will fall back to reading whichever import is current for their date`]
+            : []),
+        ] : []}
+        confirmLabel="Delete import"
+        onConfirm={confirmDeleteImport}
+        onClose={() => setDeletingImport(null)}
+      />
     </div>
   );
 }

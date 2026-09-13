@@ -68,6 +68,9 @@ export function ProjectReportAssets({ projectId, canManage, onChanged, types, ti
   }
 
   async function remove(image: ProjectImage) {
+    // Same as the report's own assets: one click otherwise deleted an
+    // uploaded image outright (register item D4).
+    if (!window.confirm("Delete this image? It will be removed from the project and can't be recovered.")) return;
     setActionError(null);
     try {
       await api.del(`/projects/${projectId}/images/${image.id}/`);

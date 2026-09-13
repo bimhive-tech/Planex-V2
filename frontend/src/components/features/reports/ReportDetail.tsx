@@ -19,7 +19,7 @@ import { StateView } from "@/components/ui/StateView";
 import { api, ApiError, type Paginated } from "@/lib/api";
 import { ROUTES } from "@/lib/constants";
 import { useFetch } from "@/hooks/useFetch";
-import type { ProjectListRow } from "@/types/project";
+import type { ProjectListRow, ScheduleImportSummary } from "@/types/project";
 import type { ReportData, ReportLayoutOverride, ReportRow, ReportStatus, ReportTemplate } from "@/types/report";
 import { ReportAssets } from "./ReportAssets";
 import { ReportLayoutEditor } from "./ReportLayoutEditor";
@@ -58,6 +58,9 @@ const TAB_ANCHOR: Record<string, string> = {
 type Form = {
   project: string; template: string; title: string; report_number: string;
   report_date: string; period_start: string; period_finish: string; status: string;
+  /** Which schedule import to read. "" = resolve it from the report date, the
+   * choice the report was already making on its own. */
+  schedule_import: string;
 };
 
 export function ReportDetail({ reportId, canManage }: { reportId: string; canManage: boolean }) {
@@ -119,7 +122,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
       project: r.project, template: r.template ?? "",
       title: r.title, report_number: r.report_number ?? "", report_date: r.report_date ?? "",
       period_start: r.period_start ?? "", period_finish: r.period_finish ?? "",
-      status: r.status,
+      status: r.status, schedule_import: r.schedule_import ?? "",
     });
     return r;
   }, [reportId]);
@@ -208,6 +211,7 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
         report_date: form.report_date || null,
         period_start: form.period_start || null,
         period_finish: form.period_finish || null,
+        schedule_import: form.schedule_import || null,
       });
       setSaved(true);
       setRefreshKey((k) => k + 1); // save → re-pull data + re-render the preview
@@ -218,7 +222,26 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
     }
   }, [form, reportId, scopeIds]);
 
+  // The chosen project's import history, for the Setup tab's picker. Refetched
+  // when the project changes, since the imports belong to it.
+  const { data: scheduleImports } = useFetch(
+    () => (form?.project
+      ? api.get<ScheduleImportSummary[]>(`/projects/${form.project}/schedule-imports/`)
+      : Promise.resolve([] as ScheduleImportSummary[])),
+    [form?.project],
+  );
+
   const projectOptions = useMemo(() => projects.map((p) => ({ value: p.id, label: p.name })), [projects]);
+  const scheduleImportOptions = useMemo(() => [
+    // Automatic is the default and is named as what it does, not as "none":
+    // an unpinned report still reads an import, it just picks it by date.
+    { value: "", label: "Automatic — the one current at the report date" },
+    ...(scheduleImports ?? []).map((si) => ({
+      value: si.id,
+      label: `${si.date}${si.is_current ? " (latest)" : ""} — ${si.source || "no filename"}`
+        + ` · ${si.activity_count.toLocaleString()} activities`,
+    })),
+  ], [scheduleImports]);
   const templateOptions = useMemo(
     () => [{ value: "", label: "Default styling" }, ...templates.map((t) => ({ value: t.id, label: t.name }))],
     [templates],
@@ -291,6 +314,16 @@ export function ReportDetail({ reportId, canManage }: { reportId: string; canMan
                       <Select label="Status" name="status" options={STATUS_OPTIONS} value={form.status} onChange={set("status")} />
                     </div>
                     <p className="formHint">Progress is shown as of the report date — each task uses its latest dated entry on or before this day.</p>
+                    <div className={styles.fieldRow}>
+                      <Select label="Schedule import (data)" name="schedule_import"
+                        options={scheduleImportOptions} value={form.schedule_import}
+                        onChange={set("schedule_import")} />
+                    </div>
+                    <p className="formHint">
+                      Which import&rsquo;s activities this report reads. Left on automatic it follows
+                      the report date, which is what it has always done; pin one to keep this report
+                      on that schedule even after a newer file is uploaded.
+                    </p>
                     <div className={styles.fieldRow}>
                       <Input label="Period start" name="period_start" type="date" value={form.period_start} onChange={set("period_start")} />
                       <Input label="Period finish" name="period_finish" type="date" value={form.period_finish} onChange={set("period_finish")} />

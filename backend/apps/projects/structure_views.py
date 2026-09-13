@@ -432,9 +432,14 @@ class ProjectImportView(APIView):
         # workbook stays downloadable. Same non-fatal logging treatment.
         schedule_import_id = result.get("schedule_import_id")
         if schedule_import_id:
-            try:
-                from .models import ScheduleImport
+            from .models import ScheduleImport
 
+            # Who uploaded it. Recorded here rather than threaded through the
+            # three importers that create a batch, since this is the one place
+            # that knows the request. Written before the file, and separately,
+            # so a storage failure loses the workbook but not the attribution.
+            ScheduleImport.objects.filter(id=schedule_import_id).update(uploaded_by=request.user)
+            try:
                 batch = ScheduleImport.objects.get(id=schedule_import_id)
                 batch.file.save(upload.name, ContentFile(raw), save=True)
             except Exception:
@@ -454,7 +459,9 @@ class ScheduleImportListView(APIView):
         project = _project(request, project_id)
         _require_view_schedule(request)
         latest = latest_schedule_import(project)
-        imports = project.schedule_imports.all()
+        # select_related: the serializer names the uploader, and this list is
+        # one row per import — without it that is a query per row.
+        imports = project.schedule_imports.select_related("uploaded_by")
         data = ScheduleImportSerializer(
             imports, many=True, context={"latest_id": latest.id if latest else None}).data
         return Response(data)
@@ -472,6 +479,38 @@ class ScheduleImportDetailView(APIView):
     Two pieces of derived state don't, and are fixed up here."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id, import_id):
+        """What deleting this batch would take with it.
+
+        The confirmation has to name real things, not a generic warning
+        (register item D4): a reader can't otherwise see that an import owns
+        activities and milestones, nor that reports pinned to it will quietly
+        start reading a different schedule.
+        """
+        project = _project(request, project_id)
+        _require_view_schedule(request)
+        try:
+            batch = project.schedule_imports.get(pk=import_id)
+        except (ScheduleImport.DoesNotExist, ValueError):
+            raise NotFound("Schedule import not found.")
+        return Response({
+            "id": str(batch.id),
+            "date": batch.date,
+            "source": batch.source,
+            "scopes": batch.scopes.count(),
+            "activities": batch.activities.count(),
+            "milestones": batch.milestones.count(),
+            # Reports that named this batch explicitly. They aren't deleted --
+            # the FK is SET_NULL -- but they stop reading this schedule and
+            # fall back to resolving one by their own date, which is a change
+            # underneath whoever pinned them.
+            "pinned_reports": batch.reports.count(),
+            # A snapshot is attributed by date alone (no FK), so it only goes
+            # when no other import shares that date.
+            "snapshots": (0 if project.schedule_imports.filter(date=batch.date).exclude(pk=batch.pk).exists()
+                          else project.snapshots.filter(date=batch.date).count()),
+        })
 
     def delete(self, request, project_id, import_id):
         project = _project(request, project_id)

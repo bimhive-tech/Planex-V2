@@ -1,11 +1,13 @@
 """Project API tests: tenant isolation, permission enforcement, CRUD, archive."""
+import datetime
+
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, Permission, SeededRole
 from apps.accounts.models import Company, Membership, Role, User
 from .imports import _guess_discipline, parse_sheet
-from .models import Project
+from .models import Activity, Milestone, Project, ProjectScope, ScheduleImport
 
 
 class ImportParserTests(SimpleTestCase):
@@ -2371,3 +2373,85 @@ class BoqFinancialProgressTests(TestCase):
         for name in ("Finishes", "Elec"):
             own = rows[name]["financial_percent"] / rows[name]["budget_share"] * 100
             self.assertAlmostEqual(own, 50.0, places=1)
+
+
+class ScheduleImportDeleteImpactTests(TestCase):
+    """Register item D4: the confirmation has to name what is about to go.
+
+    A reader can't otherwise see that an import owns activities and
+    milestones, nor that reports pinned to it will quietly start reading a
+    different schedule."""
+
+    def setUp(self):
+        from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, SeededRole
+        from apps.accounts.models import Membership, Role, User
+        from django.urls import reverse
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial")
+        role = Role.objects.create(company=self.company, name=SeededRole.COMPANY_ADMIN,
+                                   permissions=COMPANY_ADMIN_PERMISSIONS)
+        user = User.objects.create_user(email="d4@acme.com", password="Str0ng!Passw0rd",
+                                        company=self.company)
+        Membership.objects.create(company=self.company, user=user, role=role)
+        self.client.post(reverse("auth-login"),
+                         {"email": "d4@acme.com", "password": "Str0ng!Passw0rd"},
+                         content_type="application/json")
+
+        self.batch = ScheduleImport.objects.create(
+            company=self.company, project=self.project,
+            date=datetime.date(2026, 5, 1), source="may.xlsx")
+        scope = ProjectScope.objects.create(
+            company=self.company, project=self.project, scope_type="zone",
+            name="Zone A", schedule_import=self.batch)
+        for i in range(3):
+            Activity.objects.create(company=self.company, project=self.project, scope=scope,
+                                    name=f"Task {i}", schedule_import=self.batch)
+        Milestone.objects.create(company=self.company, project=self.project,
+                                 title="Handover", schedule_import=self.batch)
+
+    def _impact(self):
+        resp = self.client.get(
+            f"/api/projects/{self.project.id}/schedule-imports/{self.batch.id}/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        return resp.json()
+
+    def test_it_names_what_goes_with_the_import(self):
+        impact = self._impact()
+        self.assertEqual(impact["activities"], 3)
+        self.assertEqual(impact["scopes"], 1)
+        self.assertEqual(impact["milestones"], 1)
+        self.assertEqual(impact["source"], "may.xlsx")
+
+    def test_it_counts_the_reports_that_will_change_underneath_the_user(self):
+        """Those reports are not deleted -- they fall back to resolving an
+        import from their own date -- but that is still a change nobody asked
+        for, so the dialog has to say it."""
+        from apps.reports.models import Report
+
+        Report.objects.create(company=self.company, project=self.project,
+                              title="Pinned", schedule_import=self.batch)
+        Report.objects.create(company=self.company, project=self.project, title="Unpinned")
+        self.assertEqual(self._impact()["pinned_reports"], 1)
+
+    def test_a_snapshot_shared_with_another_import_is_not_counted(self):
+        """Snapshots carry no FK and are attributed by date alone, so one only
+        goes when no other import is left on that date."""
+        self.project.snapshots.create(company=self.company, date=self.batch.date,
+                                      overall_progress=50)
+        self.assertEqual(self._impact()["snapshots"], 1)
+
+        ScheduleImport.objects.create(company=self.company, project=self.project,
+                                      date=self.batch.date, source="may-again.xlsx")
+        self.assertEqual(self._impact()["snapshots"], 0)
+
+    def test_another_companys_import_is_not_reachable(self):
+        other = Company.objects.create(name="Rival")
+        their_project = Project.objects.create(company=other, name="Theirs",
+                                               project_type="commercial")
+        theirs = ScheduleImport.objects.create(company=other, project=their_project,
+                                               date=datetime.date(2026, 5, 1))
+        resp = self.client.get(
+            f"/api/projects/{their_project.id}/schedule-imports/{theirs.id}/")
+        self.assertEqual(resp.status_code, 404)

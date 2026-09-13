@@ -202,10 +202,15 @@ class ScheduleImportSerializer(serializers.ModelSerializer):
 
     is_current = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
+    # Who uploaded it — blank for imports predating the field being recorded,
+    # and for one whose uploader has since been deleted (SET_NULL).
+    uploaded_by_name = serializers.CharField(
+        source="uploaded_by.full_name", read_only=True, default="")
 
     class Meta:
         model = ScheduleImport
-        fields = ["id", "date", "source", "activity_count", "created_at", "is_current", "file_url"]
+        fields = ["id", "date", "source", "activity_count", "created_at",
+                  "uploaded_by_name", "is_current", "file_url"]
 
     def get_is_current(self, obj):
         latest_id = self.context.get("latest_id")

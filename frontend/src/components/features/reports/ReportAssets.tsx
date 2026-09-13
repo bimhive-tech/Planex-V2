@@ -65,6 +65,9 @@ export function ReportAssets({
   }
 
   async function remove(image: ReportImage) {
+    // An uploaded image is gone for good and cannot be recovered from the
+    // report, so the click gets a question first (register item D4).
+    if (!window.confirm("Delete this image? It will be removed from the report and can't be recovered.")) return;
     setActionError(null);
     try {
       await api.del(`/reports/${reportId}/images/${image.id}/`);

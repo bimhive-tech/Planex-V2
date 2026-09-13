@@ -1,0 +1,26 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.description {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+/* Listed, not prose: a reader should be able to count what goes. */
+.consequences {
+  margin: 0;
+  padding-inline-start: 20px;
+  list-style: disc;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.irreversible {
+  margin: 0;
+  font-weight: 600;
+  color: var(--danger-text);
+}

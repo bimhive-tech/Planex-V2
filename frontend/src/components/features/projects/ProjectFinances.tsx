@@ -1,17 +1,19 @@
 "use client";
 
-// Finances tab — gated by the view-finances permission. Two sub-views:
-// Cash Flow (monthly planned/actual grid) and Invoices (مستخلصات). Both feed
-// the report. Editing requires the manage-finances permission.
+// Finances tab — gated by the view-finances permission. Sub-views: Cash Flow
+// (monthly planned/actual grid), Invoices (مستخلصات), Schedule Cost, and
+// Imports. All feed the report. Editing requires the manage-finances
+// permission.
 import { useState } from "react";
 
 import { CashFlowPanel } from "./CashFlowPanel";
 import { DashboardImport } from "./DashboardImport";
+import { DashboardImportHistory } from "./DashboardImportHistory";
 import { InvoicesPanel } from "./InvoicesPanel";
 import { ProjectCostPerformance } from "./ProjectCostPerformance";
 import styles from "./finances.module.css";
 
-type Sub = "cashflow" | "invoices" | "cost";
+type Sub = "cashflow" | "invoices" | "cost" | "imports";
 
 export function ProjectFinances({ projectId, canManage }: { projectId: string; canManage: boolean }) {
   const [sub, setSub] = useState<Sub>("cashflow");
@@ -20,9 +22,6 @@ export function ProjectFinances({ projectId, canManage }: { projectId: string; c
   const [reloadKey, setReloadKey] = useState(0);
   return (
     <div className={styles.wrap}>
-      {canManage && (
-        <DashboardImport projectId={projectId} onImported={() => setReloadKey((k) => k + 1)} />
-      )}
       <nav className={styles.subtabs}>
         <button className={`${styles.subtab} ${sub === "cashflow" ? styles.active : ""}`} onClick={() => setSub("cashflow")}>
           Cash Flow
@@ -33,10 +32,24 @@ export function ProjectFinances({ projectId, canManage }: { projectId: string; c
         <button className={`${styles.subtab} ${sub === "cost" ? styles.active : ""}`} onClick={() => setSub("cost")}>
           Schedule Cost
         </button>
+        {/* The dashboard upload lives with its own history rather than
+            floating above the sub-tabs, where it sat in front of whichever
+            panel the user was actually reading (register item D2). */}
+        <button className={`${styles.subtab} ${sub === "imports" ? styles.active : ""}`} onClick={() => setSub("imports")}>
+          Imports
+        </button>
       </nav>
       {sub === "cashflow" && <CashFlowPanel key={reloadKey} projectId={projectId} canManage={canManage} />}
       {sub === "invoices" && <InvoicesPanel key={reloadKey} projectId={projectId} canManage={canManage} />}
       {sub === "cost" && <ProjectCostPerformance projectId={projectId} />}
+      {sub === "imports" && (
+        <>
+          {canManage && (
+            <DashboardImport projectId={projectId} onImported={() => setReloadKey((k) => k + 1)} />
+          )}
+          <DashboardImportHistory projectId={projectId} reloadKey={reloadKey} />
+        </>
+      )}
     </div>
   );
 }

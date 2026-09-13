@@ -289,3 +289,39 @@ export interface PartScope {
   delay_days: number | null;
   created_at: string;
 }
+
+/** One past dashboard-workbook upload (Finances → Imports). A log row, not a
+ * retained batch: the rows a workbook wrote are replaced or upserted by the
+ * next import, so there is nothing here to switch between. */
+export interface DashboardImportRow {
+  id: string;
+  source: string;
+  created_at: string;
+  uploaded_by_name: string;
+  file_url: string | null;
+  /** Whatever the importer reported at the time — read defensively, an older
+   * row can predate a part that exists now. */
+  summary: {
+    imported?: {
+      cashflow?: { months: number; curve_months?: number };
+      invoices?: { periods: number };
+    };
+    skipped?: Record<string, string>;
+  };
+}
+
+/** What deleting one schedule import would take with it — asked of the server
+ * before the confirmation is shown, so the dialog names real counts rather
+ * than warning generically (register item D4). */
+export interface ScheduleImportImpact {
+  id: string;
+  date: string;
+  source: string;
+  scopes: number;
+  activities: number;
+  milestones: number;
+  /** Reports that named this batch. They are not deleted — they fall back to
+   * resolving an import from their own report date. */
+  pinned_reports: number;
+  snapshots: number;
+}

@@ -14,6 +14,7 @@ from apps.projects.models import Project
 from .constants import apply_report_layout_override, default_config, merged_config
 from .layout_seed import seed_layout_from_sections
 from .models import Report, ReportTemplate
+from .serializers import ReportWriteSerializer
 from .pdf import build_report_pdf, has_arabic, shape
 from .pdf_layout import cover_fit_geometry
 from .pdf_tables import element_col_widths, element_row_heights
@@ -2447,6 +2448,93 @@ class DescriptionFallbackTests(SimpleTestCase):
         ctx = {"project": {"description": "Cost < budget & on track."}}
         html = _effective_description_html({"html": ""}, ctx)
         self.assertEqual(html, "<p>Cost &lt; budget &amp; on track.</p>")
+
+
+class ReportPicksItsScheduleImportTests(TestCase):
+    """Register item D3: the report already resolved a batch per report date;
+    this exposes that choice instead of leaving it implicit."""
+
+    def setUp(self):
+        from apps.projects.models import ScheduleImport
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower",
+            project_type=Project.ProjectType.COMMERCIAL)
+        self.old = ScheduleImport.objects.create(
+            company=self.company, project=self.project,
+            date=datetime.date(2026, 1, 31), source="jan.xlsx")
+        self.new = ScheduleImport.objects.create(
+            company=self.company, project=self.project,
+            date=datetime.date(2026, 6, 30), source="jun.xlsx")
+
+    def _ctx(self, report):
+        from .services import build_report_context
+
+        # Stubbed only because it reads through a PostgreSQL-only DISTINCT ON.
+        with patch("apps.reports.services.activity_progress_as_of", return_value=None):
+            return build_report_context(report)
+
+    def test_unpinned_still_resolves_by_the_report_date(self):
+        """The default must not change: this item exposes the existing choice,
+        it doesn't replace it."""
+        report = Report.objects.create(
+            company=self.company, project=self.project, title="R",
+            report_date=datetime.date(2026, 3, 1))
+        self.assertIsNone(report.schedule_import)
+        self.assertEqual(self._ctx(report)["schedule_import_id"], str(self.old.id))
+
+    def test_pinning_an_import_overrides_the_date(self):
+        report = Report.objects.create(
+            company=self.company, project=self.project, title="R",
+            report_date=datetime.date(2026, 3, 1), schedule_import=self.new)
+        self.assertEqual(self._ctx(report)["schedule_import_id"], str(self.new.id))
+
+    def test_deleting_a_pinned_import_drops_the_report_back_to_automatic(self):
+        """SET_NULL, not CASCADE: deleting an import must not take the reports
+        that happened to read it. They fall back to resolving by date, which is
+        what they would have done had nobody pinned them."""
+        report = Report.objects.create(
+            company=self.company, project=self.project, title="R",
+            report_date=datetime.date(2026, 3, 1), schedule_import=self.new)
+        self.new.delete()
+        report.refresh_from_db()
+        self.assertIsNone(report.schedule_import)
+        self.assertTrue(Report.objects.filter(pk=report.pk).exists())
+        self.assertEqual(self._ctx(report)["schedule_import_id"], str(self.old.id))
+
+    def test_a_report_cannot_pin_another_projects_import(self):
+        """Otherwise a valid id from another project would render that
+        project's schedule under this project's name."""
+        from apps.projects.models import ScheduleImport
+
+        other = Project.objects.create(company=self.company, name="Other",
+                                       project_type=Project.ProjectType.COMMERCIAL)
+        theirs = ScheduleImport.objects.create(
+            company=self.company, project=other, date=datetime.date(2026, 5, 1))
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+
+        serializer = ReportWriteSerializer(
+            report, data={"schedule_import": str(theirs.id)}, partial=True)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("schedule_import", serializer.errors)
+
+    def test_a_report_cannot_pin_another_companys_import(self):
+        from apps.projects.models import ScheduleImport
+
+        other_co = Company.objects.create(name="Rival")
+        their_project = Project.objects.create(
+            company=other_co, name="Theirs", project_type=Project.ProjectType.COMMERCIAL)
+        theirs = ScheduleImport.objects.create(
+            company=other_co, project=their_project, date=datetime.date(2026, 5, 1))
+        report = Report.objects.create(company=self.company, project=self.project, title="R")
+
+        request = SimpleNamespace(user=SimpleNamespace(company_id=self.company.id))
+        serializer = ReportWriteSerializer(
+            report, data={"schedule_import": str(theirs.id)}, partial=True,
+            context={"request": request})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("schedule_import", serializer.errors)
 
 
 class ApprovedFinishAndOtpTests(TestCase):

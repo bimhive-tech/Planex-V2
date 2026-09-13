@@ -226,9 +226,9 @@
   color: var(--text-secondary);
 }
 
-/* The one dashboard upload, above the sub-tabs — see DashboardImport. Its
-   message wraps onto its own line, so the row is a wrapping flex rather than
-   a fixed two-column strip. */
+/* The one dashboard upload, at the top of the Imports sub-tab above its own
+   history — see DashboardImport. Its message wraps onto its own line, so the
+   row is a wrapping flex rather than a fixed two-column strip. */
 .importBar {
   display: flex;
   flex-wrap: wrap;
@@ -245,4 +245,17 @@
 .importBar .importMsg {
   flex-basis: 100%;
   margin-bottom: 0;
+}
+
+/* A past import's own workbook, downloadable from the history row — the point
+   of keeping the file is that the row can answer for itself. */
+.fileLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--primary);
+  text-decoration: none;
+}
+.fileLink:hover {
+  text-decoration: underline;
 }

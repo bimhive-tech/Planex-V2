@@ -407,6 +407,89 @@ class DashboardImportTests(TestCase):
         self.assertEqual(sorted(resp.json()["imported"]), ["cashflow", "invoices"])
 
 
+class DashboardImportHistoryTests(TestCase):
+    """Register item D2: what has been imported before -- file, date and who
+    uploaded it. A schedule import has always been its own retained batch, so
+    the Schedule tab could show its history; the dashboard upload left no
+    trace at all."""
+
+    def setUp(self):
+        from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, SeededRole
+        from apps.accounts.models import Membership, Role, User
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial")
+        role = Role.objects.create(company=self.company, name=SeededRole.COMPANY_ADMIN,
+                                   permissions=COMPANY_ADMIN_PERMISSIONS)
+        self.user = User.objects.create_user(
+            email="a@acme.com", password="Str0ng!Passw0rd", company=self.company)
+        Membership.objects.create(company=self.company, user=self.user, role=role)
+        from django.urls import reverse
+        self.client.post(reverse("auth-login"),
+                         {"email": "a@acme.com", "password": "Str0ng!Passw0rd"},
+                         content_type="application/json")
+
+    def _workbook(self, name="dashboard.xlsx"):
+        wb = openpyxl.Workbook()
+        wb.active.title = "notes"
+        ws = wb.create_sheet("cashflow total")
+        ws.append(["Description", *(datetime.datetime(2026, m, 1) for m in range(1, 5))])
+        ws.append(["Planned Cash In /Month", 100, 200, 300, 400])
+        ws.append(["Invoices /Month", 50, 60, 70, 80])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        buf.name = name
+        return buf
+
+    def test_an_import_records_its_file_date_and_uploader(self):
+        from .models import DashboardImport
+
+        resp = self.client.post(f"/api/projects/{self.project.id}/dashboard/import/",
+                                {"file": self._workbook("cairo-aug.xlsx")})
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        record = DashboardImport.objects.get(project=self.project)
+        self.assertEqual(record.source, "cairo-aug.xlsx")
+        self.assertEqual(record.uploaded_by, self.user)
+        self.assertIsNotNone(record.created_at)
+        # What it brought in, as the importer itself reported it.
+        self.assertIn("cashflow", record.summary["imported"])
+
+    def test_the_history_endpoint_lists_them_newest_first(self):
+        for name in ("first.xlsx", "second.xlsx"):
+            self.client.post(f"/api/projects/{self.project.id}/dashboard/import/",
+                             {"file": self._workbook(name)})
+        resp = self.client.get(f"/api/projects/{self.project.id}/dashboard/imports/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = resp.json()
+        self.assertEqual([r["source"] for r in rows], ["second.xlsx", "first.xlsx"])
+        self.assertEqual(rows[0]["uploaded_by_name"], self.user.full_name)
+        self.assertTrue(rows[0]["file_url"])
+
+    def test_a_workbook_that_imported_nothing_is_not_recorded(self):
+        """The history is a list of what changed the project's figures, not of
+        every file anyone tried."""
+        from .models import DashboardImport
+
+        wb = openpyxl.Workbook()
+        wb.active.title = "nothing useful"
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        buf.name = "empty.xlsx"
+        resp = self.client.post(f"/api/projects/{self.project.id}/dashboard/import/", {"file": buf})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(DashboardImport.objects.count(), 0)
+
+    def test_another_companys_history_is_not_reachable(self):
+        other = Company.objects.create(name="Rival")
+        theirs = Project.objects.create(company=other, name="Theirs", project_type="commercial")
+        resp = self.client.get(f"/api/projects/{theirs.id}/dashboard/imports/")
+        self.assertEqual(resp.status_code, 404)
+
+
 class ProgressSeriesSourceTests(TestCase):
     """The Overview's progress-over-time chart and the report's S-curve are the
     same story, so they read the same data: the dashboard's own progress curve
