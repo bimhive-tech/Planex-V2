@@ -791,6 +791,8 @@ def _full_ctx():
     ctx = _sample_ctx()
     ctx["arabic"] = True
     ctx["planned"] = 82.0
+    # Earned over planned, the ratio the SPI dial draws (services.project_spi).
+    ctx["spi"] = 0.88
     ctx["zones"][0]["planned"] = 88.0
     ctx["zones"][0]["previous"] = 85.0
     ctx["zones"][1]["planned"] = 70.0
@@ -1089,9 +1091,19 @@ class ResolveChartTests(SimpleTestCase):
     ]
 
     def test_item_spi_reads_the_current_item(self):
+        """This item's own index — what it earned against its own share of the
+        baseline, not its completion percentage."""
         drawing = resolve_chart("item.spi", "gauge", default_config(), _full_ctx(),
-                                {"item": {"name": "Zone A", "progress": 62.0}}, 100, 70)
+                                {"item": {"name": "Zone A", "progress": 62.0, "planned": 80.0}},
+                                100, 70)
         self.assertIsNotNone(drawing)
+        self.assertIn("SPI= 0.78", [s.text for s in drawing.contents if hasattr(s, "text")])
+
+    def test_item_spi_needs_both_halves_of_the_ratio(self):
+        """An item with no planned figure has no index to show, and a dial with
+        nothing behind it must not invent a reading."""
+        self.assertIsNone(resolve_chart("item.spi", "gauge", default_config(), _full_ctx(),
+                                        {"item": {"name": "Zone A", "progress": 62.0}}, 100, 70))
 
     def test_every_source_with_data_returns_a_drawing(self):
         cfg = default_config()

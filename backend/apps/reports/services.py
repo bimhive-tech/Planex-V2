@@ -14,7 +14,7 @@ from apps.projects.models import (
 )
 from apps.projects.services import (
     activity_progress_as_of, latest_schedule_import, project_overall_progress,
-    project_planned_cost, project_planned_progress, scope_planned_map,
+    project_planned_cost, project_planned_progress, project_spi, scope_planned_map,
 )
 
 from .models import ReportImage
@@ -1230,6 +1230,8 @@ def build_report_context(report):
     # BCWS — what the baseline says should have been spent by now. None for a
     # source carrying no baseline percentage or no budget.
     planned_cost = project_planned_cost(project, schedule_import)
+    # Earned over planned — a ratio, where 1.0 is on plan.
+    spi = project_spi(project, schedule_import)
 
     # Per-phase (STAGE scope) rollups — backs the reference report's own
     # per-phase dashboard pages. Same inputs as `hierarchy`, one level up.
@@ -1433,6 +1435,7 @@ def build_report_context(report):
         "boq_financial_progress": boq_financial_progress,
         "financial_percent_complete": financial_percent_complete,
         "planned_cost": planned_cost,
+        "spi": spi,
         "area_dashboards": area_dashboards,
         "phase_dashboards": phase_dashboards,
         "critical_path": critical_path,

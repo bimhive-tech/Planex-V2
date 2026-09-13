@@ -298,6 +298,34 @@ def scope_planned_progress_map(project, schedule_import=None):
             for sid in all_ids if sub_base.get(sid)}
 
 
+def project_spi(project, schedule_import=None):
+    """Schedule Performance Index — earned value over planned value, a RATIO:
+    0.63 means the work done is worth 63% of what the baseline priced for now.
+
+    The ratio of the two sums, never the mean of the per-activity SPI column a
+    P6 export also carries: averaging ratios weights a trivial activity the
+    same as the whole substructure. On the Cairo Airport export the column
+    averages 0.437 while the project's real index is 0.630 — the figure its own
+    project row states, and the one its dashboard quotes.
+
+    Equivalently earned progress over planned progress, since both divide by
+    the same budget; computed from the sums so it stands alone.
+
+    `None` when the baseline has no price (see project_planned_cost)."""
+    from django.db.models import Sum
+
+    planned = project_planned_cost(project, schedule_import)
+    if not planned:
+        return None
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    earned = activities.exclude(budgeted_cost=None).aggregate(
+        s=Sum("earned_value_cost"))["s"] or 0
+    return float(earned) / planned
+
+
 def project_earned_progress(project, schedule_import=None):
     """Actual progress as EARNED VALUE: sum(earned_value_cost) / sum(budgeted_cost).
 

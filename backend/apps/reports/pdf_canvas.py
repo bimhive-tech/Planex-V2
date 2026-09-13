@@ -1578,6 +1578,18 @@ def _resolve_activity_schedule_table(cfg, ctx, styles, avail_width=None, raw=Fal
 
 # ── Chart binding ────────────────────────────────────────────────────────────
 
+def _spi_gauge(value, w, cfg, labels, h):
+    """The SPI dial. A ratio, so it carries its own scale and band cutoffs —
+    1.0 is exactly on plan, and the dial runs to 1.5 so being ahead has
+    somewhere to show."""
+    if value is None:
+        return None
+    return speedometer_chart(
+        value, w, cfg, title=labels.get("spi", "SPI"), height=h,
+        max_value=float(cfg.get("spi_max", 1.5)),
+        thresholds=cfg.get("spi_thresholds"), value_fmt="{:.2f}")
+
+
 def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float,
                   scope_zone_id: str | None = None):
     """Build a ready-to-draw Drawing for one of reportElements.ts's
@@ -1606,14 +1618,22 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
         item = scope.get("item") or {}
         return item_earned_pie(cfg, item, w, labels, height=h)
     if source == "item.spi":
+        # This item's own index: what it has earned against what its share of
+        # the baseline priced. None when either half is missing — a gauge with
+        # nothing behind it draws nothing (see _draw_chart_element).
         item = scope.get("item") or {}
-        value = item.get("progress") if "progress" in item else item.get("actual")
-        return speedometer_chart(value, w, cfg, title=labels.get("spi", "SPI"), height=h)
+        actual = item.get("progress") if "progress" in item else item.get("actual")
+        planned = item.get("planned")
+        if actual is None or not planned:
+            return None
+        return _spi_gauge(float(actual) / float(planned), w, cfg, labels, h)
     if isinstance(source, str) and source.startswith("item."):
         return None  # no other item-scoped chart source defined
 
     if source == "spi":
-        return speedometer_chart(ctx.get("overall"), w, cfg, title=labels.get("spi", "SPI"), height=h)
+        # The index itself, not the completion percentage that used to be drawn
+        # here under an SPI title (see services.project_spi).
+        return _spi_gauge(ctx.get("spi"), w, cfg, labels, h)
     if source == "zone_progress":
         chart_ctx = ctx
         if scope_zone_id:

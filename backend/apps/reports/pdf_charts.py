@@ -799,7 +799,8 @@ def overall_donut(cfg, ctx, width, labels, height=None):
     return _reference_pie(cfg, slices, width, height, value_fmt="{:,.2f}%")
 
 
-def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None):
+def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None,
+                      thresholds=None, value_fmt="{:.0f}%"):
     """Semicircular SPI/completion gauge — 4 labeled bands (Poor/Average/Good/
     Excellent, red->orange->yellow->green) with a needle at `value`
     (0..max_value). `value` is a plain number (not read from ctx) so the
@@ -823,7 +824,9 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     band_font_size = 6.5
     r_label_factor = 1.08
 
-    thresholds = cfg.get("gauge_thresholds") or {}
+    # Band cutoffs are in the same units as `max_value`, so a ratio dial has to
+    # bring its own — the completion gauge's 50/70/90 are percentages.
+    thresholds = thresholds or cfg.get("gauge_thresholds") or {}
     low = float(thresholds.get("low", 50))
     mid = float(thresholds.get("mid", 70))
     high = float(thresholds.get("high", 90))
@@ -883,7 +886,8 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     # bidi-reordered string is the same gotcha documented for table cells
     # (pdf_tables.py's _wrap_shape docstring): the reorder has to see the
     # full logical string to place the trailing "=", not just the title.
-    value_text = shape(f"{title}= {v:.0f}%") if title else f"{v:.0f}%"
+    reading = value_fmt.format(v)
+    value_text = shape(f"{title}= {reading}") if title else reading
     d.add(String(cx, cy - 14, value_text, fontName=_gauge_font(title or ""), fontSize=11,
                  fillColor=hexcolor(cfg["colors"]["text"]), textAnchor="middle"))
     if title:

@@ -150,6 +150,67 @@ from unittest import skipUnless
 from django.db import connection
 
 
+class SchedulePerformanceIndexTests(TestCase):
+    """C1 — SPI is a ratio of sums, and the gauge that carries its name draws
+    it rather than the completion percentage."""
+
+    def setUp(self):
+        from decimal import Decimal
+
+        from apps.accounts.models import Company
+        from apps.projects.models import Activity, ProjectScope
+
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL)
+        zone = ProjectScope.objects.create(
+            company=self.company, project=self.project,
+            scope_type=ProjectScope.ScopeType.ZONE, name="Z1")
+        # Planned 100% of 100 and 50% of 900 = 550 priced; earned 100 + 180 = 280.
+        # SPI = 280 / 550 = 0.509..., while the mean of the rows' own indices
+        # (1.0 and 0.4) would be 0.7 — a small row weighted like a large one.
+        for budget, sched, earned, own_spi in ((100, 100, 100, 1.0), (900, 50, 180, 0.4)):
+            Activity.objects.create(
+                company=self.company, project=self.project, scope=zone,
+                name=f"A{budget}", weight=budget, progress_percent=0,
+                schedule_percent=sched, budgeted_cost=budget,
+                earned_value_cost=earned, schedule_performance_index=Decimal(str(own_spi)))
+
+    def test_spi_is_the_ratio_of_sums_not_the_mean_of_ratios(self):
+        from apps.projects.services import project_spi
+
+        self.assertAlmostEqual(project_spi(self.project), 280 / 550, places=6)
+
+    def test_spi_stays_a_ratio(self):
+        """0.51, never 51 — the register is explicit that this is not a
+        percentage."""
+        from apps.projects.services import project_spi
+
+        self.assertLess(project_spi(self.project), 1.0)
+
+    def test_the_gauge_draws_the_index_and_not_the_completion_percentage(self):
+        """The element named SPI used to be handed ctx["overall"], so it drew
+        physical progress under a schedule-performance title."""
+        from apps.reports.constants import merged_config
+        from apps.reports.pdf_canvas import resolve_chart
+
+        cfg = merged_config(None)
+        ctx = {"overall": 88.0, "spi": 0.51, "project": {"name": "Tower"}}
+        drawing = resolve_chart("spi", None, cfg, ctx, {"item": None}, 200, 200)
+        readings = [s.text for s in drawing.contents if hasattr(s, "text")]
+        self.assertIn("SPI= 0.51", readings)
+        self.assertNotIn("SPI= 88%", readings)
+
+    def test_the_gauge_draws_nothing_without_an_index(self):
+        """A project with no priced baseline has no index; a dial with nothing
+        behind it must not invent a reading."""
+        from apps.reports.constants import merged_config
+        from apps.reports.pdf_canvas import resolve_chart
+
+        cfg = merged_config(None)
+        self.assertIsNone(resolve_chart("spi", None, cfg, {"spi": None}, {"item": None}, 200, 200))
+
+
 class DisplayCurrencyTests(TestCase):
     """C6 — an amount with no currency of its own prints in the one the
     project's money is actually held in, not the stale shared field."""

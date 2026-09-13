@@ -49,6 +49,11 @@ DEFAULT_CONFIG = {
     # gauge_bad, low-mid is gauge_warn, mid-high is gauge_good, above `high`
     # is gauge_excellent.
     "gauge_thresholds": {"low": 50, "mid": 70, "high": 90},
+    # The SPI dial reads a ratio, not a percentage, so it needs its own scale
+    # and cutoffs: below 0.8 is poor, 1.0 is exactly on plan, and the dial runs
+    # past it so being ahead of schedule has somewhere to show.
+    "spi_max": 1.5,
+    "spi_thresholds": {"low": 0.8, "mid": 0.9, "high": 1.0},
     "fonts": {
         "base_size": 11,
         "h1_size": 22,
