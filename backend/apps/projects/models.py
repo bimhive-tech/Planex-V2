@@ -83,6 +83,12 @@ class Project(TimestampedModel):
     # Kept in sync with the latest APPROVED schedule Variation (SVO) — see
     # apps.projects.services.resync_revised_finish. Not directly editable.
     revised_finish = models.DateField(null=True, blank=True)
+    # The finish the owner has actually approved, which is not always either
+    # the contractual one or the one the latest SVO proposed (client ask,
+    # 2026-09-13). Entered by hand, unlike revised_finish: it records a
+    # decision made off-system, so nothing here can derive it. Together with
+    # planned_finish it gives OTP — see apps.reports.services.project_otp.
+    approved_finish = models.DateField(null=True, blank=True)
     forecast_finish = models.DateField(null=True, blank=True)  # current forecast, separate from the revised baseline
     size_sqm = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     notes = models.TextField(blank=True)

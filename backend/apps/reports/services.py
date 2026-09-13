@@ -187,6 +187,30 @@ def _duration_for(s, f, revised_finish, as_of, planned_pct=None, actual_pct=None
     return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
 
 
+def project_otp(project):
+    """OTP in days — the approved finish measured against the contractual one.
+
+    `approved_finish - planned_finish`, as the register states it, and
+    `planned_finish` IS the contractual finish (it is what the report's own
+    `info_finish` label calls it). Positive means the approved finish lands
+    LATER than the contract's: time granted. Negative means it was pulled in.
+
+    None when either date is missing. A project with no approved finish has no
+    OTP, which is a different thing from an OTP of zero (the approved finish is
+    exactly the contractual one), so the two must not collapse into one row.
+
+    Days, always: the difference between two dates is a whole number of them
+    and nothing is rounded to get it. Stating it in months or years is a
+    display choice, made against the config the report actually renders with
+    (see pdf_tables.fmt_otp) rather than baked in here -- otherwise a report
+    that overrides the setting would show a figure computed for the other
+    unit."""
+    approved, contractual = project.approved_finish, project.planned_finish
+    if not (approved and contractual):
+        return None
+    return (approved - contractual).days
+
+
 def _duration(project, as_of):
     """Contract duration / elapsed / remaining / delay in calendar days."""
     return _duration_for(project.planned_start, project.planned_finish, project.revised_finish, as_of)
@@ -1418,7 +1442,13 @@ def build_report_context(report):
             "planned_start": project.planned_start,
             "planned_finish": project.planned_finish,
             "revised_finish": project.revised_finish,
+            "approved_finish": project.approved_finish,
             "forecast_finish": project.forecast_finish,
+            # OTP is derived, never stored: it is the gap between the two
+            # finish dates above and would go stale the moment either moved.
+            # The unit is a template setting, so the figure has to be computed
+            # in whatever the template asks for rather than converted later.
+            "otp_days": project_otp(project),
             "size_sqm": project.size_sqm,
             "budget": project.budget,
             "budget_currency": project.budget_currency,

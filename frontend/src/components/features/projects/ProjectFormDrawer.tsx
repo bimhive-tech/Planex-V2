@@ -31,7 +31,7 @@ const FIELDS = [
   "consultant_name", "consultant_phone", "consultant_email",
   "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
   "subcontractor_name", "subcontractor_phone", "subcontractor_email",
-  "planned_start", "planned_finish", "forecast_finish",
+  "planned_start", "planned_finish", "approved_finish", "forecast_finish",
   "eot_days", "size_sqm", "notes",
   "contract_value", "contract_value_currency", "forecast_cost", "forecast_cost_currency",
 ];
@@ -132,7 +132,7 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
     // Empty dates / size must be null, not "".
     const payload: Record<string, unknown> = { ...form };
     for (const k of [
-      "planned_start", "planned_finish", "forecast_finish",
+      "planned_start", "planned_finish", "approved_finish", "forecast_finish",
       "size_sqm", "budget", "advance_payment", "eot_days",
       "contract_value", "forecast_cost",
     ]) {
@@ -230,7 +230,12 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
           <Input label="Planned finish" name="planned_finish" type="date" value={form.planned_finish} onChange={set("planned_finish")} />
         </div>
         <div className={styles.row2}>
+          {/* Next to the planned (contractual) finish it is measured against:
+              the report states the gap between the two as OTP. */}
+          <Input label="Approved finish" name="approved_finish" type="date" value={form.approved_finish} onChange={set("approved_finish")} />
           <Input label="Forecast finish" name="forecast_finish" type="date" value={form.forecast_finish} onChange={set("forecast_finish")} />
+        </div>
+        <div className={styles.row2}>
           <Input label="Size (sqm)" name="size_sqm" type="number" step="0.01" value={form.size_sqm} onChange={set("size_sqm")} />
         </div>
         <p className={styles.sectionHint}>

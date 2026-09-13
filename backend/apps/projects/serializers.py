@@ -11,7 +11,7 @@ STAKEHOLDER_FIELDS = [
     "contractor_name", "contractor_phone", "contractor_email", "contractor_consultant",
     "subcontractor_name", "subcontractor_phone", "subcontractor_email",
 ]
-DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "forecast_finish"]
+DATE_FIELDS = ["planned_start", "planned_finish", "revised_finish", "approved_finish", "forecast_finish"]
 # revised_finish is derived (the latest approved schedule Variation's new
 # finish — see apps.projects.services.resync_revised_finish), not directly
 # editable: a manual edit would just get silently overwritten by the next

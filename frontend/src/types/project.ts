@@ -47,6 +47,7 @@ export interface ProjectDetail {
   // Derived from the latest approved schedule Variation (SVO) — read-only,
   // not accepted on PATCH. Edit it via the Variations tab instead.
   revised_finish: string | null;
+  approved_finish: string | null;
   forecast_finish: string | null;
   advance_payment: string | null;
   advance_payment_currency: string;
@@ -203,6 +204,7 @@ export interface Scope {
   planned_start: string | null;
   planned_finish: string | null;
   revised_finish: string | null;
+  approved_finish: string | null;
   discipline: ScopeDiscipline;
   discipline_display: string;
 }

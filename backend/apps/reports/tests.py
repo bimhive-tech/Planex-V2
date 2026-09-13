@@ -1,6 +1,7 @@
 """Reports tests: config merge, Arabic-aware PDF rendering, and API gating."""
 import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
 from reportlab.lib.units import mm
@@ -2446,6 +2447,152 @@ class DescriptionFallbackTests(SimpleTestCase):
         ctx = {"project": {"description": "Cost < budget & on track."}}
         html = _effective_description_html({"html": ""}, ctx)
         self.assertEqual(html, "<p>Cost &lt; budget &amp; on track.</p>")
+
+
+class ApprovedFinishAndOtpTests(TestCase):
+    """Register items B2 and B3: the owner-approved finish date, and OTP --
+    the distance between it and the contractual finish -- both stated in the
+    Project Info table."""
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+
+    def _project(self, name="Tower", **kw):
+        # Names are unique per company, so each project in a test needs its own.
+        return Project.objects.create(
+            company=self.company, name=name,
+            project_type=Project.ProjectType.COMMERCIAL, **kw)
+
+    # --- B2 -----------------------------------------------------------------
+
+    def test_the_approved_finish_and_otp_reach_the_report_context(self):
+        """activity_progress_as_of is stubbed only because it reads through a
+        PostgreSQL-only DISTINCT ON; None is its own "no dated entries"
+        answer, so the rest of the context assembles exactly as it would."""
+        from .services import build_report_context
+
+        project = self._project(planned_finish=datetime.date(2026, 1, 1),
+                                approved_finish=datetime.date(2026, 4, 1))
+        report = Report.objects.create(company=self.company, project=project, title="R")
+        with patch("apps.reports.services.activity_progress_as_of", return_value=None):
+            ctx = build_report_context(report)
+
+        self.assertEqual(ctx["project"]["approved_finish"], datetime.date(2026, 4, 1))
+        # Carried in days, not in whatever unit a template happens to want.
+        self.assertEqual(ctx["project"]["otp_days"], 90)
+
+    def test_the_approved_finish_is_writable_unlike_the_revised_one(self):
+        """revised_finish is derived from the latest approved SVO and typing it
+        does nothing. The approved finish records a decision made off-system,
+        so nothing can derive it and it has to be editable."""
+        from apps.projects.serializers import DATE_FIELDS, WRITABLE_DATE_FIELDS
+
+        self.assertIn("approved_finish", DATE_FIELDS)
+        self.assertIn("approved_finish", WRITABLE_DATE_FIELDS)
+        self.assertNotIn("revised_finish", WRITABLE_DATE_FIELDS)
+
+    # --- B3 -----------------------------------------------------------------
+
+    def test_otp_is_the_approved_finish_less_the_contractual_one(self):
+        from .services import project_otp
+
+        # planned_finish IS the contractual finish -- it is what the report's
+        # own info_finish label calls it.
+        self.assertEqual(project_otp(self._project(
+            planned_finish=datetime.date(2026, 1, 1),
+            approved_finish=datetime.date(2026, 4, 1))), 90)
+
+    def test_otp_is_negative_when_the_approved_finish_is_the_earlier_one(self):
+        from .services import project_otp
+
+        self.assertEqual(project_otp(self._project(
+            planned_finish=datetime.date(2026, 4, 1),
+            approved_finish=datetime.date(2026, 1, 1))), -90)
+
+    def test_no_approved_finish_means_no_otp_rather_than_zero(self):
+        """A project that has no approved finish has no OTP. An OTP of zero
+        says something different -- the approved finish IS the contractual one
+        -- so the two must not collapse into the same row."""
+        from .services import project_otp
+
+        self.assertIsNone(project_otp(self._project(
+            "No approved", planned_finish=datetime.date(2026, 1, 1))))
+        self.assertIsNone(project_otp(self._project(
+            "No contractual", approved_finish=datetime.date(2026, 1, 1))))
+        self.assertEqual(project_otp(self._project(
+            "Same day",
+            planned_finish=datetime.date(2026, 1, 1),
+            approved_finish=datetime.date(2026, 1, 1))), 0)
+
+    def test_otp_states_itself_in_the_templates_unit(self):
+        from .constants import default_config
+        from .pdf_tables import fmt_otp
+
+        labels = default_config()["labels"]
+        self.assertEqual(fmt_otp(365, "days", labels), "365 days")
+        self.assertEqual(fmt_otp(365, "months", labels), "12.0 months")
+        self.assertEqual(fmt_otp(365, "years", labels), "1.0 years")
+        # An unrecognised unit falls back to the one it was computed in rather
+        # than printing a bare number with no unit at all.
+        self.assertEqual(fmt_otp(365, "fortnights", labels), "365 days")
+
+    def test_a_month_is_the_average_one_so_a_span_does_not_drift(self):
+        """Counting 30-day months would make the same gap read differently
+        depending on which months it happened to cross."""
+        from .constants import default_config
+        from .pdf_tables import fmt_otp
+
+        self.assertEqual(fmt_otp(30, "months", default_config()["labels"]), "1.0 months")
+
+    def test_days_print_whole_and_are_never_rounded_into_being(self):
+        """The difference between two dates already is a whole number of days,
+        so nothing is rounded to state it (register item C2)."""
+        from .constants import default_config
+        from .pdf_tables import fmt_otp
+
+        self.assertEqual(fmt_otp(-47, "days", default_config()["labels"]), "-47 days")
+        self.assertEqual(fmt_otp(1380, "days", default_config()["labels"]), "1,380 days")
+
+    def test_no_otp_prints_nothing_so_the_row_drops_out(self):
+        from .constants import default_config
+        from .pdf_tables import fmt_otp
+
+        self.assertEqual(fmt_otp(None, "days", default_config()["labels"]), "")
+
+    def test_both_rows_appear_in_the_project_info_table(self):
+        from .pdf_base import ensure_fonts
+        from .pdf_canvas import resolve_table
+
+        ensure_fonts()
+        cfg = default_config()
+        base = {"project": {"name": "Tower", "currency": "EGP"}, "arabic": False, "duration": {}}
+        without = resolve_table("project_info", cfg, base, {"item": None})
+        rows_without = len(without._cellvalues) if without else 0
+
+        base["project"]["approved_finish"] = datetime.date(2026, 4, 1)
+        base["project"]["otp_days"] = 90
+        table = resolve_table("project_info", cfg, base, {"item": None})
+        self.assertEqual(len(table._cellvalues), rows_without + 2)
+
+    def test_the_unit_setting_reaches_the_rendered_table(self):
+        """The figure is carried in days and converted against the config the
+        report actually renders with, so a template that asks for months gets
+        months rather than a number computed for another unit."""
+        from .pdf_base import ensure_fonts
+        from .pdf_canvas import resolve_table
+
+        ensure_fonts()
+        ctx = {"project": {"name": "Tower", "currency": "EGP", "otp_days": 365},
+               "arabic": False, "duration": {}}
+
+        def otp_cell(unit):
+            cfg = default_config()
+            cfg["otp_unit"] = unit
+            table = resolve_table("project_info", cfg, ctx, {"item": None})
+            return [str(getattr(c, "text", c)) for row in table._cellvalues for c in row]
+
+        self.assertTrue(any("365 days" in c for c in otp_cell("days")))
+        self.assertTrue(any("12.0 months" in c for c in otp_cell("months")))
 
 
 class ProjectInfoCostAndDateFieldsTests(TestCase):

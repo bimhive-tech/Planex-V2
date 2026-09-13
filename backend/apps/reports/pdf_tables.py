@@ -8,7 +8,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Table, TableStyle
 
-from .constants import PERCENT_DECIMALS
+from .constants import DAYS_PER_MONTH, DAYS_PER_YEAR, OTP_DECIMALS, PERCENT_DECIMALS
 from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
 
 NOTE_HEIGHT = 4 * mm  # space reserved under a truncated table for the "+N more" note
@@ -146,6 +146,28 @@ def enum_label(cfg, text):
 
 def _fmt_date(d):
     return d.strftime("%d %b %Y") if d else "—"
+
+
+def fmt_otp(days, unit, labels) -> str:
+    """OTP stated in the template's unit, or "" when there is no OTP.
+
+    Blank rather than a dash or a zero: the Project Info table drops empty
+    rows, and a project with no approved finish has no OTP at all -- a
+    different thing from an OTP of zero (the approved finish IS the
+    contractual one), so the two must not print the same.
+
+    Days print whole, because the difference between two dates is whole and
+    nothing was rounded to get it. Months and years are conversions of that
+    figure and do carry a fraction, so they keep OTP_DECIMALS of it."""
+    if days is None:
+        return ""
+    if unit == "months":
+        value, word = days / DAYS_PER_MONTH, labels.get("unit_months", "months")
+    elif unit == "years":
+        value, word = days / DAYS_PER_YEAR, labels.get("unit_years", "years")
+    else:
+        return f"{int(days):,} {labels.get('unit_days', 'days')}"
+    return f"{value:,.{OTP_DECIMALS}f} {word}"
 
 
 def fmt_percent(v) -> str:

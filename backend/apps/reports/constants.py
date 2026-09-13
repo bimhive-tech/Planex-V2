@@ -13,6 +13,14 @@ import copy
 # 59.5. Money keeps its own precision at each call site - a contract value
 # and an invoice extract are read very differently.
 PERCENT_DECIMALS = 2
+# OTP in months or years is a conversion of a whole number of days, so unlike
+# days it carries a fraction worth showing. One decimal: "1.5 months" is the
+# granularity a finish-date decision is actually made at.
+OTP_DECIMALS = 1
+# Average Gregorian month and year, so a span stated in months or years doesn't
+# drift with which months it happens to cross. 365.25 carries the leap year.
+DAYS_PER_YEAR = 365.25
+DAYS_PER_MONTH = DAYS_PER_YEAR / 12
 
 DEFAULT_CONFIG = {
     # "auto" guesses Arabic/English from the project name and labels (the old,
@@ -62,6 +70,9 @@ DEFAULT_CONFIG = {
     # past it so being ahead of schedule has somewhere to show.
     "spi_max": 1.5,
     "spi_thresholds": {"low": 0.8, "mid": 0.9, "high": 1.0},
+    # What unit the Project Info table states OTP in (register item B3). Days
+    # is the unit it's computed in; months and years are conversions of it.
+    "otp_unit": "days",  # days | months | years
     "fonts": {
         "base_size": 11,
         "h1_size": 22,
@@ -300,6 +311,9 @@ DEFAULT_CONFIG = {
         "scurve_remaining": "Cummulative Remaining %",
         # Unit words appended to bare numbers so a reader knows what they mean.
         "unit_days": "days",
+        # OTP can be stated in any of the three (see "otp_unit").
+        "unit_months": "months",
+        "unit_years": "years",
         "unit_sqm": "m²",
         "scurve": "Time Performance",
         "spi": "SPI",
@@ -362,6 +376,8 @@ DEFAULT_CONFIG = {
         "info_subcontractor": "Sub-contractor",
         "info_advance_payment": "Advance Payment",
         "info_eot": "EOT (Days)",
+        "info_approved_finish": "Approved finish",
+        "info_otp": "OTP",
         "info_part_amount": "(Part) Amount",
         "info_part_completion_revised": "(Part) Completion Date (Revised Baseline)",
         "info_part_forecast": "(Part) Forecasted Completion Date",

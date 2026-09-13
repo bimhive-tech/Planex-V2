@@ -47,7 +47,7 @@ from .pdf_tables import (
     _hierarchy_table_flat as _hierarchy_table_flat_impl,
     _info_table as _info_table_impl, _pct_or_dash, _styles,
     _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label,
-    table_style_override,
+    fmt_otp, table_style_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -1227,6 +1227,12 @@ def resolve_table(
              f"{dur['total']} {labels['unit_days']}" if dur.get("total") else ""),
             (labels["info_start"], _fmt_date(p.get("planned_start"))),
             (labels["info_finish"], _fmt_date(p.get("planned_finish"))),
+            # The approved finish and OTP sit immediately under the
+            # contractual one, because OTP is the distance between those two
+            # rows and is unreadable anywhere else.
+            (labels.get("info_approved_finish", "Approved finish"),
+             _fmt_date(p.get("approved_finish")) if p.get("approved_finish") else ""),
+            (labels.get("info_otp", "OTP"), fmt_otp(p.get("otp_days"), cfg.get("otp_unit"), labels)),
             (labels.get("info_eot", "EOT (Days)"), days(p.get("eot_days"))),
             (labels.get("info_revised", "Revised finish"),
              _fmt_date(p.get("revised_finish")) if p.get("revised_finish") else ""),
