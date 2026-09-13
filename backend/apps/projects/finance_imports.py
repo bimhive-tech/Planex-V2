@@ -82,7 +82,9 @@ def _is_data_label(label, keyword):
 
 
 def _read_wide(ws):
-    """Find a date-header row and the planned/actual rows beneath it."""
+    """Find a date-header row and the planned/actual rows beneath it.
+
+    Every dated column becomes a month, whether or not it carries cash."""
     header_row = header = None
     for row in range(1, min(ws.max_row, SCAN_ROWS) + 1):
         months = {}
@@ -112,8 +114,13 @@ def _read_wide(ws):
     for col, month in header.items():
         planned = _as_amount(ws.cell(row=planned_row, column=col).value) if planned_row else None
         actual = _as_amount(ws.cell(row=actual_row, column=col).value) if actual_row else None
-        if planned is None and actual is None:
-            continue  # a header date with no cash under it isn't a real month
+        # Every month the sheet heads is a month of the programme, including the
+        # ones with no cash under them. Skipping the blanks silently shortened
+        # the cash flow to whenever money happened to move: the Cairo airport
+        # sheet runs May 2022 to December 2026, and the report drew 52 of those
+        # 55 months, losing the quiet start and the two-month tail at the end.
+        # A month that saw nothing is information -- the plan expected nothing
+        # there -- and dropping it also slides the chart's own axis.
         out[month] = (planned or Decimal("0"), actual or Decimal("0"))
     return out
 

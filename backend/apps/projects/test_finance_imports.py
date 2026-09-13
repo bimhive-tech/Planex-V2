@@ -8,6 +8,7 @@ plots, so the report's curve IS the curve they publish.
 """
 import datetime
 import io
+from decimal import Decimal
 
 import openpyxl
 from django.test import SimpleTestCase, TestCase
@@ -448,3 +449,89 @@ class ProgressSeriesSourceTests(TestCase):
         series = progress_series(self.project)
         self.assertTrue(series)                     # the live "today" point
         self.assertIn("overall_progress", series[0])
+
+
+class QuietMonthsStayInTheCashFlow(TestCase):
+    """A month the sheet heads but books no cash is still a month of the
+    programme (client ask, 2026-09-13).
+
+    The wide reader used to drop any dated column with both cells blank, which
+    silently shortened the cash flow to whenever money happened to move. On the
+    Cairo airport dashboard that lost 3 of 55 months at the two ends — and two
+    more *inside* the run (Jan/Feb 2023), so the chart's own axis jumped from
+    Dec 22 straight to Mar 23 with nothing saying a gap was there.
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name="Acme")
+        self.project = Project.objects.create(
+            company=self.company, name="Tower", project_type="commercial")
+
+    def _sheet(self, planned, actual, months=6):
+        """A wide cash-flow workbook; `planned`/`actual` are per-month cells,
+        None meaning the sheet left that cell empty."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "cashflow total"
+        ws.append(["Description", *(datetime.datetime(2026, m, 1) for m in range(1, months + 1))])
+        ws.append(["Planned Cash In /Month", *planned])
+        ws.append(["Invoices /Month", *actual])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    def test_a_month_with_no_cash_is_still_a_month(self):
+        from .finance_imports import parse_cashflow
+
+        # Quiet at both ends and a two-month gap in the middle.
+        data = parse_cashflow(self._sheet(
+            planned=[None, 100, None, None, 300, None],
+            actual=[None, 50, None, None, 90, None]))
+        self.assertEqual(sorted(data), [datetime.date(2026, m, 1) for m in range(1, 7)])
+        self.assertEqual(data[datetime.date(2026, 1, 1)], (Decimal("0"), Decimal("0")))
+        self.assertEqual(data[datetime.date(2026, 4, 1)], (Decimal("0"), Decimal("0")))
+        self.assertEqual(data[datetime.date(2026, 6, 1)], (Decimal("0"), Decimal("0")))
+
+    def test_the_quiet_months_reach_the_finances_tab(self):
+        """Import stores them, so the grid and the report's chart both see the
+        full span rather than the months that happened to carry money."""
+        from .finance_imports import import_cashflow
+        from .models import CashFlowEntry
+
+        result = import_cashflow(self.project, self._sheet(
+            planned=[None, 100, None, None, 300, None],
+            actual=[None, 50, None, None, 90, None]))
+        self.assertEqual(result["months"], 6)
+        self.assertEqual(result["first_month"], "2026-01-01")
+        self.assertEqual(result["last_month"], "2026-06-01")
+        self.assertEqual(CashFlowEntry.objects.filter(project=self.project).count(), 6)
+
+    def test_dropping_a_quiet_month_would_not_change_the_totals(self):
+        """The point isn't the money — it's the span. Keeping the blanks adds
+        nothing to either total, so no figure on the tab moves."""
+        from .finance_imports import parse_cashflow
+
+        data = parse_cashflow(self._sheet(
+            planned=[None, 100, None, None, 300, None],
+            actual=[None, 50, None, None, 90, None]))
+        self.assertEqual(sum(p for p, _ in data.values()), Decimal("400"))
+        self.assertEqual(sum(a for _, a in data.values()), Decimal("140"))
+
+    def test_a_column_that_heads_no_date_is_still_ignored(self):
+        """Only *dated* columns become months — the fix must not turn a stray
+        label column into a month with no date."""
+        from .finance_imports import parse_cashflow
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "cashflow total"
+        ws.append(["Description", *(datetime.datetime(2026, m, 1) for m in range(1, 5)), "Total"])
+        ws.append(["Planned Cash In /Month", 100, None, 300, None, 400])
+        ws.append(["Invoices /Month", 50, None, 70, None, 120])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        data = parse_cashflow(buf)
+        self.assertEqual(len(data), 4)
+        self.assertEqual(sum(p for p, _ in data.values()), Decimal("400"))
