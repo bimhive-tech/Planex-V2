@@ -11,9 +11,8 @@ interface NamedRow {
   name: string;
 }
 
-/** A consultant or contractor: picking one fills the project's phone/email
- * alongside the name. Owners carry a name only (see the master_data models).
- * The API path stays /clients/ — only what a reader sees is renamed. */
+/** One company on the roster. Picking it in any role fills the project's
+ * phone/email alongside the name. */
 export interface PartyRow {
   id: string;
   name: string;
@@ -40,18 +39,9 @@ export function useCurrencies() {
   return useFetch(() => api.get<Paginated<CurrencyRow>>("/currencies/?page_size=200"), []);
 }
 
-export function useClients() {
-  return useFetch(() => api.get<Paginated<NamedRow>>("/clients/?page_size=500"), []);
-}
-
-export function useConsultants() {
-  return useFetch(() => api.get<Paginated<PartyRow>>("/consultants/?page_size=500"), []);
-}
-
-export function useContractors() {
-  return useFetch(() => api.get<Paginated<PartyRow>>("/contractors/?page_size=500"), []);
-}
-
-export function useSubcontractors() {
-  return useFetch(() => api.get<Paginated<PartyRow>>("/subcontractors/?page_size=500"), []);
+/** The one roster behind every party dropdown on the project form. There used
+ * to be a hook per role against a list per role, which meant the same company
+ * had to be entered up to four times to be pickable everywhere. */
+export function useParties() {
+  return useFetch(() => api.get<Paginated<PartyRow>>("/parties/?page_size=500"), []);
 }

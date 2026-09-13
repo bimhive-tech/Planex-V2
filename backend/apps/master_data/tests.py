@@ -8,7 +8,7 @@ from apps.accounts.models import Company, Membership, Role, User
 from apps.projects.models import Project
 
 from . import services as svc
-from .models import Client, Consultant, Contractor, Currency, ProjectPriority, ProjectType, SubContractor
+from .models import Currency, Party, ProjectPriority, ProjectType
 
 
 def _make_user(company, permissions):
@@ -100,7 +100,7 @@ class MasterDataApiTests(TestCase):
         user = _make_user(self.company, permissions=[Permission.VIEW_PROJECTS.value])
         self.client.force_authenticate(user)
         self.assertEqual(self.client.post("/api/currencies/", {"code": "GBP", "name": "Pound"}).status_code, 403)
-        self.assertEqual(self.client.post("/api/clients/", {"name": "Nope"}).status_code, 403)
+        self.assertEqual(self.client.post("/api/parties/", {"name": "Nope"}).status_code, 403)
 
     def test_no_permission_at_all_is_still_refused(self):
         user = _make_user(self.company, permissions=[])
@@ -154,9 +154,12 @@ class MasterDataApiTests(TestCase):
         self.assertEqual(resp.data["priority"], "critical")
 
 
-class StakeholderListTests(TestCase):
-    """Clients / consultants / contractors — the lists behind the project
-    form's stakeholder dropdowns."""
+class PartyRosterTests(TestCase):
+    """One roster of firms, any of which can hold any role on a project
+    (client ask, 2026-09-13). Owner / consultant / contractor / sub-contractor
+    were four separately-curated lists, which meant entering the same company
+    up to four times; the role belongs to the project-party pairing, so it
+    lives on the Project's own field instead."""
 
     def setUp(self):
         self.company = Company.objects.create(name="Acme")
@@ -170,104 +173,91 @@ class StakeholderListTests(TestCase):
 
     def test_create_list_and_scope_to_one_company(self):
         self._admin()
-        Client.objects.create(company=self.other, name="Someone else's client")
+        Party.objects.create(company=self.other, name="Someone else's party")
 
-        resp = self.client.post("/api/clients/", {"name": "  Ministry of Housing  "})
+        resp = self.client.post("/api/parties/", {"name": "  Ministry of Housing  "})
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["name"], "Ministry of Housing")  # trimmed
 
-        resp = self.client.get("/api/clients/")
+        resp = self.client.get("/api/parties/")
         self.assertEqual([r["name"] for r in resp.data["results"]], ["Ministry of Housing"])
 
-    def test_consultant_carries_phone_and_email(self):
+    def test_a_party_carries_phone_and_email(self):
         self._admin()
         resp = self.client.post(
-            "/api/consultants/", {"name": "ECG", "phone": "+20 100", "email": "a@ecg.com"})
+            "/api/parties/", {"name": "ECG", "phone": "+20 100", "email": "a@ecg.com"})
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual((resp.data["phone"], resp.data["email"]), ("+20 100", "a@ecg.com"))
 
     def test_duplicate_name_rejected_per_company(self):
         self._admin()
-        self.client.post("/api/contractors/", {"name": "Sinai Sons"})
-        dup = self.client.post("/api/contractors/", {"name": "Sinai Sons"})
+        self.client.post("/api/parties/", {"name": "Sinai Sons"})
+        dup = self.client.post("/api/parties/", {"name": "Sinai Sons"})
         self.assertEqual(dup.status_code, 400)
         # ...but the same name is fine for a different company.
-        Contractor.objects.create(company=self.other, name="Sinai Sons")
+        Party.objects.create(company=self.other, name="Sinai Sons")
+
+    def test_one_entry_serves_every_role(self):
+        """The point of the merge: a firm is entered once and is then available
+        as the owner, the consultant, the contractor and the sub-contractor.
+        It used to need entering into four separate lists."""
+        self._admin()
+        self.assertEqual(self.client.post("/api/parties/", {"name": "Dual Role"}).status_code, 201)
+        names = [r["name"] for r in self.client.get("/api/parties/").data["results"]]
+        self.assertEqual(names, ["Dual Role"])
 
     def test_delete_blocked_while_a_project_still_names_it(self):
         self._admin()
-        c = Client.objects.create(company=self.company, name="Ministry")
+        party = Party.objects.create(company=self.company, name="Ministry")
         Project.objects.create(company=self.company, name="P1", project_type="commercial",
                                client_name="Ministry")
-        resp = self.client.delete(f"/api/clients/{c.id}/")
+        resp = self.client.delete(f"/api/parties/{party.id}/")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("1 project", str(resp.data))
 
-    def test_a_consultant_named_only_as_the_contractors_consultant_still_blocks_delete(self):
-        """Consultant feeds two Project fields — either one counts as in use."""
+    def test_delete_is_blocked_by_a_project_naming_it_in_any_role(self):
+        """Each role's field on its own has to count. A party filed under no
+        role can still be named by any of the five, and deleting it while a
+        project points at it would blank that project's dropdown."""
         self._admin()
-        c = Consultant.objects.create(company=self.company, name="Mentor")
-        Project.objects.create(company=self.company, name="P1", project_type="commercial",
-                               contractor_consultant="Mentor")
-        self.assertEqual(self.client.delete(f"/api/consultants/{c.id}/").status_code, 400)
+        for i, field in enumerate(["client_name", "consultant_name", "contractor_consultant",
+                                   "contractor_name", "subcontractor_name"]):
+            party = Party.objects.create(company=self.company, name=f"Firm {i}")
+            project = Project.objects.create(company=self.company, name=f"P{i}",
+                                             project_type="commercial", **{field: f"Firm {i}"})
+            self.assertEqual(self.client.delete(f"/api/parties/{party.id}/").status_code, 400, field)
+            project.delete()
+            self.assertEqual(self.client.delete(f"/api/parties/{party.id}/").status_code, 204, field)
 
-    def test_renaming_carries_the_new_name_onto_projects_using_it(self):
+    def test_renaming_carries_the_new_name_onto_every_role_at_once(self):
         """Otherwise the rename orphans them: their stored string would no
-        longer match any list entry and the dropdown would read as blank."""
+        longer match any list entry and the dropdown would read as blank.
+
+        With one roster this has to reach every role, not just the list the
+        name happened to be filed under -- the same firm is routinely the
+        contractor on one project and the consultant on another.
+        """
         self._admin()
-        c = Consultant.objects.create(company=self.company, name="Old Name")
-        mine = Project.objects.create(company=self.company, name="P1", project_type="commercial",
-                                      consultant_name="Old Name", contractor_consultant="Old Name")
+        party = Party.objects.create(company=self.company, name="Old Name")
+        mine = Project.objects.create(
+            company=self.company, name="P1", project_type="commercial",
+            client_name="Old Name", consultant_name="Old Name", contractor_consultant="Old Name",
+            contractor_name="Old Name", subcontractor_name="Old Name")
         theirs = Project.objects.create(company=self.other, name="P2", project_type="commercial",
                                         consultant_name="Old Name")
 
-        resp = self.client.patch(f"/api/consultants/{c.id}/", {"name": "New Name"})
+        resp = self.client.patch(f"/api/parties/{party.id}/", {"name": "New Name"})
         self.assertEqual(resp.status_code, 200, resp.data)
         mine.refresh_from_db()
-        self.assertEqual(mine.consultant_name, "New Name")
-        self.assertEqual(mine.contractor_consultant, "New Name")
+        self.assertEqual(
+            [mine.client_name, mine.consultant_name, mine.contractor_consultant,
+             mine.contractor_name, mine.subcontractor_name],
+            ["New Name"] * 5)
         theirs.refresh_from_db()
         self.assertEqual(theirs.consultant_name, "Old Name")  # another company's is untouched
 
     def test_another_companys_row_is_not_reachable(self):
         self._admin()
-        theirs = Client.objects.create(company=self.other, name="Theirs")
-        self.assertEqual(self.client.patch(f"/api/clients/{theirs.id}/", {"name": "x"}).status_code, 404)
-        self.assertEqual(self.client.delete(f"/api/clients/{theirs.id}/").status_code, 404)
-
-
-class SubContractorTests(TestCase):
-    """The subcontractor list, added alongside the other project parties
-    (client ask, 2026-09-06). Its own roster, not a reuse of Contractor: the
-    same firm can be a main contractor on one project and a sub on another."""
-
-    def setUp(self):
-        self.company = Company.objects.create(name="Acme")
-        self.client = APIClient()
-        self.client.force_authenticate(_make_user(self.company, permissions=COMPANY_ADMIN_PERMISSIONS))
-
-    def test_create_with_contacts_and_list(self):
-        resp = self.client.post(
-            "/api/subcontractors/", {"name": "Sinai Sub", "phone": "+20 2", "email": "s@sub.example"})
-        self.assertEqual(resp.status_code, 201, resp.data)
-        self.assertEqual(resp.data["email"], "s@sub.example")
-        self.assertEqual(self.client.get("/api/subcontractors/").data["count"], 1)
-
-    def test_same_name_can_be_a_contractor_and_a_subcontractor(self):
-        self.assertEqual(self.client.post("/api/contractors/", {"name": "Dual Role"}).status_code, 201)
-        self.assertEqual(self.client.post("/api/subcontractors/", {"name": "Dual Role"}).status_code, 201)
-
-    def test_delete_blocked_while_a_project_names_it(self):
-        sub = SubContractor.objects.create(company=self.company, name="Sinai Sub")
-        Project.objects.create(company=self.company, name="P1", project_type="commercial",
-                               subcontractor_name="Sinai Sub")
-        resp = self.client.delete(f"/api/subcontractors/{sub.id}/")
-        self.assertEqual(resp.status_code, 400)
-
-    def test_rename_carries_onto_projects(self):
-        sub = SubContractor.objects.create(company=self.company, name="Old Sub")
-        p = Project.objects.create(company=self.company, name="P1", project_type="commercial",
-                                   subcontractor_name="Old Sub")
-        self.assertEqual(self.client.patch(f"/api/subcontractors/{sub.id}/", {"name": "New Sub"}).status_code, 200)
-        p.refresh_from_db()
-        self.assertEqual(p.subcontractor_name, "New Sub")
+        theirs = Party.objects.create(company=self.other, name="Theirs")
+        self.assertEqual(self.client.patch(f"/api/parties/{theirs.id}/", {"name": "x"}).status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/parties/{theirs.id}/").status_code, 404)

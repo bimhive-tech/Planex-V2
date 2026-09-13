@@ -10,8 +10,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { api, ApiError } from "@/lib/api";
 import {
-  useClients, useConsultants, useContractors, useCurrencies, useProjectPriorities, useProjectTypes,
-  useSubcontractors,
+  useCurrencies, useParties, useProjectPriorities, useProjectTypes,
 } from "@/hooks/useMasterData";
 import type { ProjectDetail } from "@/types/project";
 import { PartySelect, type PartyOption } from "./PartySelect";
@@ -58,17 +57,14 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
   const currencyOptions = (currenciesData?.results ?? [])
     .map((c) => ({ value: c.code, label: `${c.code} — ${c.name}` }));
 
-  // Stakeholder lists (Settings -> Master Data) behind the three dropdowns
-  // below, so a client/consultant/contractor is picked rather than retyped —
-  // and spelled the same way on every project that uses it.
-  const { data: clientsData, loading: clientsLoading } = useClients();
-  const { data: consultantsData, loading: consultantsLoading } = useConsultants();
-  const { data: contractorsData, loading: contractorsLoading } = useContractors();
-  const { data: subcontractorsData, loading: subcontractorsLoading } = useSubcontractors();
-  const clients: PartyOption[] = clientsData?.results ?? [];
-  const consultants: PartyOption[] = consultantsData?.results ?? [];
-  const contractors: PartyOption[] = contractorsData?.results ?? [];
-  const subcontractors: PartyOption[] = subcontractorsData?.results ?? [];
+  // The party roster (Settings -> Master Data) behind every dropdown below, so
+  // a company is picked rather than retyped — and spelled the same way on
+  // every project that names it. One list for all five: the role is this
+  // project's opinion of the company, not a property of the company, so the
+  // same firm can be the contractor here and the consultant on the next job
+  // without being entered twice.
+  const { data: partiesData, loading: partiesLoading } = useParties();
+  const parties: PartyOption[] = partiesData?.results ?? [];
 
   /** Store the picked name, and carry that party's own phone/email onto the
    * project with it. Explicitly picked, so overwriting is what's wanted —
@@ -243,11 +239,11 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
 
         <p className={styles.section}>Owner</p>
         <PartySelect label="Owner" name="client_name" value={form.client_name}
-          options={clients} loading={clientsLoading} onPick={pickParty("client_name")} />
+          options={parties} loading={partiesLoading} onPick={pickParty("client_name")} />
 
         <p className={styles.section}>Consultant</p>
         <PartySelect label="Name" name="consultant_name" value={form.consultant_name}
-          options={consultants} loading={consultantsLoading}
+          options={parties} loading={partiesLoading}
           onPick={pickParty("consultant_name", "consultant_phone", "consultant_email")} />
         <div className={styles.row2}>
           <Input label="Phone" name="consultant_phone" value={form.consultant_phone} onChange={set("consultant_phone")} />
@@ -256,7 +252,7 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
 
         <p className={styles.section}>Contractor</p>
         <PartySelect label="Name" name="contractor_name" value={form.contractor_name}
-          options={contractors} loading={contractorsLoading}
+          options={parties} loading={partiesLoading}
           onPick={pickParty("contractor_name", "contractor_phone", "contractor_email")} />
         <div className={styles.row2}>
           <Input label="Phone" name="contractor_phone" value={form.contractor_phone} onChange={set("contractor_phone")} />
@@ -265,12 +261,12 @@ export function ProjectFormDrawer({ open, projectId, onClose, onSaved }: Props) 
         {/* Names a consultant, so it draws on the consultant list too — its own
             contact details aren't tracked separately on the project. */}
         <PartySelect label="Contractor's consultant" name="contractor_consultant"
-          value={form.contractor_consultant} options={consultants} loading={consultantsLoading}
+          value={form.contractor_consultant} options={parties} loading={partiesLoading}
           onPick={pickParty("contractor_consultant")} />
 
         <p className={styles.section}>Sub-contractor</p>
         <PartySelect label="Name" name="subcontractor_name" value={form.subcontractor_name}
-          options={subcontractors} loading={subcontractorsLoading}
+          options={parties} loading={partiesLoading}
           onPick={pickParty("subcontractor_name", "subcontractor_phone", "subcontractor_email")} />
         <div className={styles.row2}>
           <Input label="Phone" name="subcontractor_phone" value={form.subcontractor_phone}

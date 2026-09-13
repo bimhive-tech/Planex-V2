@@ -18,15 +18,13 @@ export interface PartyRow {
 
 interface Props {
   open: boolean;
-  resource: "consultants" | "contractors" | "subcontractors";
-  label: string; // "consultant" | "contractor" | "sub-contractor" — modal copy
   companyId: string;
   item: PartyRow | null; // null = create
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function PartyFormModal({ open, resource, label, companyId, item, onClose, onSaved }: Props) {
+export function PartyFormModal({ open, companyId, item, onClose, onSaved }: Props) {
   const [form, setForm] = useState({ name: "", phone: "", email: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +33,10 @@ export function PartyFormModal({ open, resource, label, companyId, item, onClose
     if (!open) return;
     setForm({ name: item?.name ?? "", phone: item?.phone ?? "", email: item?.email ?? "" });
     setError(null);
+    // Also clear `submitting`: a successful save closes the modal without
+    // resetting it, so without this the button still read "Saving…" the next
+    // time the modal opened and looked permanently stuck.
+    setSubmitting(false);
   }, [open, item]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -46,15 +48,15 @@ export function PartyFormModal({ open, resource, label, companyId, item, onClose
     setError(null);
     try {
       if (item) {
-        await api.patch(`/${resource}/${item.id}/${companyQuery(companyId)}`, form);
+        await api.patch(`/parties/${item.id}/${companyQuery(companyId)}`, form);
       } else {
-        await api.post(`/${resource}/${companyQuery(companyId)}`, form);
+        await api.post(`/parties/${companyQuery(companyId)}`, form);
       }
       onSaved();
       onClose();
     } catch (err) {
       // Covers the duplicate-name refusal, which names the clash.
-      setError(err instanceof ApiError ? err.message : `Couldn't save this ${label}.`);
+      setError(err instanceof ApiError ? err.message : "Couldn't save this party.");
       setSubmitting(false);
     }
   }
@@ -62,7 +64,7 @@ export function PartyFormModal({ open, resource, label, companyId, item, onClose
   return (
     <Modal
       open={open}
-      title={item ? `Edit ${label}` : `New ${label}`}
+      title={item ? "Edit party" : "New party"}
       onClose={onClose}
       footer={
         <>

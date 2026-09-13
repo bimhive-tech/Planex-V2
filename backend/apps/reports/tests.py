@@ -4734,9 +4734,11 @@ class OwnerWordingTests(SimpleTestCase):
         self.assertEqual(default_config()["labels"]["info_client"], "Owner")
 
     def test_the_field_key_is_untouched(self):
-        """Only the wording changes: `client_name` on the model, `info_client`
-        as the label key, and /clients/ as the API path all stay, so nothing
-        that references them has to move."""
+        """Only the wording changes: `client_name` on the model and
+        `info_client` as the label key both stay, so nothing that references
+        them has to move. (The /clients/ endpoint this once also named is gone
+        for an unrelated reason -- register item B1 merged the four party
+        lists into one /parties/ roster.)"""
         self.assertIn("info_client", default_config()["labels"])
 
 

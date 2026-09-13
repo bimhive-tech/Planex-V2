@@ -2,22 +2,20 @@
 from rest_framework.routers import SimpleRouter
 
 from .views import (
-    ClientsViewSet,
-    ConsultantsViewSet,
-    ContractorsViewSet,
     CurrenciesViewSet,
+    PartiesViewSet,
     ProjectPrioritiesViewSet,
     ProjectTypesViewSet,
-    SubContractorsViewSet,
 )
 
 router = SimpleRouter(trailing_slash=True)
 router.register("currencies", CurrenciesViewSet, basename="currencies")
 router.register("project-types", ProjectTypesViewSet, basename="project-types")
 router.register("project-priorities", ProjectPrioritiesViewSet, basename="project-priorities")
-router.register("clients", ClientsViewSet, basename="clients")
-router.register("consultants", ConsultantsViewSet, basename="consultants")
-router.register("contractors", ContractorsViewSet, basename="contractors")
-router.register("subcontractors", SubContractorsViewSet, basename="subcontractors")
+# One roster for every role — the four separate /clients/, /consultants/,
+# /contractors/ and /subcontractors/ lists it replaces are gone, not aliased:
+# the frontend ships in the same container, so there is no older client to
+# keep serving.
+router.register("parties", PartiesViewSet, basename="parties")
 
 urlpatterns = router.urls
