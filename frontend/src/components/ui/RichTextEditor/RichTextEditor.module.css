@@ -108,3 +108,34 @@
 .surface li {
   margin: 2px 0;
 }
+
+/* A pasted table carries no styling of its own (the paste handler strips
+   Word's, and the PDF draws it with the report's own table style), so give it
+   visible structure here — otherwise it reads as loose text in the editor
+   while the PDF shows a real table. Scrolls rather than forcing the editor
+   wide when a pasted table has more columns than fit. */
+.surface table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: var(--space-3) 0;
+  max-width: 100%;
+}
+.surface th,
+.surface td {
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  text-align: start;
+  vertical-align: top;
+}
+/* The renderer takes the first row as the header whether or not the source
+   marked it up as one — show that here too, so the editor isn't the only
+   place the table looks different. */
+.surface tr:first-child td,
+.surface th {
+  background: var(--bg-canvas);
+  font-weight: 600;
+}
+.surface table p {
+  margin: 0;
+}

@@ -7,6 +7,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
 
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { cleanPastedHtml } from "@/lib/pasteHtml";
 import styles from "./RichTextEditor.module.css";
 
 interface Props {
@@ -88,6 +89,23 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
     },
   }), []);
 
+  // Paste the clipboard's own HTML rather than letting the browser drop it in
+  // raw: a table copied out of Word or Excel keeps its rows and columns
+  // (previously it flattened to one paragraph per cell), and Word's <style>
+  // blocks, mso-* declarations and class attributes are dropped here instead
+  // of being stored, shown in the editor, and then silently discarded again by
+  // the backend sanitizer -- which made the editor disagree with the PDF.
+  // A clipboard with no HTML flavour is left to the browser's own handling.
+  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    const html = e.clipboardData.getData("text/html");
+    if (!html) return;
+    const clean = cleanPastedHtml(html);
+    if (!clean) return;
+    e.preventDefault();
+    document.execCommand("insertHTML", false, clean);
+    emit();
+  }
+
   // Alignment is applied directly as a style on the affected block(s) rather than
   // via execCommand("justify…"): the browser otherwise puts text-align on the
   // contentEditable root (where it's lost from innerHTML), so it would never
@@ -161,6 +179,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
         data-placeholder={placeholder}
         onInput={emit}
         onBlur={emit}
+        onPaste={handlePaste}
       />
     </div>
   );

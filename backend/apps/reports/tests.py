@@ -150,6 +150,114 @@ class RichTextTests(SimpleTestCase):
         flow = html_to_flowables(html, cfg, {}, ctx=_full_ctx(), scope={"item": None}, avail_width=400)
         self.assertEqual(flow, [])
 
+    # --- G1: a table pasted in from Word or Excel ---------------------------
+    #
+    # The clipboard's text/html flavour carries real table markup. Before this,
+    # `table`/`tr`/`td` weren't in the kept set, so the sanitizer unwrapped them
+    # and a 3x3 table was stored as nine stacked paragraphs -- every column
+    # relationship gone, and nothing in the PDF resembling a table.
+
+    WORD_TABLE = (
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office"><head>'
+        "<style><!-- .MsoNormal {margin:0} --></style></head><body>"
+        "<table class=MsoTableGrid border=1 style='border-collapse:collapse'>"
+        "<tr><td><p class=MsoNormal><b>Activity</b><o:p></o:p></p></td>"
+        "<td><p class=MsoNormal><b>Planned</b></p></td></tr>"
+        "<tr><td><p class=MsoNormal>Excavation</p></td>"
+        "<td><p class=MsoNormal>100%</p></td></tr>"
+        "</table></body></html>"
+    )
+
+    def test_sanitize_keeps_a_pasted_tables_structure(self):
+        from .richtext import sanitize_html
+
+        out = sanitize_html(self.WORD_TABLE)
+        self.assertIn("<table>", out)
+        self.assertEqual(out.count("<tr>"), 2)
+        self.assertEqual(out.count("<td>"), 4)
+        # Word's own baggage never reaches storage.
+        self.assertNotIn("MsoNormal", out)
+        self.assertNotIn("<o:p>", out)
+        self.assertNotIn("border-collapse", out)
+
+    def test_a_pasted_table_renders_as_a_table_not_a_stack_of_paragraphs(self):
+        from reportlab.platypus import Table
+
+        from .richtext import html_to_flowables, sanitize_html
+
+        cfg = default_config()
+        flow = html_to_flowables(sanitize_html(self.WORD_TABLE), cfg, {}, avail_width=400)
+        self.assertEqual(len(flow), 1)
+        self.assertIsInstance(flow[0], Table)
+
+    def test_a_pasted_table_renders_without_report_context(self):
+        """It draws through resolve_table's `custom` branch, which reads its
+        cells out of the spec rather than from ctx -- so unlike an embed, a
+        pasted table can't vanish just because a caller had no context."""
+        from reportlab.platypus import Table
+
+        from .richtext import html_to_flowables, sanitize_html
+
+        flow = html_to_flowables(sanitize_html(self.WORD_TABLE), default_config(), {})
+        self.assertEqual([type(f).__name__ for f in flow], [Table.__name__])
+
+    def test_a_pasted_tables_cells_survive_wordss_per_cell_paragraphs(self):
+        from .richtext import _DOM, _table_grid, sanitize_html
+
+        dom = _DOM()
+        dom.feed(sanitize_html(self.WORD_TABLE))
+        table = next(n for n in dom.root.children if n.tag == "table")
+        header, rows = _table_grid(table)
+        self.assertEqual(header, ["Activity", "Planned"])
+        self.assertEqual(rows, [["Excavation", "100%"]])
+
+    def test_a_pasted_tables_spans_keep_the_columns_lined_up(self):
+        """A merged cell must not shift everything under it one column left."""
+        from .richtext import _DOM, _table_grid, sanitize_html
+
+        html = ('<table>'
+                '<tr><th colspan="2">Progress</th><th rowspan="2">Note</th></tr>'
+                '<tr><td>Planned</td><td>Actual</td></tr>'
+                '<tr><td>80%</td><td>62%</td><td>behind</td></tr></table>')
+        dom = _DOM()
+        dom.feed(sanitize_html(html))
+        header, rows = _table_grid(next(n for n in dom.root.children if n.tag == "table"))
+        self.assertEqual(header, ["Progress", "", "Note"])
+        # "Note" spans down, so its column is held open rather than filled by
+        # the next row's first cell.
+        self.assertEqual(rows, [["Planned", "Actual", ""], ["80%", "62%", "behind"]])
+
+    def test_a_table_with_no_cells_is_dropped_rather_than_drawn_empty(self):
+        from .richtext import html_to_flowables, sanitize_html
+
+        flow = html_to_flowables(sanitize_html("<table><tbody></tbody></table>"),
+                                 default_config(), {}, avail_width=400)
+        self.assertEqual(flow, [])
+
+    def test_a_pasted_table_reads_rows_through_thead_and_tbody(self):
+        """Excel and Google Docs wrap rows; Word does not. Same grid either way."""
+        from .richtext import _DOM, _table_grid, sanitize_html
+
+        html = ("<table><thead><tr><td>A</td><td>B</td></tr></thead>"
+                "<tbody><tr><td>1</td><td>2</td></tr></tbody></table>")
+        dom = _DOM()
+        dom.feed(sanitize_html(html))
+        header, rows = _table_grid(next(n for n in dom.root.children if n.tag == "table"))
+        self.assertEqual((header, rows), (["A", "B"], [["1", "2"]]))
+
+    def test_a_ragged_pasted_table_is_padded_to_one_width(self):
+        """reportlab raises on rows of differing length, so a short row has to
+        be filled out rather than passed through."""
+        from reportlab.platypus import Table
+
+        from .richtext import html_to_flowables, sanitize_html
+
+        html = ("<table><tr><td>A</td><td>B</td><td>C</td></tr>"
+                "<tr><td>1</td></tr></table>")
+        flow = html_to_flowables(sanitize_html(html), default_config(), {}, avail_width=400)
+        self.assertEqual(len(flow), 1)
+        self.assertIsInstance(flow[0], Table)
+
     def test_sanitize_layout_html_cleans_a_description_elements_html_prop(self):
         """A description element's rich text is authored per-element now
         (props.html), not one shared report-wide field — it still has to go

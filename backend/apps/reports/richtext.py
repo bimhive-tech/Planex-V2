@@ -37,7 +37,13 @@ from .pdf_canvas import resolve_chart, resolve_table
 _INLINE = {"b", "strong", "i", "em", "u", "span", "font"}
 _BLOCK = {"p", "div", "li"}
 _LIST = {"ul", "ol"}
-_KEEP = _INLINE | _BLOCK | _LIST | {"br"}
+# A table pasted in from Word or Excel arrives as real table markup on the
+# clipboard's text/html flavour. Keeping the structure is the whole point:
+# unwrapped, a 3x3 table became nine stacked paragraphs with every column
+# relationship gone.
+_CELL = {"td", "th"}
+_TABLE = {"table", "thead", "tbody", "tfoot", "tr"} | _CELL
+_KEEP = _INLINE | _BLOCK | _LIST | _TABLE | {"br"}
 # Tags whose contents are discarded wholesale (never just unwrapped).
 _DROP = {"script", "style", "head", "title", "noscript", "iframe", "object", "embed"}
 # A `<div data-embed="...">` in one of these carries a self-contained JSON spec
@@ -79,6 +85,13 @@ class _DOM(HTMLParser):
         # usually balanced, but be forgiving about <li>/<p> without a close tag).
         if tag in _BLOCK | _LIST and top in _BLOCK:
             self.stack.pop()
+        # Same forgiveness for table structure, which Word and Excel both emit
+        # with cells and rows left open.
+        if tag in _CELL and top in _CELL:
+            self.stack.pop()
+        elif tag == "tr":
+            while self.stack[-1].tag in _CELL | {"tr"}:
+                self.stack.pop()
         node = _Node(tag, dict(attrs))
         self.stack[-1].children.append(node)
         if tag not in self.VOID:
@@ -313,11 +326,105 @@ def _resolve_embed(node, cfg, ctx, scope, avail_width):
     return None
 
 
+def _cell_text(cell):
+    """A cell's visible text, as one line.
+
+    Word wraps every cell's contents in its own <p>, so reading the runs and
+    joining the lines is what turns `<td><p>Excavation</p></td>` back into
+    "Excavation" rather than a paragraph break inside a table cell."""
+    runs = []
+    _collect_runs(cell, {}, runs)
+    lines = [" ".join(text for text, _ in line).strip() for line in _split_lines(runs)]
+    return " ".join(ln for ln in lines if ln).strip()
+
+
+def _rows_of(node, out):
+    """Every <tr> under a table, in document order, through whatever
+    thead/tbody/tfoot wrappers the source happened to use."""
+    for child in node.children:
+        if child.tag == "tr":
+            out.append(child)
+        elif child.tag in {"thead", "tbody", "tfoot"}:
+            _rows_of(child, out)
+    return out
+
+
+def _table_grid(node):
+    """A pasted table as (header, rows) of plain strings, or None if it holds
+    no cells at all.
+
+    Spans are expanded into real cells -- a colspan=2 heading becomes the
+    heading plus one blank -- so every row is the same width and the columns
+    below a merged cell still line up. A rowspan reserves its column on the
+    rows it covers rather than letting them shift left; its text stays on the
+    row it started on, which is where a reader looks for it.
+
+    The first row is the header. Word and Excel both emit a plain <td> for a
+    heading row unless the source explicitly marked one, so requiring <th>
+    would leave almost every real paste headerless -- and a table drawn with
+    no header row is the one shape `custom` tables can't take."""
+    grid, spans = [], {}  # spans: column -> rows still owed to a rowspan
+    for tr in _rows_of(node, []):
+        row, col = [], 0
+        for cell in tr.children:
+            if cell.tag not in _CELL:
+                continue
+            while spans.get(col, 0) > 0:  # a cell above still occupies this column
+                spans[col] -= 1
+                row.append("")
+                col += 1
+            span = int(cell.attrs.get("colspan") or 1)
+            down = int(cell.attrs.get("rowspan") or 1)
+            text = _cell_text(cell)
+            for i in range(span):
+                row.append(text if i == 0 else "")
+                if down > 1:
+                    spans[col] = down - 1
+                col += 1
+        while spans.get(col, 0) > 0:  # trailing columns held by a rowspan
+            spans[col] -= 1
+            row.append("")
+            col += 1
+        if row:
+            grid.append(row)
+    if not grid:
+        return None
+    width = max(len(r) for r in grid)
+    for r in grid:
+        r.extend([""] * (width - len(r)))
+    return grid[0], grid[1:]
+
+
+def _render_table(node, cfg, ctx, scope, avail_width):
+    """A pasted table -> the same flowable a "custom" table element draws.
+
+    Routed through resolve_table rather than building a table here, for the
+    same reason an inline embed is (see _resolve_embed): a table pasted into
+    the description then can't render a different look than one built in the
+    Properties panel. The custom branch reads its cells out of `style` and
+    never touches `ctx`, so this survives a caller that has no report context."""
+    grid = _table_grid(node)
+    if grid is None:
+        return None
+    header, rows = grid
+    return resolve_table(
+        "custom", cfg, ctx or {}, scope if scope is not None else {"item": None},
+        avail_width=avail_width,
+        style={"custom_data": {"columns": header, "rows": rows}},
+    )
+
+
 def _render_block(node, cfg, base_size, default_color, flow, ctx=None, scope=None, avail_width=None):
     """Emit flowable(s) for one top-level node (block, list, embed, or stray
     inline)."""
     if node.tag == "div" and node.attrs.get("data-embed") in _EMBED_KINDS:
         flowable = _resolve_embed(node, cfg, ctx, scope, avail_width)
+        if flowable is not None:
+            flow.append(flowable)
+        return
+
+    if node.tag == "table":
+        flowable = _render_table(node, cfg, ctx, scope, avail_width)
         if flowable is not None:
             flow.append(flowable)
         return
@@ -387,6 +494,13 @@ def _safe_attrs(tag, attrs):
         out["data-embed"] = attrs["data-embed"]
         out["data-spec"] = attrs.get("data-spec") or "{}"
         return out
+    if tag in _CELL:
+        # Only the spans, and only as digits: they decide which column a cell
+        # lands in, which is the one thing a pasted table must not lose.
+        for key in ("colspan", "rowspan"):
+            raw = str(attrs.get(key, "") or "").strip()
+            if raw.isdigit() and 1 <= int(raw) <= 100:
+                out[key] = raw
     if tag == "font":
         if _clean_color(attrs.get("color", "")):
             out["color"] = _clean_color(attrs["color"])
