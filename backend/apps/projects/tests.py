@@ -145,6 +145,76 @@ class P6ImportTests(TestCase):
         self.assertEqual(round(result["overall_progress"]), 75)  # equal weight → (50+100)/2
 
 
+from unittest import skipUnless
+
+from django.db import connection
+
+
+class DisplayCurrencyTests(TestCase):
+    """C6 — an amount with no currency of its own prints in the one the
+    project's money is actually held in, not the stale shared field."""
+
+    def setUp(self):
+        from apps.accounts.models import Company
+
+        self.company = Company.objects.create(name="Acme")
+
+    def _project(self, **kwargs):
+        from decimal import Decimal
+
+        defaults = dict(company=self.company, name=f"P{Project.objects.count()}",
+                        project_type=Project.ProjectType.COMMERCIAL)
+        defaults.update(kwargs)
+        return Project.objects.create(**defaults)
+
+    def test_budget_currency_beats_a_stale_shared_currency(self):
+        """The Cairo airport case: created when the company default was AED,
+        then priced in EGP through the only currency control the form shows."""
+        from decimal import Decimal
+
+        project = self._project(currency="AED", budget=Decimal("100"), budget_currency="EGP")
+        self.assertEqual(project.display_currency, "EGP")
+
+    def test_a_chosen_shared_currency_is_never_overridden(self):
+        """The reverse of the Cairo case, and just as real: two live projects
+        are priced in Egyptian pounds through the shared field alone, with the
+        per-field pickers left at the default. Reading the money there would
+        relabel them AED."""
+        from decimal import Decimal
+
+        project = self._project(currency="LE", budget=Decimal("100"), budget_currency="AED")
+        self.assertEqual(project.display_currency, "LE")
+
+    def test_falls_through_to_the_first_field_actually_carrying_an_amount(self):
+        """A project with no budget but a contract value is priced by the
+        contract — an unset field's currency says nothing about the project."""
+        from decimal import Decimal
+
+        project = self._project(currency="AED", budget=None, budget_currency="USD",
+                                contract_value=Decimal("250"), contract_value_currency="EGP")
+        # budget_currency says USD but there is no budget, so it says nothing.
+        self.assertEqual(project.display_currency, "EGP")
+
+    def test_shared_currency_is_the_last_resort(self):
+        """Nothing priced at all — there is nothing better to go on."""
+        project = self._project(currency="SAR")
+        self.assertEqual(project.display_currency, "SAR")
+
+    @skipUnless(connection.vendor == "postgresql",
+                "build_report_context reads dated progress via DISTINCT ON")
+    def test_the_report_prints_the_currency_the_money_is_in(self):
+        """The whole point: ctx carries the derived code, so the invoices table,
+        the Part amount and a chart's axis unit all agree with the figures."""
+        from decimal import Decimal
+
+        from apps.reports.models import Report
+        from apps.reports.services import build_report_context
+
+        project = self._project(currency="AED", budget=Decimal("1000"), budget_currency="EGP")
+        report = Report.objects.create(company=self.company, project=project, title="R")
+        self.assertEqual(build_report_context(report)["project"]["currency"], "EGP")
+
+
 class P6ScheduleImportTests(TestCase):
     """`import_workbook` prefers the real P6 schedule template (Activity ID/Name/
     Start/Finish/% Complete, WBS via leading-space indentation — no outline

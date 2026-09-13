@@ -6,6 +6,10 @@ from django.db import models
 
 from apps.accounts.models import Company, TimestampedModel
 
+# The currency a project starts on before anyone chooses one. Named
+# because display_currency has to tell "never chosen" from "chosen".
+DEFAULT_CURRENCY = "AED"
+
 
 def source_workbook_key(instance, filename):
     """Private R2 key for a project's original imported tracker workbook, kept so
@@ -54,8 +58,8 @@ class Project(TimestampedModel):
     # currency and, say, an advance payment paid in another — auto-
     # converting them from one shared rate would show the wrong number, not
     # just the wrong label. See each field's own `_currency` companion.
-    currency = models.CharField(max_length=8, default="AED")
-    budget_currency = models.CharField(max_length=8, default="AED")
+    currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
+    budget_currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
 
     # Stakeholders (kept as fields now; a reusable Client entity comes later).
     client_name = models.CharField(max_length=180, blank=True)
@@ -85,23 +89,23 @@ class Project(TimestampedModel):
 
     # Contract KPIs surfaced on the Overview tab (matches the client's dashboard header).
     advance_payment = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    advance_payment_currency = models.CharField(max_length=8, default="AED")
+    advance_payment_currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
     eot_days = models.PositiveIntegerField(null=True, blank=True)  # extension of time granted, in days
     # Three distinct cost figures a report may need side by side: what was
     # signed (contract_value), what's approved after variations to date
     # (approved_value), and where it's projected to land (forecast_cost).
     # `budget` stays as the general-purpose figure other flows already use.
     contract_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    contract_value_currency = models.CharField(max_length=8, default="AED")
+    contract_value_currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
     # contract_value + the sum of all APPROVED cost Variations (CVOs) — kept in
     # sync automatically (apps.projects.services.resync_approved_value) rather
     # than hand-typed, so it can never disagree with the actual Variation log.
     # Not directly editable. Its currency always mirrors contract_value_currency
     # (a CVO amount has no currency of its own — see resync_approved_value).
     approved_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    approved_value_currency = models.CharField(max_length=8, default="AED")
+    approved_value_currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
     forecast_cost = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
-    forecast_cost_currency = models.CharField(max_length=8, default="AED")
+    forecast_cost_currency = models.CharField(max_length=8, default=DEFAULT_CURRENCY)
 
     # A real P6 schedule states its own actual AND planned % complete for the
     # whole project — Performance % Complete (earned value / budgeted cost) and
@@ -141,6 +145,47 @@ class Project(TimestampedModel):
 
     def __str__(self):
         return self.name
+
+    # The contract-KPI fields, in the order they answer "what is this project
+    # priced in" — budget first because it is the figure every project fills.
+    _CURRENCY_SOURCES = (
+        ("budget", "budget_currency"),
+        ("contract_value", "contract_value_currency"),
+        ("approved_value", "approved_value_currency"),
+        ("forecast_cost", "forecast_cost_currency"),
+        ("advance_payment", "advance_payment_currency"),
+    )
+
+    @property
+    def display_currency(self) -> str:
+        """The currency this project's money is actually held in — what to print
+        beside an amount that carries no currency of its own (cash flow,
+        invoices, the Part amount, a chart's axis unit).
+
+        Read from the first KPI field that actually has an amount rather than
+        from `currency`, because `currency` cannot be trusted: the project form
+        sets it once at creation, from the company default, and never shows an
+        input for it. Every currency a user can actually see and change is a
+        per-field one, so the moment someone picks EGP for the budget of a
+        project created when the default was AED, the two disagree for good —
+        and the report prints AED over EGP figures, which is how the Cairo
+        airport project reads today.
+
+        Falls back to `currency` for a project carrying no amounts at all,
+        which is the only case where there is nothing better to go on."""
+        # A project whose shared currency is anything but the default had one
+        # chosen for it, and that choice stands — two live projects are priced
+        # in Egyptian pounds exactly this way, with the per-field pickers left
+        # untouched at the default. Only a project that has never had one
+        # chosen falls through to what its money says.
+        if self.currency and self.currency != DEFAULT_CURRENCY:
+            return self.currency
+        for amount_field, code_field in self._CURRENCY_SOURCES:
+            if getattr(self, amount_field) is not None:
+                code = getattr(self, code_field)
+                if code:
+                    return code
+        return self.currency
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)

@@ -409,7 +409,9 @@ def _dashboard_section(cfg, styles, ctx, labels, rtl, w, fig):
     info_rows = [
         (labels["info_client"], p["client"]), (labels["info_consultant"], p["consultant"]),
         (labels["info_contractor"], p["contractor"]),
-        (labels["info_budget"], f"{p['budget']:,.0f} {p['currency']}" if p["budget"] else ""),
+        # The budget carries its own currency; the shared one is for amounts
+        # that don't (see Project.display_currency).
+        (labels["info_budget"], format_money(p.get("budget"), p.get("budget_currency"))),
         (labels["info_finish"], _fmt_date(p["planned_finish"])),
     ]
     if ctx.get("duration"):

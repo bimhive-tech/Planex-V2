@@ -1414,7 +1414,9 @@ def build_report_context(report):
             "part_completion_revised": latest_part.completion_revised if latest_part else None,
             "part_forecast_completion": latest_part.forecast_completion if latest_part else None,
             "part_delay_days": latest_part.delay_days if latest_part else None,
-            "currency": project.currency,
+            # What an amount with no currency of its own prints in — see
+            # Project.display_currency for why the stored field is not it.
+            "currency": project.display_currency,
             "notes": project.notes,
         },
         "overall": overall,

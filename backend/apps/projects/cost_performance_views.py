@@ -46,7 +46,7 @@ class ProjectCostPerformanceView(APIView):
             budgeted=Sum("budgeted_cost"), earned=Sum("earned_value_cost"), variance=Sum("schedule_variance"),
         )
         return Response({
-            "currency": project.currency or "",
+            "currency": project.display_currency or "",
             "budgeted_total_cost": str(agg["budgeted"]) if agg["budgeted"] is not None else None,
             "earned_value_cost": str(agg["earned"]) if agg["earned"] is not None else None,
             "schedule_variance": str(agg["variance"]) if agg["variance"] is not None else None,

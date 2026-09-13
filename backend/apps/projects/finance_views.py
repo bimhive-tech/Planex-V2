@@ -57,7 +57,7 @@ class CashFlowView(APIView):
     def _payload(self, project):
         return {
             "entries": CashFlowEntrySerializer(project.cashflow_entries.all(), many=True).data,
-            "currency": project.currency or "",
+            "currency": project.display_currency or "",
         }
 
     def get(self, request, project_id):
