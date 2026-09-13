@@ -161,10 +161,17 @@ class P6ScheduleImportTests(TestCase):
               "Activity % Complete", "Performance % Complete", "Schedule % Complete",
               "Budgeted Material Cost", "Earned Value Cost", "Schedule Variance Index"]
 
-    def _rows(self, project_performance_pct=None, project_schedule_pct=None):
+    def _rows(self, project_performance_pct=None, project_schedule_pct=None, complete=False):
+        """`complete=True` earns every leaf in full — the same schedule a month
+        later. Needed because progress is now earned value over budget, a ratio
+        that is invariant under duplication: re-importing the identical rows
+        leaves it unchanged, so only genuinely different leaf costs can show
+        that one batch is being read rather than two blended together."""
         import datetime
 
         d = datetime.date
+        ev = (lambda bac: bac) if complete else (lambda bac: None)
+        pct = 1 if complete else None
         return [
             ["Tower Project", None, 100, 10, 90, d(2026, 1, 1), d(2026, 6, 1), 0, None,
              project_performance_pct, project_schedule_pct, 20000000, 0, 0],
@@ -175,8 +182,11 @@ class P6ScheduleImportTests(TestCase):
             ["    Part A", None, 100, 10, 90, d(2026, 2, 1), d(2026, 6, 1), 0, None, 0, 0, 20000000, 0, 0],
             ["      Civil Works", None, 50, 10, 40, d(2026, 2, 1), d(2026, 4, 1), 0, None, 0, 0, 10000000, 0, 0],
             ["        Substructure", None, 50, 10, 40, d(2026, 2, 1), d(2026, 4, 1), 0, None, 0, 0, 10000000, 0, 0],
-            ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0, 0.5, 0.5, 0.5, 1000000, 500000, 0],
-            ["CN.02", "Framing", 30, 0, 30, d(2026, 3, 1), d(2026, 4, 1), 12, 0, 0, 0, 9000000, 0, 0],
+            ["CN.01", "Foundation", 20, 10, 10, "1-Feb-26 A", "20-Feb-26*", 0,
+             pct if pct is not None else 0.5, pct if pct is not None else 0.5,
+             pct if pct is not None else 0.5, 1000000, ev(1000000) or 500000, 0],
+            ["CN.02", "Framing", 30, 0, 30, d(2026, 3, 1), d(2026, 4, 1), 12,
+             pct or 0, pct or 0, pct or 0, 9000000, ev(9000000) or 0, 0],
             # A second Area under the same Zone — the grid's second column.
             ["      Arch Works", None, 50, 50, 0, d(2026, 4, 1), d(2026, 6, 1), 3, None, 0, 0, 10000000, 0, 0],
             ["        Finishes", None, 50, 50, 0, d(2026, 4, 1), d(2026, 6, 1), 3, None, 0, 0, 10000000, 0, 0],
@@ -185,7 +195,8 @@ class P6ScheduleImportTests(TestCase):
             ["      MEP Works", None, 0, 0, 0, d(2026, 5, 1), d(2026, 6, 1), 9, None, 0, 0, 0, 0, 0],
         ]
 
-    def _workbook(self, drop_cost_columns=False, project_performance_pct=None, project_schedule_pct=None):
+    def _workbook(self, drop_cost_columns=False, project_performance_pct=None,
+                  project_schedule_pct=None, complete=False):
         import io
 
         import openpyxl
@@ -195,7 +206,7 @@ class P6ScheduleImportTests(TestCase):
         ws.title = "Sheet1"
         keep = slice(0, 11) if drop_cost_columns else slice(None)
         ws.append(self.HEADER[keep])
-        for row in self._rows(project_performance_pct, project_schedule_pct):
+        for row in self._rows(project_performance_pct, project_schedule_pct, complete):
             ws.append(row[keep])
         buf = io.BytesIO()
         wb.save(buf)
@@ -369,11 +380,10 @@ class P6ScheduleImportTests(TestCase):
         import_workbook(project, self._workbook(), source="jan.xlsx")
         self.assertEqual(project_overall_progress(project), 52.5)
 
-        # A fully-complete re-import — if the old batch's activities leaked
-        # into the aggregate too, this would land somewhere between 52.5 and
-        # 100, not exactly 100.
-        import_workbook(project, self._workbook(project_performance_pct=1.0, project_schedule_pct=1.0),
-                        source="feb.xlsx")
+        # A fully-earned re-import — if the old batch's activities leaked into
+        # the aggregate too, this would land somewhere between 52.5 and 100,
+        # not exactly 100.
+        import_workbook(project, self._workbook(complete=True), source="feb.xlsx")
         self.assertEqual(project_overall_progress(project), 100.0)
 
     def test_zone_children_become_grid_columns(self):
@@ -467,11 +477,15 @@ class P6ScheduleImportTests(TestCase):
         finishes = ProjectScope.objects.get(project=project, name="Finishes")
         self.assertEqual(scope_progress_map(project)[str(finishes.id)], 100.0)
 
-    def test_uses_the_files_own_overall_progress_when_present(self):
-        """A real P6 export states its own Performance % Complete for the whole
-        project. Prefer that over our weighted approximation of it — deliberately
-        picking a value (90%) that disagrees with what cost-weighting would say
-        (52.5%) proves the override wins rather than coincidentally matching."""
+    def test_earned_value_wins_over_the_files_stated_overall_progress(self):
+        """A P6 export states a project-row Performance % Complete, but that is
+        only a summary of the same earned value the activity rows carry — so the
+        money decides. The fixture states 90% against leaves earning 10.5M of a
+        20M budget; progress reads 52.5%, the figure that reconciles with the
+        cost columns a planner can check cell by cell.
+
+        The stated percentage is still recorded: it is what a source carrying no
+        cost at all falls back to (see services.project_overall_progress)."""
         from apps.accounts.models import Company
         from .imports import import_workbook
 
@@ -479,15 +493,15 @@ class P6ScheduleImportTests(TestCase):
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
         result = import_workbook(project, self._workbook(project_performance_pct=0.9), source="P6.xlsx")
 
-        self.assertEqual(result["overall_progress"], 90.0)
-        self.assertEqual(result["overall_progress_source"], "imported")
+        self.assertEqual(result["overall_progress"], 52.5)
+        self.assertEqual(result["overall_progress_source"], "earned_value")
         project.refresh_from_db()
         self.assertEqual(float(project.imported_progress_percent), 90.0)
 
-    def test_overall_progress_falls_back_to_computed_without_a_stated_figure(self):
-        """When the file has no project-level Performance % Complete (this
-        fixture's default), Planex computes its own weighted figure exactly as
-        before — the override is opt-in per file, not assumed."""
+    def test_earned_value_needs_no_stated_figure(self):
+        """The cost columns are enough on their own: with no project-level
+        Performance % Complete anywhere in the file, progress is still the same
+        52.5% the earned value gives, and nothing is recorded to fall back to."""
         from apps.accounts.models import Company
         from .imports import import_workbook
 
@@ -496,9 +510,28 @@ class P6ScheduleImportTests(TestCase):
         result = import_workbook(project, self._workbook(), source="P6.xlsx")
 
         self.assertEqual(result["overall_progress"], 52.5)
-        self.assertEqual(result["overall_progress_source"], "computed")
+        self.assertEqual(result["overall_progress_source"], "earned_value")
         project.refresh_from_db()
         self.assertIsNone(project.imported_progress_percent)
+
+    def test_a_source_with_no_cost_columns_still_reports_progress(self):
+        """Earned value needs a budget to divide by, and a zone tracker carries
+        none — those activities have null cost by design. Rather than reporting
+        such a project as having made no progress, it keeps the weighted
+        percent-complete roll-up (here duration-weighted, the basis _weight_key
+        picks when a file has no cost at all)."""
+        from apps.accounts.models import Company
+        from .imports import import_workbook
+        from .services import project_earned_progress, project_overall_progress
+
+        company = Company.objects.create(name="Acme")
+        project = Project.objects.create(company=company, name="Tower", project_type="commercial")
+        result = import_workbook(project, self._workbook(drop_cost_columns=True), source="P6.xlsx")
+
+        self.assertIsNone(project_earned_progress(project))
+        self.assertEqual(result["overall_progress_source"], "computed")
+        self.assertEqual(result["overall_progress"], project_overall_progress(project))
+        self.assertGreater(result["overall_progress"], 0)
 
     def test_as_of_view_ignores_the_stated_overall_progress(self):
         """The stated figure is a single point in time (import time) -- an

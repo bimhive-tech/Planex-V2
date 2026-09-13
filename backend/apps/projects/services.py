@@ -142,6 +142,15 @@ def project_overall_progress(project, progress=None, schedule_import=None) -> fl
     latest = latest_schedule_import(project)
     if schedule_import is None:
         schedule_import = latest
+    # Earned value is the reported figure wherever the schedule carries cost
+    # (see project_earned_progress). It deliberately ignores `progress`: field
+    # submissions and dated entries still flow through the review chain and
+    # still update Activity.progress_percent, they just no longer move the
+    # headline — one number on the page, reconcilable against the planners'
+    # own dashboard cell by cell.
+    earned = project_earned_progress(project, schedule_import)
+    if earned is not None:
+        return earned
     if progress is None and schedule_import == latest and project.imported_progress_percent is not None:
         return float(project.imported_progress_percent)
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
@@ -156,6 +165,84 @@ def project_overall_progress(project, progress=None, schedule_import=None) -> fl
         ).values_list("id", "weight", "progress_percent"):
             psum += float(w) * (progress[str(aid)] - float(cur))
     return round(psum / wsum, 1)
+
+
+def project_earned_progress(project, schedule_import=None):
+    """Actual progress as EARNED VALUE: sum(earned_value_cost) / sum(budgeted_cost).
+
+    This is what a P6 export means by "Performance % Complete" — P6 derives
+    earned value as that percentage times the activity's budget, so dividing
+    back out recovers it exactly, whatever earned-value technique the planner
+    configured on the WBS. Verified against the Cairo Airport export: the
+    file states 0.5955 and these sums give 59.5489.
+
+    Summed, NOT averaged per activity: a cost-weighted mean of each row's own
+    EV/BAC collapses to exactly this ratio, so a scope, a phase and the whole
+    project all agree by construction rather than by coincidence. Rows with a
+    zero budget (milestones, level-of-effort) contribute nothing to either
+    sum and drop out on their own.
+
+    `None` — not 0.0 — when the batch carries no cost columns at all, which is
+    every zone-tracker import: those fields are null by design, and callers
+    fall back to the weight-based roll-up rather than reporting a project as
+    having made no progress.
+    """
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    agg = activities.exclude(budgeted_cost=None).aggregate(
+        bac=Sum("budgeted_cost"), ev=Sum("earned_value_cost"))
+    bac = agg["bac"] or 0
+    if not bac:
+        return None
+    return float((agg["ev"] or 0) / bac * 100)
+
+
+def scope_earned_progress_map(project, schedule_import=None):
+    """{scope_id -> EV/BAC over that scope's whole subtree}, or None when the
+    batch carries no cost at all — same rule and same reasoning as
+    project_earned_progress, one level down.
+
+    A scope whose subtree holds only zero-budget rows has no meaningful
+    percentage, so it is left at 0.0 rather than dividing by zero."""
+    if schedule_import is None:
+        schedule_import = latest_schedule_import(project)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    direct_bac, direct_ev = {}, {}
+    seen_cost = False
+    for sid, bac, ev in activities.exclude(budgeted_cost=None).values_list(
+            "scope_id", "budgeted_cost", "earned_value_cost"):
+        seen_cost = True
+        direct_bac[sid] = direct_bac.get(sid, 0.0) + float(bac)
+        direct_ev[sid] = direct_ev.get(sid, 0.0) + float(ev or 0)
+    if not seen_cost:
+        return None
+
+    scopes = (project.scopes.filter(schedule_import=schedule_import)
+              if schedule_import else project.scopes.all())
+    children, all_ids, roots = {}, [], []
+    for sid, pid in scopes.values_list("id", "parent_id"):
+        all_ids.append(sid)
+        (roots if pid is None else children.setdefault(pid, [])).append(sid)
+
+    sub_bac, sub_ev = {}, {}
+
+    def agg(sid):
+        b, e = direct_bac.get(sid, 0.0), direct_ev.get(sid, 0.0)
+        for child in children.get(sid, []):
+            cb, ce = agg(child)
+            b += cb
+            e += ce
+        sub_bac[sid], sub_ev[sid] = b, e
+        return b, e
+
+    for r in roots:
+        agg(r)
+
+    return {str(sid): (sub_ev[sid] / sub_bac[sid] * 100 if sub_bac.get(sid) else 0.0)
+            for sid in all_ids}
 
 
 def _planned_at(project, on):
@@ -345,6 +432,11 @@ def scope_progress_map(project, progress=None, schedule_import=None) -> dict:
     resolved to latest when not given."""
     if schedule_import is None:
         schedule_import = latest_schedule_import(project)
+    # Same rule as project_overall_progress: earned value where the schedule
+    # has cost, so every level of the tree agrees with the project headline.
+    earned = scope_earned_progress_map(project, schedule_import)
+    if earned is not None:
+        return earned
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
     direct_w, direct_pw = {}, {}

@@ -355,7 +355,7 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
     from .models import ScheduleImport
-    from .services import project_overall_progress
+    from .services import project_earned_progress, project_overall_progress
 
     Scope = ProjectScope
     company = project.company
@@ -513,7 +513,13 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         "milestones": milestones,
         "activities": len(activities),
         "overall_progress": project_overall_progress(project, schedule_import=schedule_import),
-        "overall_progress_source": "imported" if project_pct is not None else "computed",
+        # Names where the figure above actually came from. "earned_value" is
+        # the normal answer for a cost-loaded export — the stated project-row
+        # percentage is only a summary of the same money, so the sums win and
+        # this must not claim otherwise (see services.project_earned_progress).
+        "overall_progress_source": (
+            "earned_value" if project_earned_progress(project, schedule_import) is not None
+            else "imported" if project_pct is not None else "computed"),
         "planned_progress": float(project_schedule_pct) if project_schedule_pct is not None else None,
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",
