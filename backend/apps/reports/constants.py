@@ -256,7 +256,6 @@ DEFAULT_CONFIG = {
         "col_this_month": "إنجاز هذا الشهر",
         "col_performance_factor": "معامل الأداء",
         "variance": "الانحراف",
-        "unit_millions": "بالمليون",
         "budget_planned_value": "القيمة المخططة",
         "budget_earned_value": "القيمة المكتسبة",
         "budget_remaining_value": "القيمة المتبقية",
@@ -291,6 +290,13 @@ DEFAULT_CONFIG = {
         "progress_report": "Project Progress Report",
         "duration_section": "Duration & Delay",
         "duration_days": "Project duration",
+        # The dashboard's Time Performance and Project Duration panels (F3).
+        "time_performance": "الأداء الزمني",
+        # The summary's two progress bar charts (F6): by place, and by trade.
+        "work_progress": "الإنجاز حسب التخصص",
+        "project_duration": "مدة المشروع والتأخير",
+        "time_elapsed": "المدة المنقضية",
+        "time_remaining": "المدة المتبقية",
         "delay_days": "Delay (days)",
         # Arabic like the rest of this dict — these three now print on the
         # duration pie itself (not just the legacy duration table), and the

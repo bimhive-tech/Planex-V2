@@ -76,10 +76,13 @@ export const TABLE_SOURCES = [
 export const CHART_SOURCES = [
   { value: "zone_progress", label: "Progress by zone" },
   { value: "area_progress", label: "Progress by area" },
+  { value: "work_progress", label: "Progress by phase / discipline" },
   { value: "scurve", label: "S-curve (planned vs actual)" },
   { value: "breakdown", label: "Completion breakdown" },
   { value: "spi", label: "SPI gauge (overall)" },
   { value: "duration", label: "Duration & delay" },
+  { value: "time_performance", label: "Time performance (elapsed vs remaining)" },
+  { value: "project_duration", label: "Project duration with delay" },
   { value: "cashflow_monthly", label: "Cash flow — monthly" },
   { value: "cashflow_cumulative", label: "Cash flow — cumulative" },
   { value: "invoice_status", label: "Invoice status (invoiced vs remaining)" },

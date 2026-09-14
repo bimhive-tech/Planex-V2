@@ -28,6 +28,8 @@ from .pdf_charts import (
     cashflow_chart,
     cashflow_curve,
     duration_pie,
+    project_duration_chart,
+    time_performance_chart,
     gantt_chart,
     invoice_status_chart,
     item_earned_pie,
@@ -1645,6 +1647,11 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
         if scope_zone_id:
             chart_ctx = {**ctx, "zones": [z for z in (ctx.get("zones") or []) if z.get("id") == scope_zone_id]}
         return planned_actual_chart(cfg, chart_ctx, w, labels, height=h)
+    if source == "work_progress":
+        # The same planned-vs-actual bars as zone_progress, fed per work group
+        # rather than per place — see services._work_rows.
+        return planned_actual_chart(cfg, {**ctx, "zones": ctx.get("work_progress") or []},
+                                    w, labels, height=h)
     if source == "area_progress":
         return area_progress_chart(cfg, ctx, w, labels, height=h)
     if source == "scurve":
@@ -1653,6 +1660,10 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
         return overall_donut(cfg, ctx, w, labels, height=h)
     if source == "duration":
         return duration_pie(cfg, ctx, w, labels, height=h)
+    if source == "time_performance":
+        return time_performance_chart(cfg, ctx, w, labels, height=h)
+    if source == "project_duration":
+        return project_duration_chart(cfg, ctx, w, labels, height=h)
     if source == "cashflow_monthly":
         return cashflow_chart(cfg, ctx.get("cashflow") or [], w, labels, height=h)
     if source == "cashflow_cumulative":
@@ -1676,7 +1687,8 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
         # filter can't drift out of sync with an i18n'd `type` string.
         wanted = "material" if source == "submittals_material" else "shop_drawing"
         rows = [r for r in (ctx.get("submittals") or {}).get("rows") or [] if r.get("type_key") == wanted]
-        return submittals_breakdown_chart(cfg, rows, w, labels, height=h)
+        counts = ((ctx.get("dashboard") or {}).get("submittals") or {}).get(wanted)
+        return submittals_breakdown_chart(cfg, rows, w, labels, height=h, counts=counts)
     return None
 
 

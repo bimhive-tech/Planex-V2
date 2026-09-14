@@ -351,6 +351,11 @@ class DashboardImportTests(TestCase):
             ws.append([None, None, "رقم المستخلص", "اجمالي الأعمال"])
             ws.append([None, "Item A", "مستخلص جاري (1)", 100.0])
             ws.append([None, "الاجمالي", None, 100.0])
+        if "dashboard" in sheets:
+            # The summary panels the report charts (register F3-F5).
+            ws = wb.create_sheet("Dashboard")
+            ws.append(["PROJECT DURATION", 1380])
+            ws.append(["COMPLETED DURATION", 1313])
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
@@ -358,14 +363,16 @@ class DashboardImportTests(TestCase):
 
     def test_one_upload_brings_in_every_part(self):
         from .finance_imports import import_dashboard
-        from .models import CashFlowEntry, Invoice, ProgressCurvePoint
+        from .models import CashFlowEntry, DashboardPanels, Invoice, ProgressCurvePoint
 
-        result = import_dashboard(self.project, self._upload("cashflow", "curve", "invoices"))
-        self.assertEqual(sorted(result["imported"]), ["cashflow", "invoices"])
+        result = import_dashboard(self.project, self._upload("cashflow", "curve", "invoices", "dashboard"))
+        self.assertEqual(sorted(result["imported"]), ["cashflow", "invoices", "panels"])
         self.assertEqual(result["skipped"], {})
         self.assertEqual(CashFlowEntry.objects.filter(project=self.project).count(), 4)
         self.assertEqual(ProgressCurvePoint.objects.filter(project=self.project).count(), 3)
         self.assertEqual(Invoice.objects.filter(project=self.project).count(), 1)
+        self.assertEqual(DashboardPanels.objects.get(project=self.project).data["duration"],
+                         {"project_days": 1380.0, "completed_days": 1313.0})
 
     def test_a_partial_workbook_imports_what_it_has(self):
         """A missing sheet is information, not a failure — reporting it as one
@@ -375,7 +382,7 @@ class DashboardImportTests(TestCase):
 
         result = import_dashboard(self.project, self._upload("cashflow"))
         self.assertEqual(list(result["imported"]), ["cashflow"])
-        self.assertEqual(list(result["skipped"]), ["invoices"])
+        self.assertEqual(list(result["skipped"]), ["invoices", "panels"])
         self.assertEqual(CashFlowEntry.objects.filter(project=self.project).count(), 4)
         self.assertEqual(Invoice.objects.filter(project=self.project).count(), 0)
 
@@ -384,7 +391,7 @@ class DashboardImportTests(TestCase):
 
         result = import_dashboard(self.project, self._upload())
         self.assertEqual(result["imported"], {})
-        self.assertEqual(sorted(result["skipped"]), ["cashflow", "invoices"])
+        self.assertEqual(sorted(result["skipped"]), ["cashflow", "invoices", "panels"])
 
     def test_the_endpoint_accepts_one_file_for_all_of_it(self):
         from apps.accounts.constants import COMPANY_ADMIN_PERMISSIONS, SeededRole

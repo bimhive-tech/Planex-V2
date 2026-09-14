@@ -293,6 +293,14 @@ export interface PartScope {
 /** One past dashboard-workbook upload (Finances → Imports). A log row, not a
  * retained batch: the rows a workbook wrote are replaced or upserted by the
  * next import, so there is nothing here to switch between. */
+/** How much of each Dashboard-sheet panel an import read: the duration
+ * block's figure count, submittal rows across both grids, BOQ categories. */
+export interface DashboardPanelsSummary {
+  duration?: number;
+  submittals?: number;
+  boq?: number;
+}
+
 export interface DashboardImportRow {
   id: string;
   source: string;
@@ -305,6 +313,7 @@ export interface DashboardImportRow {
     imported?: {
       cashflow?: { months: number; curve_months?: number };
       invoices?: { periods: number };
+      panels?: DashboardPanelsSummary;
     };
     skipped?: Record<string, string>;
   };

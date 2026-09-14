@@ -601,6 +601,36 @@ class DashboardImport(TimestampedModel):
         return f"{self.project_id} dashboard @ {self.created_at:%Y-%m-%d}"
 
 
+class DashboardPanels(TimestampedModel):
+    """The summary panels of a project's dashboard workbook, as last imported:
+    its duration block, its submittals grid, and its financial progress by
+    BOQ. The report draws those charts from here rather than deriving its own
+    figures, since these ARE the numbers the client publishes (planner review,
+    register F3-F5).
+
+    One row per project, replaced wholesale on every dashboard import exactly
+    as the cash flow is — a snapshot, not a history. Kept apart from
+    DashboardImport on purpose: that one is a log whose rows can be deleted
+    without taking any project data with them, and holding chart data there
+    would break that.
+
+    `data` is the parsed panels, keyed by panel — see
+    apps.projects.dashboard_panels for the shape. A panel the workbook lacks is
+    simply absent, and the report falls back to what it drew before.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="dashboard_panels")
+    project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name="dashboard_panels")
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name_plural = "dashboard panels"
+
+    def __str__(self):
+        return f"{self.project_id} dashboard panels"
+
+
 class ProjectScope(TimestampedModel):
     """A node in a project's flexible work hierarchy
     (Phase -> Zone -> Building -> Area). Self-referencing tree."""

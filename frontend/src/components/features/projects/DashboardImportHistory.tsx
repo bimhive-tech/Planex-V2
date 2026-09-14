@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { StateView } from "@/components/ui/StateView";
 import { api } from "@/lib/api";
 import { API_BASE } from "@/lib/constants";
+import { panelParts } from "@/lib/dashboardImport";
 import { useFetch } from "@/hooks/useFetch";
 import { formatDateTime } from "@/lib/format";
 import type { DashboardImportRow } from "@/types/project";
@@ -28,6 +29,7 @@ function broughtIn(summary: DashboardImportRow["summary"]): string {
     const i = imported.invoices;
     parts.push(`${i.periods} invoice${i.periods === 1 ? "" : "s"}`);
   }
+  parts.push(...panelParts(imported.panels));
   return parts.length ? parts.join(", ") : "nothing recorded";
 }
 

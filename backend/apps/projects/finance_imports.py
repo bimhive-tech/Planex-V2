@@ -21,6 +21,7 @@ import io
 import openpyxl
 from django.db import transaction
 
+from .dashboard_panels import import_dashboard_panels  # noqa: F401 — looked up by name
 from .models import CashFlowEntry, Invoice, ProgressCurvePoint
 
 SCAN_ROWS = 100          # how deep to look for the header / label rows
@@ -662,6 +663,9 @@ def import_invoices(project, upload):
 _DASHBOARD_PARTS = (
     ("cashflow", "import_cashflow"),
     ("invoices", "import_invoices"),
+    # The Dashboard sheet's own summary panels — duration and delay, the
+    # submittal grids, financial progress by BOQ (register F3-F5).
+    ("panels", "import_dashboard_panels"),
 )
 
 

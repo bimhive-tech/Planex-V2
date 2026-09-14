@@ -187,6 +187,70 @@ def _duration_for(s, f, revised_finish, as_of, planned_pct=None, actual_pct=None
     return {"total": total, "elapsed": elapsed, "remaining": remaining, "delay": delay}
 
 
+def _dashboard_panels(project) -> dict:
+    """The project's imported dashboard panels, or {} when it has none."""
+    from apps.projects.models import DashboardPanels
+
+    panels = DashboardPanels.objects.filter(project=project).values_list("data", flat=True).first()
+    return panels or {}
+
+
+def _dashboard_duration(panel):
+    """The dashboard's duration block, in the shape `_duration` returns plus
+    the time-performance fractions the sheet states alongside it — or None
+    when the block has no project duration to anchor it.
+
+    The fractions are carried as the sheet gives them rather than recomputed
+    from the day counts: they are the figures the client's own Time
+    Performance chart plots, and nothing about them is rounded here."""
+    if not panel or panel.get("project_days") is None:
+        return None
+
+    def days(value):
+        # Day counts arrive as the floats openpyxl reads every number as, and
+        # the info table printed them that way — "1380.0 يوم". A whole count
+        # is an int; anything fractional is kept exactly as the sheet has it.
+        return int(value) if isinstance(value, float) and value.is_integer() else value
+
+    return {
+        "total": days(panel["project_days"]),
+        "elapsed": days(panel.get("completed_days")),
+        "remaining": days(panel.get("remaining_days")),
+        "delay": days(panel.get("delay_days") or 0),
+        "elapsed_pct": panel.get("elapsed_pct"),
+        "remaining_pct": panel.get("remaining_pct"),
+    }
+
+
+def _dashboard_boq_rows(panel) -> list:
+    """The dashboard's "Financial Progress according to BOQ" panel, in the row
+    shape the BOQ chart already draws.
+
+    The sheet states each category's budget and actual as FRACTIONS of the
+    contract total, and derives them from the amounts the same way — amount
+    over total — so multiplying back by the total restores the money exactly
+    rather than approximating it. A panel with no total keeps just the shares,
+    which the chart can still plot.
+
+    Nothing is rounded: these are the client's own figures (register C2)."""
+    if not panel or not panel.get("rows"):
+        return []
+    total = panel.get("total")
+    out = []
+    for row in panel["rows"]:
+        share, earned = row.get("budget_share"), row.get("financial_percent")
+        if share is None and earned is None:
+            continue
+        line = {"name": row["category"],
+                "budget_share": (share or 0) * 100,
+                "financial_percent": (earned or 0) * 100}
+        if total:
+            line["budget"] = (share or 0) * total
+            line["earned"] = (earned or 0) * total
+        out.append(line)
+    return out
+
+
 def project_otp(project):
     """OTP in days — the approved finish measured against the contractual one.
 
@@ -473,6 +537,73 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
     rows = [{"id": z, "name": zone_name[z], "progress": spw[z] / sw[z] if sw[z] else 0.0}
             for z in sw]
     rows.sort(key=lambda r: order.get(r["id"], 999))
+    return rows
+
+
+def _work_rows(project, scope_ids=None, progress=None, schedule_import=None):
+    """Progress per work group — the summary's "phases" bar chart (register
+    F6): rows shaped like `_zone_rows`', so the same planned-vs-actual chart
+    draws either.
+
+    Grouped by the TOP work level each activity sits under, whatever that
+    level is called in this import: a Planex-coded file's Discipline (Civil
+    Works, MEP Works, …) or a positional import's Phase. Grouping by the
+    deepest one instead gave the airport project 34 bars on a summary panel,
+    none of them readable; the top level answers the question the chart is
+    there for — which trade is behind.
+
+    Groups are merged by name across the tree, because "Civil Works" under
+    one level and "Civil Works" under the next are the same trade. Planned is
+    each group's own weighted planned figure where the schedule carried one."""
+    from apps.projects.models import WORK_SCOPE_TYPES
+    from apps.projects.services import scope_planned_map
+
+    predicate, _ = _scope_context(project, scope_ids, schedule_import)
+    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    info = {str(sid): (str(pid) if pid else None, st, (label or "").strip() or name, order)
+            for sid, pid, st, name, label, order in scopes.values_list(
+                "id", "parent_id", "scope_type", "name", "label", "sort_order")}
+
+    def top_work(sid):
+        """The shallowest work-level node over this scope, or None."""
+        found, seen = None, set()
+        while sid and sid not in seen:
+            seen.add(sid)
+            parent, stype, _, _ = info.get(sid, (None, None, None, None))
+            if stype in WORK_SCOPE_TYPES:
+                found = sid
+            sid = parent
+        return found
+
+    planned_map = scope_planned_map(project, schedule_import) or {}
+    top_of, groups, first_seen = {}, {}, {}
+    activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
+    for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
+        sid = str(sid)
+        if not predicate(sid, aid):
+            continue
+        if sid not in top_of:
+            top_of[sid] = top_work(sid)
+        node = top_of[sid]
+        if node is None:
+            continue
+        name, order = info[node][2], info[node][3]
+        w = float(weight)
+        value = progress.get(str(aid), float(prog)) if progress is not None else float(prog)
+        g = groups.setdefault(name, {"w": 0.0, "pw": 0.0, "plan_w": 0.0, "plan": 0.0})
+        g["w"] += w
+        g["pw"] += w * value
+        planned = planned_map.get(node)
+        if planned is not None:
+            g["plan_w"] += w
+            g["plan"] += w * float(planned)
+        first_seen.setdefault(name, order)
+
+    rows = [{"name": name,
+             "progress": g["pw"] / g["w"] if g["w"] else 0.0,
+             "planned": g["plan"] / g["plan_w"] if g["plan_w"] else None}
+            for name, g in groups.items()]
+    rows.sort(key=lambda r: (first_seen[r["name"]], r["name"]))
     return rows
 
 
@@ -1214,7 +1345,11 @@ def build_report_context(report):
     # the planned figure now comes from the resolved import batch rather than
     # from elapsed calendar time, so the two stay directly comparable.
     planned = _planned_progress(project, as_of, current=True)
-    duration = _duration(project, as_of)
+    dashboard = _dashboard_panels(project)
+    # The dashboard's own duration block when it was imported (register F3) —
+    # it states the duration, the delay and the time performance the client
+    # publishes; derived from the project's dates otherwise, as before.
+    duration = _dashboard_duration(dashboard.get("duration")) or _duration(project, as_of)
 
     # Pinned to the resolved batch like every other current-state read above.
     # Milestones are upserted by (project, title) and never deleted, so an
@@ -1256,6 +1391,7 @@ def build_report_context(report):
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
     # the selected tasks (empty selection = whole project).
     zones = _zone_rows(project, report.scope_ids, progress, schedule_import)
+    work_progress = _work_rows(project, report.scope_ids, progress, schedule_import)
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
         z["planned"] = planned  # time-based baseline is project-wide
@@ -1272,7 +1408,10 @@ def build_report_context(report):
               "planned": c["planned"], "actual": c["actual"]}
              for z in hierarchy for c in z["children"]]
     discipline_columns, discipline = _discipline_rows(project, report.scope_ids, progress, schedule_import)
-    boq_financial_progress = _boq_financial_progress(project, schedule_import=schedule_import)
+    # The dashboard's own BOQ panel when it was imported (register F5); the
+    # P6 activities' cost columns otherwise, as before.
+    boq_financial_progress = (_dashboard_boq_rows(dashboard.get("boq"))
+                              or _boq_financial_progress(project, schedule_import=schedule_import))
     financial_percent_complete = _financial_percent_complete(project, schedule_import)
     # BCWS — what the baseline says should have been spent by now. None for a
     # source carrying no baseline percentage or no budget.
@@ -1486,6 +1625,7 @@ def build_report_context(report):
         "duration": duration,
         "breakdown": breakdown,
         "zones": zones,
+        "work_progress": work_progress,
         "areas": areas,
         "hierarchy": hierarchy,
         "discipline": discipline,
@@ -1508,6 +1648,11 @@ def build_report_context(report):
         "invoices_total": invoices_total,
         "variations_cost_approved_total": variations_cost_approved_total,
         "submittals": submittals,
+        # The dashboard workbook's own summary panels (duration and delay,
+        # submittal grids, financial progress by BOQ) as last imported, or {}.
+        # Charts that have them draw them in preference to anything derived
+        # here — they are the client's published figures (register F3-F5).
+        "dashboard": dashboard,
         "delays": delays,
         "scurve": scurve,
         "scurve_source": scurve_source,

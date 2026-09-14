@@ -1,13 +1,16 @@
 "use client";
 
 // One upload for the whole dashboard workbook — cash flow, the progress curve
-// the report's S-curve is drawn from, and the invoice extracts. The same file
-// carries all three and used to need uploading once per panel (client ask,
-// 2026-09-09). Backed by /projects/<id>/dashboard/import/.
+// the report's S-curve is drawn from, the invoice extracts, and the Dashboard
+// sheet's own duration, submittal and BOQ panels the report charts. The same
+// file carries all of them and used to need uploading once per panel (client
+// ask, 2026-09-09). Backed by /projects/<id>/dashboard/import/.
 import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { api, ApiError } from "@/lib/api";
+import { DASHBOARD_PART_NAMES, panelParts } from "@/lib/dashboardImport";
+import type { DashboardPanelsSummary } from "@/types/project";
 import styles from "./finances.module.css";
 
 /** What each part of the import reports back. Shapes differ per part, so this
@@ -16,6 +19,7 @@ interface DashboardImportResult {
   imported: {
     cashflow?: { months: number; first_month: string; last_month: string; curve_months?: number };
     invoices?: { periods: number; created: number; updated: number; skipped: number };
+    panels?: DashboardPanelsSummary;
   };
   skipped: Record<string, string>;
 }
@@ -36,6 +40,7 @@ function summarise(r: DashboardImportResult): string {
   }
   const inv = r.imported.invoices;
   if (inv) parts.push(`${inv.periods} invoice${inv.periods === 1 ? "" : "s"}`);
+  parts.push(...panelParts(r.imported.panels));
   return parts.length ? `Imported ${parts.join(", ")}.` : "Nothing to import.";
 }
 
@@ -49,7 +54,7 @@ export function DashboardImport({ projectId, onImported }: Props) {
     const file = e.target.files?.[0];
     e.target.value = ""; // same file re-selectable
     if (!file) return;
-    if (!window.confirm("Importing replaces this project's cash flow and progress curve, and updates its invoices. Continue?")) return;
+    if (!window.confirm("Importing replaces this project's cash flow, progress curve and dashboard panels, and updates its invoices. Continue?")) return;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -60,8 +65,8 @@ export function DashboardImport({ projectId, onImported }: Props) {
         `/projects/${projectId}/dashboard/import/`, form);
       // A workbook holding only some of the sheets still imports the rest, so
       // say which parts were not in it rather than reporting a clean success.
-      const missing = Object.keys(result.skipped ?? {});
-      setMessage(summarise(result) + (missing.length ? ` No ${missing.join(" or ")} sheet in this workbook.` : ""));
+      const missing = Object.keys(result.skipped ?? {}).map((key) => DASHBOARD_PART_NAMES[key] ?? key);
+      setMessage(summarise(result) + (missing.length ? ` Not in this workbook: ${missing.join(", ")}.` : ""));
       onImported();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Dashboard import failed.");
@@ -77,7 +82,7 @@ export function DashboardImport({ projectId, onImported }: Props) {
         {busy ? "Importing…" : "Import dashboard"}
       </Button>
       <span className={styles.importHint}>
-        One upload: cash flow, progress curve and invoices.
+        One upload: cash flow, progress curve, invoices and the Dashboard sheet's panels.
       </span>
       {message && <p className={styles.importMsg}>{message}</p>}
       {error && <p className="formError">{error}</p>}
