@@ -220,9 +220,9 @@ def _dual_chart_page(cfg, design, label_key, sources, name):
 
 def _dashboard_page(cfg, design):
     """Approximates the landscape executive dashboard as a portrait composite
-    of 6 charts in three rows: the progress pie beside the duration pie, the
-    dashboard's time-performance and project-duration bars (register F3),
-    then zone bars beside the S-curve — the reference's landscape layout
+    of 5 charts in three rows: the progress pie beside the dashboard's
+    "DURATION (Working Days)" pie (register A6), the time-performance bars
+    across the page, then zone bars beside the S-curve — the reference's landscape layout
     needs a manual pass; the canvas has no per-page orientation override yet
     (see plan gap notes). The project-info panel is deliberately left out
     here: it already gets its own full-width page via the "project_info"
@@ -242,9 +242,8 @@ def _dashboard_page(cfg, design):
     els = [
         *heading,
         _el("chart", sub["x"], sub["y"], half, pie_h, _chart_props(cfg, "breakdown", "donut")),
-        _el("chart", right, sub["y"], half, pie_h, _chart_props(cfg, "duration", "pie")),
-        _el("chart", sub["x"], duration_y, half, DURATION_ROW_H, _chart_props(cfg, "time_performance", "column")),
-        _el("chart", right, duration_y, half, DURATION_ROW_H, _chart_props(cfg, "project_duration", "column")),
+        _el("chart", right, sub["y"], half, pie_h, _chart_props(cfg, "project_duration", "pie")),
+        _el("chart", sub["x"], duration_y, sub["w"], DURATION_ROW_H, _chart_props(cfg, "time_performance", "column")),
         _el("chart", sub["x"], bottom_y, half, bottom_h, _chart_props(cfg, "zone_progress", "column")),
         _el("chart", right, bottom_y, half, bottom_h, _chart_props(cfg, "scurve", "line")),
     ]

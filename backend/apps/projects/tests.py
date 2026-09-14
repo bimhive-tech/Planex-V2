@@ -610,26 +610,26 @@ class P6ScheduleImportTests(TestCase):
         finishes = ProjectScope.objects.get(project=project, name="Finishes")
         self.assertEqual(scope_progress_map(project)[str(finishes.id)], 100.0)
 
-    def test_earned_value_wins_over_the_files_stated_overall_progress(self):
-        """A P6 export states a project-row Performance % Complete, but that is
-        only a summary of the same earned value the activity rows carry — so the
-        money decides. The fixture states 90% against leaves earning 10.5M of a
-        20M budget; progress reads 52.5%, the figure that reconciles with the
-        cost columns a planner can check cell by cell.
-
-        The stated percentage is still recorded: it is what a source carrying no
-        cost at all falls back to (see services.project_overall_progress)."""
+    def test_the_files_stated_overall_progress_wins_over_earned_value(self):
+        """Where P6 states the project's Performance % Complete, that is the
+        figure (register A1, 2026-09-14): the planners check the report against
+        the file, and earned value over budget only reconstructs it to within
+        rounding. The fixture states 90% against leaves earning 10.5M of a 20M
+        budget; progress reads the stated 90%."""
         from apps.accounts.models import Company
         from .imports import import_workbook
+        from .services import project_earned_progress
 
         company = Company.objects.create(name="Acme")
         project = Project.objects.create(company=company, name="Tower", project_type="commercial")
         result = import_workbook(project, self._workbook(project_performance_pct=0.9), source="P6.xlsx")
 
-        self.assertEqual(result["overall_progress"], 52.5)
-        self.assertEqual(result["overall_progress_source"], "earned_value")
+        self.assertEqual(result["overall_progress"], 90.0)
+        self.assertEqual(result["overall_progress_source"], "imported")
         project.refresh_from_db()
         self.assertEqual(float(project.imported_progress_percent), 90.0)
+        # Earned value is still what a file with no stated figure would use.
+        self.assertEqual(project_earned_progress(project), 52.5)
 
     def test_earned_value_needs_no_stated_figure(self):
         """The cost columns are enough on their own: with no project-level

@@ -19,7 +19,8 @@ from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import Frame, Paragraph
 
 from .constants import PERCENT_DECIMALS, merged_config
-from .pdf_base import BOLD, FONT_NAME, ensure_fonts, format_money, hexcolor, resolve_arabic, shape, storage_image_reader
+from .pdf_base import (BOLD, FONT_NAME, ensure_fonts, format_money, format_quantity, hexcolor, resolve_arabic, shape,
+                       storage_image_reader)
 from .pdf_charts import (
     area_progress_chart,
     area_units_chart,
@@ -1253,7 +1254,7 @@ def resolve_table(
             (labels.get("info_forecast", "Forecast finish"),
              _fmt_date(p.get("forecast_finish")) if p.get("forecast_finish") else ""),
             (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
-            (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p.get("size_sqm") else ""),
+            (labels["info_size"], f"{format_quantity(p['size_sqm'])} {labels['unit_sqm']}" if p.get("size_sqm") else ""),
             # A contracted sub-scope some projects track alongside the whole
             # project — see Project.part_amount's docstring. Grouped at the
             # end so the whole-project figures above stay together.
@@ -1395,8 +1396,12 @@ def resolve_table(
                            avail_width=avail_width, header_rows=header_rows)
 
     if source == "progress_compare":
-        zones = [z for z in (ctx.get("zones") or []) if z.get("planned") is not None]
-        if not zones:
+        # Every zone, with "—" where the schedule states no planned figure.
+        # Leaving those rows out hid the zone's actual progress too — Walk way
+        # vanished from نسب الإنجاز the moment its borrowed project-wide
+        # planned figure was removed (register A3, 2026-09-14).
+        zones = ctx.get("zones") or []
+        if not any(z.get("planned") is not None for z in zones):
             return None
         rows = [[z["name"],
                  f"{z['planned']:.{PERCENT_DECIMALS}f}%" if z.get("planned") is not None else "—",
@@ -1492,9 +1497,13 @@ def resolve_table(
         rows_data = ctx.get("critical_path") or []
         if not rows_data:
             return None
-        rows = [[r["name"], _fmt_date(r["planned_finish"]), _fmt_date(r["forecast_finish"]), str(r["delay_days"])]
+        # P6's own Start, Finish and Total Float per zone — see
+        # services._critical_path_rows for why there is no "expected" date.
+        rows = [[r["name"], _fmt_date(r["start"]) if r.get("start") else "—",
+                 _fmt_date(r["finish"]) if r.get("finish") else "—",
+                 format_quantity(r["total_float"]) if r.get("total_float") is not None else "—"]
                 for r in rows_data]
-        header = [labels["col_zone"], labels["info_finish"], labels["col_forecast_finish"], labels["delay_days"]]
+        header = [labels["col_zone"], labels["col_start"], labels["col_finish"], labels["col_total_float"]]
         apply_table_overrides("data", header, rows, overrides, hidden_rows, hidden_cols)
         if raw:
             return {"kind": "data", "header": header, "rows": rows,

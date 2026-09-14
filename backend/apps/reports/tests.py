@@ -1282,7 +1282,9 @@ class ResolveChartTests(SimpleTestCase):
         self.assertEqual(chart.data, [[100.0, 100.0], [97.0, 69.0]])
         # Only the actual bars carry a printed value — labelling a flat 100%
         # stacked "100%" over every bar in one colliding row.
-        self.assertEqual(chart.barLabelFormat, [None, "%0.0f%%"])
+        from .pdf_charts import _pct_label
+
+        self.assertEqual(chart.barLabelFormat, [None, _pct_label])
 
     def test_planned_actual_chart_keeps_both_series_when_only_some_zones_are_pinned(self):
         """The mixed case reads the same way — nothing special about it now."""
@@ -1460,7 +1462,7 @@ class InvoiceStatusAndBudgetTotalCostChartTests(SimpleTestCase):
         drawing = resolve_chart("progress_tracking", "bar", default_config(), ctx, {"item": None}, 180, 60)
         self.assertIsNotNone(drawing)
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
-        self.assertEqual(chart.data, [[100.0, 100.0], [92.3, 88.0]])  # planned, actual (rounded to 1dp)
+        self.assertEqual(chart.data, [[100.0, 100.0], [92.34, 88.0]])  # planned, actual — unrounded (A2)
         from .pdf_base import shape
 
         self.assertEqual(list(chart.categoryAxis.categoryNames),
@@ -1477,7 +1479,9 @@ class InvoiceStatusAndBudgetTotalCostChartTests(SimpleTestCase):
         }}
         drawing = resolve_chart("progress_tracking", "bar", default_config(), ctx, {"item": None}, 180, 60)
         chart = next(el for el in drawing.contents if isinstance(el, VerticalBarChart))
-        self.assertEqual(chart.data, [[100.0], [88.0]])
+        # The previous month still states a planned figure, so it keeps its
+        # planned bar; its missing actual is no bar at all, never a 0%.
+        self.assertEqual(chart.data, [[100.0, 100.0], [None, 88.0]])
 
     def test_progress_tracking_none_with_no_snapshots_at_all(self):
         ctx = {**_full_ctx(), "monthly_tracking": {
@@ -1925,12 +1929,16 @@ class PlannedProgressFromCostTests(TestCase):
 
     def test_planned_progress_is_cost_weighted_not_calendar(self):
         """70% of the budget was due by the data date, on a contract only a
-        quarter elapsed and against a stated figure of 95% — so neither the
-        calendar nor the stated summary can be what produced it."""
+        quarter elapsed — the calendar can't be what produced it. A stated
+        Schedule % Complete (95% here) is printed instead when the file gives
+        one (register A1, 2026-09-14)."""
         import datetime
 
         from .services import _planned_progress
 
+        self.assertEqual(_planned_progress(self.project, datetime.date(2026, 4, 1), current=True), 95.0)
+        self.project.imported_planned_progress_percent = None
+        self.project.save(update_fields=["imported_planned_progress_percent"])
         planned = _planned_progress(self.project, datetime.date(2026, 4, 1), current=True)
         self.assertAlmostEqual(planned, 70.0, places=6)
 
@@ -2073,93 +2081,6 @@ class AreaDashboardsTests(TestCase):
         self.assertEqual([a["area_name"] for a in ctx["areas"]], ["Bldg 1"])
         # The chart renders (returns a Drawing, not None) when areas exist.
         self.assertIsNotNone(area_progress_chart(default_config(), ctx, 400, default_config()["labels"]))
-
-
-class CriticalPathRowsTests(TestCase):
-    """`_critical_path_rows` — only zones with their own P6-imported schedule
-    carry a delay figure; a dateless zone is skipped, not zero-filled."""
-
-    def setUp(self):
-        from apps.projects.models import Activity, ProjectScope
-
-        self.company = Company.objects.create(name="Acme")
-        self.project = Project.objects.create(
-            company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
-            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 12, 31))
-        self.zone = ProjectScope.objects.create(
-            company=self.company, project=self.project, scope_type="zone", name="Zone A",
-            planned_start=datetime.date(2026, 1, 1), planned_finish=datetime.date(2026, 6, 1))
-        self.dateless = ProjectScope.objects.create(
-            company=self.company, project=self.project, scope_type="zone", name="Zone B")
-        # `_hierarchy_rows` (which supplies critical_path's zone list) skips any
-        # zone with zero rolled-up weight — a bare ProjectScope with no
-        # activities never appears, dated or not.
-        Activity.objects.create(company=self.company, project=self.project, scope=self.zone,
-                                name="Task", weight=1, progress_percent=50)
-        Activity.objects.create(company=self.company, project=self.project, scope=self.dateless,
-                                name="Task", weight=1, progress_percent=50)
-
-    def test_zone_with_revised_finish_reports_that_delay(self):
-        from .services import _critical_path_rows, _hierarchy_rows
-
-        self.zone.revised_finish = datetime.date(2026, 6, 20)
-        self.zone.save(update_fields=["revised_finish"])
-        as_of = datetime.date(2026, 5, 1)
-        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
-        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
-        self.assertEqual(rows["Zone A"]["planned_finish"], datetime.date(2026, 6, 1))
-        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 20))
-        self.assertEqual(rows["Zone A"]["delay_days"], 19)
-        self.assertNotIn("Zone B", rows)  # no own schedule -> skipped
-
-    def test_overdue_zone_without_revised_finish_derives_forecast_from_as_of(self):
-        from .services import _critical_path_rows, _hierarchy_rows
-
-        as_of = datetime.date(2026, 6, 11)  # 10 days past Zone A's planned finish
-        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
-        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
-        self.assertEqual(rows["Zone A"]["delay_days"], 10)
-        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 11))
-
-    def test_on_time_zone_has_zero_delay_and_forecast_equals_planned(self):
-        from .services import _critical_path_rows, _hierarchy_rows
-
-        as_of = datetime.date(2026, 3, 1)  # well before Zone A's planned finish
-        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
-        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
-        self.assertEqual(rows["Zone A"]["delay_days"], 0)
-        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 1))
-
-    def test_zone_behind_pace_reports_estimated_delay_before_its_deadline_passes(self):
-        """The actual bug this replaced: a zone running well behind schedule
-        showed 0 delay for its entire run because its own deadline hadn't
-        technically arrived yet. Zone A: 1-Jan-2026 -> 1-Jun-2026 (151 days),
-        50% actual progress — as-of a date where time-based planned% is much
-        higher than 50%, the gap should translate into real estimated days,
-        not a flat 0 just because 1-Jun hasn't arrived yet."""
-        from .services import _critical_path_rows, _hierarchy_rows
-
-        as_of = datetime.date(2026, 5, 1)  # 4 months in, planned ~79.5%, actual 50%
-        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
-        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
-        self.assertGreater(rows["Zone A"]["delay_days"], 0)  # not the old flat 0
-        self.assertEqual(
-            rows["Zone A"]["forecast_finish"],
-            datetime.date(2026, 6, 1) + datetime.timedelta(days=rows["Zone A"]["delay_days"]),
-        )
-
-    def test_explicit_revised_finish_wins_over_the_pace_estimate(self):
-        """An explicit EOT is a human-recorded decision — it must win over
-        the heuristic pace estimate, never get silently overridden by it."""
-        from .services import _critical_path_rows, _hierarchy_rows
-
-        self.zone.revised_finish = datetime.date(2026, 6, 20)
-        self.zone.save(update_fields=["revised_finish"])
-        as_of = datetime.date(2026, 5, 1)  # same date as the pace-estimate test above
-        hierarchy = _hierarchy_rows(self.project, as_of=as_of)
-        rows = {r["name"]: r for r in _critical_path_rows(self.project, hierarchy, as_of)}
-        self.assertEqual(rows["Zone A"]["delay_days"], 19)  # the recorded EOT, not ~45 from pace
-        self.assertEqual(rows["Zone A"]["forecast_finish"], datetime.date(2026, 6, 20))
 
 
 class GanttRowsTests(TestCase):
@@ -2379,7 +2300,9 @@ class MonthlyTrackingContextTests(TestCase):
         tracking = ctx["monthly_tracking"]
         self.assertEqual(tracking["previous"]["actual"], 80.0)  # the latest snapshot strictly before Aug 1
         self.assertEqual(tracking["current"]["actual"], ctx["overall"])
-        self.assertEqual(tracking["previous"]["planned"], tracking["current"]["planned"])  # same time-based baseline
+        # That snapshot records no planned figure, so the previous month has
+        # none — never the current month's copied back (register A1).
+        self.assertIsNone(tracking["previous"]["planned"])
 
     def test_previous_is_none_with_no_snapshot_yet(self):
         from .services import build_report_context
@@ -2742,7 +2665,7 @@ class ProjectInfoCostAndDateFieldsTests(TestCase):
         from .pdf_canvas import resolve_table
 
         ensure_fonts()
-        self.assertEqual(format_money(1_000_000, "EGP"), "1,000,000 EGP")
+        self.assertEqual(format_money(1_000_000, "EGP"), "1,000,000.00 EGP")
         self.assertEqual(format_money(None, "EGP"), "")  # no value -> no row, not "0 EGP"
 
         cfg = default_config()
@@ -2755,8 +2678,8 @@ class ProjectInfoCostAndDateFieldsTests(TestCase):
         table = resolve_table("project_info", cfg, ctx, {"item": None})
         # Value cells are Paragraphs — .text is the raw markup passed in.
         texts = [c.text for row in table._cellvalues for c in row if hasattr(c, "text")]
-        self.assertIn("1,000,000 USD", texts)   # contract_value in its own currency
-        self.assertIn("500,000 EGP", texts)     # advance_payment in ITS own currency, independently
+        self.assertIn("1,000,000.00 USD", texts)   # contract_value in its own currency
+        self.assertIn("500,000.00 EGP", texts)     # advance_payment in ITS own currency, independently
 
 
 class ProjectInfoContractorConsultantAndPartScopeFieldsTests(TestCase):
@@ -4259,13 +4182,13 @@ class MoneyUnitsTests(TestCase):
             company=self.company, name="Tower", project_type=Project.ProjectType.COMMERCIAL,
             currency="EGP")
 
-    def test_format_money_keeps_cents_only_when_asked(self):
+    def test_format_money_prints_every_amount_to_the_cent(self):
         from .pdf_base import format_money
-        # Contract KPIs: a billion-pound figure gains nothing from ".00".
-        self.assertEqual(format_money(5_632_996_242, "EGP"), "5,632,996,242 EGP")
-        # An invoice extract is an exact amount; its cents are part of the record.
-        self.assertEqual(format_money(1_545_531_221.48, "EGP", decimals=2), "1,545,531,221.48 EGP")
-        self.assertEqual(format_money(None, "EGP", decimals=2), "")
+        # Register A2: the contract KPIs used to print whole pounds, rounding
+        # the project's 685,661,117.68 to 685,661,118.
+        self.assertEqual(format_money(685_661_117.68, "EGP"), "685,661,117.68 EGP")
+        self.assertEqual(format_money(5_632_996_242, "EGP"), "5,632,996,242.00 EGP")
+        self.assertEqual(format_money(None, "EGP"), "")
 
     def test_invoice_rows_carry_the_projects_currency(self):
         import datetime

@@ -90,13 +90,12 @@ def shape(text) -> str:
     return get_display(arabic_reshaper.reshape(_pin_ltr_runs(text))).replace(_LRM, "")
 
 
-def format_money(value, currency: str | None, decimals: int = 0) -> str:
-    """A money value with its own currency code, e.g. "2,433,242,562 EGP".
+def format_money(value, currency: str | None, decimals: int = 2) -> str:
+    """A money value with its own currency code, e.g. "685,661,117.68 EGP".
 
-    `decimals` is 0 for the contract KPIs — a billion-pound contract value
-    gains nothing from two decimal places and loses column width — but an
-    invoice extract is a real, exact amount whose cents are part of the record,
-    so that caller asks for 2.
+    Always to the cent. The contract KPIs used to print whole pounds, which
+    rounded the project's own total of 685,661,117.68 to 685,661,118 — a
+    figure no source states (register A2, 2026-09-14).
 
     Each contract-KPI field (budget/advance payment/contract/approved/
     forecast) carries its OWN currency on Project — a real project can
@@ -109,6 +108,16 @@ def format_money(value, currency: str | None, decimals: int = 0) -> str:
     if not value:
         return ""
     return f"{value:,.{decimals}f} {currency or ''}".strip()
+
+
+def format_quantity(value) -> str:
+    """A measured quantity (an area, a count of days) exactly as stored: whole
+    numbers print whole, anything else keeps its fraction. Never rounded to
+    fit a format (register A2)."""
+    if value is None or value == "":
+        return ""
+    number = float(value)
+    return f"{number:,.0f}" if number.is_integer() else f"{number:,.2f}"
 
 
 def hexcolor(value, fallback="#000000"):

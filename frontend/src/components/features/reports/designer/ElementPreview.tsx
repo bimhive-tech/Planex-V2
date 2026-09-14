@@ -228,7 +228,9 @@ function InlineEditableText({
 }
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—");
-const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(0)}%`);
+/** Percentages at the report's precision (pdf_tables.fmt_percent). */
+const PERCENT_DECIMALS = 2;
+const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(PERCENT_DECIMALS)}%`);
 
 const money = (v: string | number | null | undefined, currency: string) =>
   v ? `${Number(v).toLocaleString()} ${currency}` : "";
@@ -404,10 +406,10 @@ function HeaderCell({
   );
 }
 
-/** Mirrors pdf_tables.py's _pct_or_dash exactly (one decimal place, an
+/** Mirrors pdf_tables.py's _pct_or_dash exactly (the report's decimals, an
  * em-dash for a missing value) — hierarchy rows are numbers, not
  * pre-formatted strings, unlike every other table kind. */
-const fmtPctOrDash = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
+const fmtPctOrDash = (v: number | null) => (v == null ? "—" : `${v.toFixed(PERCENT_DECIMALS)}%`);
 
 /** Left/right cell padding pdf_tables.py sets on every table (LEFTPADDING/
  * RIGHTPADDING, in points). */
@@ -677,7 +679,7 @@ function GaugeSvg({ value, color, showLabel = true }: { value: number; color: st
       })}
       <line x1="18" y1="18" x2={needle[0]} y2={needle[1]} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="18" cy="18" r="1.5" fill={color} />
-      {showLabel && <text x="18" y="21.5" fontSize="4" textAnchor="middle" fill={color}>{pct.toFixed(0)}%</text>}
+      {showLabel && <text x="18" y="21.5" fontSize="4" textAnchor="middle" fill={color}>{pct.toFixed(PERCENT_DECIMALS)}%</text>}
     </svg>
   );
 }

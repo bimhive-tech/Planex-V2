@@ -299,6 +299,10 @@ export interface DashboardPanelsSummary {
   duration?: number;
   submittals?: number;
   boq?: number;
+  /** Planned / actual invoiced / earned value figures read (register A1). */
+  progress?: number;
+  /** Previous / current month columns read (register A1). */
+  tracking?: number;
 }
 
 export interface DashboardImportRow {

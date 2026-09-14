@@ -142,17 +142,19 @@ def project_overall_progress(project, progress=None, schedule_import=None) -> fl
     latest = latest_schedule_import(project)
     if schedule_import is None:
         schedule_import = latest
-    # Earned value is the reported figure wherever the schedule carries cost
-    # (see project_earned_progress). It deliberately ignores `progress`: field
-    # submissions and dated entries still flow through the review chain and
-    # still update Activity.progress_percent, they just no longer move the
-    # headline — one number on the page, reconcilable against the planners'
-    # own dashboard cell by cell.
+    # What the schedule states for itself comes first: P6's own Performance %
+    # Complete off the project row. Earned value over budget reproduces it to
+    # within rounding (59.5489 against the file's 59.55), but "within rounding"
+    # is a number the source never printed, and the planners check this figure
+    # against the file cell by cell (2026-09-14). It is a figure as of the
+    # import, so an as-of view (`progress` given) still works it out instead.
+    if progress is None and schedule_import == latest and project.imported_progress_percent is not None:
+        return float(project.imported_progress_percent)
+    # Earned value where the schedule carries cost but states no project figure
+    # (see project_earned_progress).
     earned = project_earned_progress(project, schedule_import)
     if earned is not None:
         return earned
-    if progress is None and schedule_import == latest and project.imported_progress_percent is not None:
-        return float(project.imported_progress_percent)
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     agg = activities.aggregate(wsum=Sum("weight"), psum=Sum(_WEIGHTED))
     wsum = float(agg["wsum"] or 0)
@@ -546,10 +548,21 @@ def scope_planned_map(project, schedule_import=None) -> dict:
         schedule_import = latest_schedule_import(project)
     # Planned cost over its own budget wherever the schedule carries cost, so
     # every level matches the project headline and neither figure depends on
-    # which basis _weight_key happened to pick for this file.
+    # which basis _weight_key happened to pick for this file. A scope with no
+    # budget under it still has its activities' own Schedule % Complete, so
+    # it falls back to those rather than to no figure: Walk way's one activity
+    # states 100% planned but carries no cost, and the report printed its
+    # planned as blank (register A3, 2026-09-14).
     planned = scope_planned_progress_map(project, schedule_import)
+    by_weight = _scope_planned_by_weight(project, schedule_import)
     if planned is not None:
-        return planned
+        return {**by_weight, **planned}
+    return by_weight
+
+
+def _scope_planned_by_weight(project, schedule_import):
+    """{scope_id -> weighted Schedule % Complete over its subtree} from the
+    activities' own column, for scopes planned cost can't answer."""
     activities = (project.activities.filter(schedule_import=schedule_import)
                   if schedule_import else project.activities.all())
     direct_w, direct_pw = {}, {}

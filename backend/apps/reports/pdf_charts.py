@@ -26,6 +26,29 @@ _SANS = "Helvetica"
 _SANS_BOLD = "Helvetica-Bold"
 
 
+def _pct_label(v):
+    """A percentage as the report prints every percentage: the report's own
+    decimals, never rounded further (register A2). Blank for no value."""
+    from .constants import PERCENT_DECIMALS
+
+    return f"{v:.{PERCENT_DECIMALS}f}%" if v is not None else ""
+
+
+def _money_label(v):
+    """An amount in full, to the cent (register A2) — never shortened to
+    "198.3M"."""
+    return f"{v:,.2f}" if v is not None else ""
+
+
+def _count_label(v):
+    """A count (days, submittals) as the source states it: whole numbers
+    print whole, anything fractional keeps its fraction."""
+    if v is None:
+        return ""
+    v = float(v)
+    return f"{v:,.0f}" if v.is_integer() else f"{v:,.2f}"
+
+
 def _gauge_font(text, bold=False):
     if has_arabic(text):
         return BOLD if bold else FONT_NAME
@@ -267,7 +290,7 @@ def _vertical_names(raw_names, height, font_size=None, min_font_size=None, pad=1
 
 
 # Bar value labels are the widest they get at "100%".
-_WIDEST_BAR_LABEL = "100%"
+_WIDEST_BAR_LABEL = "100.00%"
 
 
 def _value_labels(chart, categories, font_size, series):
@@ -285,9 +308,24 @@ def _value_labels(chart, categories, font_size, series):
     bar_w = per_category * chart.barWidth / units
     gap_w = per_category * chart.groupSpacing / units
     label_w = _text_width(_WIDEST_BAR_LABEL, font_size)
-    fits = label_w <= bar_w + gap_w
-    nudge = max(0.0, (label_w - bar_w) / 2) if series > 1 else 0.0
-    return fits, nudge
+    if label_w <= bar_w + gap_w:
+        return True, (max(0.0, (label_w - bar_w) / 2) if series > 1 else 0.0)
+    # Too narrow to read across: stand the value upright on its bar, where
+    # it needs only a line's height of width. Printing every value to two
+    # decimals (register A2) made "100.00%" too wide for the 87 mm zone chart
+    # on the progress page, and its values vanished altogether (2026-09-14).
+    if font_size * 1.3 <= bar_w + gap_w:
+        chart.barLabels.angle = 90
+        chart.barLabels.boxAnchor = "w"
+        # An upright "100.00%" on a full bar reaches well above the plot; give
+        # it that room so it doesn't run into the legend, and re-step a
+        # percentage axis for the shorter plot.
+        chart.height -= label_w + 2
+        axis = chart.valueAxis
+        if getattr(axis, "valueMin", None) == 0 and getattr(axis, "valueMax", None) == 100:
+            percent_axis(axis, chart.height, axis.labels.fontSize)
+        return True, 0.0
+    return False, 0.0
 
 
 def _top_legend(d, swatches, width, y_top, font_size=None):
@@ -330,7 +368,7 @@ def _legend(colors_labels, x, y, font_size=None, vertical=False, deltax=95):
     return leg
 
 
-def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4, extra_legend=()):
+def _reference_pie(cfg, slices, width, height, *, value_fmt=_count_label, popout=4, extra_legend=()):
     """Pie drawn the way every pie in the client's reference report is drawn:
     slices pulled slightly apart, each one's value printed just outside its
     own wedge, and a wrapped swatch legend underneath (2026-08-30, matching
@@ -351,7 +389,8 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4,
     """
     if not slices:
         return None
-    slices = [(s[0], abs(float(s[1])), s[2], s[3] if len(s) > 3 else value_fmt.format(s[1]))
+    fmt = value_fmt if callable(value_fmt) else value_fmt.format
+    slices = [(s[0], abs(float(s[1])), s[2], s[3] if len(s) > 3 else fmt(s[1]))
               for s in slices]
     d = Drawing(width, height)
     legend = [(c, n) for n, _, c, _ in slices] + list(extra_legend)
@@ -394,7 +433,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     names, chart.y, name_size = _vertical_names([z["name"] for z in zones], height)
     chart.x = 22
     chart.width, chart.height = width - 44, height - chart.y - 24
-    chart.data = [[round(z["progress"], 1) for z in zones]]
+    chart.data = [[z["progress"] for z in zones]]
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, font_size=name_size, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = name_size
@@ -415,7 +454,7 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = pt(7)
     fits, chart.barLabels.dx = _value_labels(chart, len(zones), 7, series=1)
-    chart.barLabelFormat = "%0.0f%%" if fits else None
+    chart.barLabelFormat = _pct_label if fits else None
     chart.barLabels.nudge = 7
     d.add(chart)
     return d
@@ -438,8 +477,11 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     # was, with nothing on the page saying anything had been left out
     # (2026-08-30 critic pass). A chart with too many bars is a legibility
     # problem; a chart that hides the bad news is a correctness one.
-    zones = [z for z in ctx["zones"] if z.get("planned") is not None]
-    if not zones:
+    # Every zone stays on the chart; one the schedule states no planned
+    # figure for simply has no planned bar (register A3) — dropping it would
+    # hide that zone's actual too.
+    zones = ctx["zones"]
+    if not any(z.get("planned") is not None for z in zones):
         return zone_progress_chart(cfg, ctx, width, height)
     height = height or 78 * mm
     d = Drawing(width, height)
@@ -448,8 +490,8 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     chart.x = 24
     chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
     chart.data = [
-        [round(z["planned"], 1) for z in zones],
-        [round(z["progress"], 1) for z in zones],
+        [z.get("planned") for z in zones],
+        [z["progress"] for z in zones],
     ]
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, font_size=name_size, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
@@ -475,7 +517,7 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     # See _unit_bars: planned is flat, so only actual gets a printed value —
     # and only while the bars are wide enough to hold one.
     fits, chart.barLabels.dx = _value_labels(chart, len(zones), 6, series=2)
-    chart.barLabelFormat = [None, "%0.0f%%" if fits else None]
+    chart.barLabelFormat = [None, _pct_label if fits else None]
     d.add(chart)
     _top_legend(d, [(cfg["colors"]["chart_planned"], labels["planned"]),
                     (cfg["colors"]["chart_actual"], labels["actual"])], width, height - 6)
@@ -499,10 +541,10 @@ def _unit_bars(cfg, units, width, labels, height=None):
     chart.x = 24
     chart.width, chart.height = width - 48, height - chart.y - 34  # top strip for the legend
     if has_planned:
-        chart.data = [[round(u.get("planned") or 0, 1) for u in units],
-                      [round(u["actual"], 1) for u in units]]
+        chart.data = [[u.get("planned") for u in units],
+                      [u["actual"] for u in units]]
     else:
-        chart.data = [[round(u["actual"], 1) for u in units]]
+        chart.data = [[u["actual"] for u in units]]
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width, font_size=name_size, vertical=True)
     chart.categoryAxis.labels.fontName = FONT_NAME
     chart.categoryAxis.labels.fontSize = name_size
@@ -537,7 +579,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     # printed "98989898…" as one unreadable smear along the top, and the
     # reference's own chart at that width carries no values at all.
     labelled, chart.barLabels.dx = _value_labels(chart, len(units), 6, series=2 if has_planned else 1)
-    fmt = "%0.0f%%" if labelled else None
+    fmt = _pct_label if labelled else None
     chart.barLabelFormat = [None, fmt] if has_planned else [fmt]
     d.add(chart)
     pairs = ([(cfg["colors"]["chart_planned"], labels["planned"])] if has_planned else [])
@@ -641,7 +683,7 @@ def _duration_pie_for(cfg, dur, width, labels, height=None):
         ]
         if not any(v > 0 for _, v, _ in slices):
             return None
-    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
+    return _reference_pie(cfg, slices, width, height, value_fmt=_count_label)
 
 
 def item_progress_pie(cfg, item, width, labels, height=None):
@@ -660,10 +702,10 @@ def item_progress_pie(cfg, item, width, labels, height=None):
         return None
     variance = max(0.0, float(planned) - float(actual))
     slices = [
-        (labels.get("actual", "Actual"), round(float(actual), 2), cfg["colors"]["chart_actual"]),
-        (labels.get("variance", "Variance"), round(variance, 2), cfg["colors"].get("muted", "#A5A5A5")),
+        (labels.get("actual", "Actual"), float(actual), cfg["colors"]["chart_actual"]),
+        (labels.get("variance", "Variance"), variance, cfg["colors"].get("muted", "#A5A5A5")),
     ]
-    return _reference_pie(cfg, slices, width, height or 60 * mm, value_fmt="{:,.2f}%")
+    return _reference_pie(cfg, slices, width, height or 60 * mm, value_fmt=_pct_label)
 
 
 def item_earned_pie(cfg, item, width, labels, height=None):
@@ -683,14 +725,14 @@ def item_earned_pie(cfg, item, width, labels, height=None):
     remaining = max(0.0, budget - earned)
     palette = cfg["colors"].get("chart_palette") or []
     slices = [
-        (labels.get("budget_planned_value", "Planned value"), round(budget, 2),
+        (labels.get("budget_planned_value", "Planned value"), budget,
          cfg["colors"]["chart_planned"]),
-        (labels.get("budget_earned_value", "Earned value"), round(earned, 2),
+        (labels.get("budget_earned_value", "Earned value"), earned,
          cfg["colors"]["chart_actual"]),
-        (labels.get("budget_remaining_value", "Remaining value"), round(remaining, 2),
+        (labels.get("budget_remaining_value", "Remaining value"), remaining,
          palette[2] if len(palette) > 2 else cfg["colors"].get("muted", "#A5A5A5")),
     ]
-    return _reference_pie(cfg, slices, width, height or 60 * mm)
+    return _reference_pie(cfg, slices, width, height or 60 * mm, value_fmt=_money_label)
 
 
 def duration_pie(cfg, ctx, width, labels, height=None):
@@ -737,7 +779,7 @@ def invoice_status_chart(cfg, ctx, width, labels, height=None):
         (labels.get("invoice_invoiced", "Invoiced"), invoiced, cfg["colors"]["chart_actual"]),
         (labels.get("invoice_remaining", "Remaining"), remaining, cfg["colors"]["chart_planned"]),
     ]
-    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
+    return _reference_pie(cfg, slices, width, height, value_fmt=_money_label)
 
 
 def boq_financial_progress_chart(cfg, ctx, width, labels, height=None, value_mode=None):
@@ -772,13 +814,15 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None, value_mod
         [r[key_planned] for r in rows],
         [r[key_actual] for r in rows],
     ]
-    top = max(max(r[key_planned], r[key_actual]) for r in rows) or 1
-    # Money written in full while the chart is wide enough for it, in K/M/B
-    # once it isn't; the plot is inset by exactly what those labels need.
-    fmt, label_w = number_axis(chart.valueAxis, 0, top, chart.height, 7, width, headroom=1.15)
-    if not money:
-        chart.valueAxis.labelTextFormat = lambda v: f"{fmt(v)}%"
-        label_w += _text_width("%", pt(7))
+    if money:
+        top = max(max(r[key_planned], r[key_actual]) for r in rows) or 1
+        _, label_w = number_axis(chart.valueAxis, 0, top, chart.height, pt(7), width, headroom=1.15)
+    else:
+        # A share of the whole contract, so the axis is the whole of it:
+        # 0-100%. Fitted to the tallest bar it stopped at 32% and every bar
+        # read as far bigger than it is (register A7, 2026-09-14).
+        percent_axis(chart.valueAxis, chart.height, pt(7))
+        label_w = _text_width("100%", pt(7))
     chart.x = max(24, label_w + 8)
     chart.width = width - chart.x - 24
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
@@ -794,15 +838,12 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None, value_mod
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
-    from .constants import PERCENT_DECIMALS
-
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = pt(6)
-    # Millions, so a nine-figure budget doesn't print a number wider than its
-    # own bar; the axis carries the full scale. Percentages keep the report's
-    # decimals (register C2) rather than rounding to a whole number.
-    chart.barLabelFormat = ((lambda v: f"{v / 1e6:,.1f}M" if v else "") if money
-                            else (lambda v: f"{v:.{PERCENT_DECIMALS}f}%" if v else ""))
+    # Amounts in full and percentages to the report's decimals — nothing
+    # shortened or rounded (register A2).
+    chart.barLabelFormat = ((lambda v: _money_label(v) if v else "") if money
+                            else (lambda v: _pct_label(v) if v else ""))
     chart.barLabels.nudge = 6
     # A label turned upright starts at the bar top and runs up the page.
     # Centred on the top instead, its first digits were drawn inside the bar
@@ -893,27 +934,28 @@ def time_performance_chart(cfg, ctx, width, labels, height=None):
 
 
 def project_duration_chart(cfg, ctx, width, labels, height=None):
-    """The project's duration beside its delay, in days — the dashboard's
-    Project Duration panel (register F3).
+    """The dashboard's "DURATION (Working Days)" pie, drawn as that chart
+    draws it (register A6, 2026-09-14): three wedges — project duration,
+    completed and remaining — each labelled with its day count, the legend
+    underneath, in the palette's first three colours (the chart's own
+    accent 1-3).
 
-    A delay can be negative — the dashboard writes an early finish as -47 —
-    so the axis reaches below zero whenever it has to, rather than clipping
-    that bar away. `None` when there is no duration at all."""
+    The three come from the dashboard's duration block (Dashboard!W15:W17)
+    when it was imported, else from the project's own dates. The total sits
+    beside the two parts that make it up, exactly as the dashboard plots it;
+    the planners asked for that chart. `None` with no duration at all."""
     dur = ctx.get("duration") or {}
     total = dur.get("total")
     if total is None:
         return None
-    delay = dur.get("delay") or 0
-    bars = [
-        (labels.get("duration_days", "Project duration"), total, cfg["colors"]["chart_planned"]),
-        (labels.get("delay_days", "Delay (days)"), delay, cfg["colors"]["chart_actual"]),
+    palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
+    slices = [
+        (labels.get("duration_days", "Project duration"), total, palette[0]),
+        (labels.get("duration_elapsed", "Completed duration"), dur.get("elapsed"), palette[1 % len(palette)]),
+        (labels.get("duration_remaining", "Remaining duration"), dur.get("remaining"), palette[2 % len(palette)]),
     ]
-    low, high = min(0, total, delay), max(0, total, delay)
-    pad = (high - low) * 0.12 or 1
-    return _single_series_bars(
-        cfg, bars, width, height or 60 * mm,
-        value_min=low - (pad if low < 0 else 0), value_max=high + pad,
-        bar_fmt="%d", percent=False)
+    slices = [s for s in slices if s[1] is not None]
+    return _reference_pie(cfg, slices, width, height or 60 * mm, value_fmt=_count_label)
 
 
 def progress_comparison_chart(cfg, ctx, width, labels, height=None):
@@ -937,12 +979,20 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
     chart = VerticalBarChart()
     chart.x, chart.y = 24, 26
     chart.width, chart.height = width - 48, height - 46
-    series = [("planned", labels.get("planned", "Planned"), round(float(planned), 1), cfg["colors"]["chart_planned"]),
-              ("actual", labels.get("actual", "Actual"), round(float(actual), 1), cfg["colors"]["chart_actual"])]
+    series = [("planned", labels.get("planned", "Planned"), float(planned), cfg["colors"]["chart_planned"]),
+              ("actual", labels.get("actual", "Actual"), float(actual), cfg["colors"]["chart_actual"])]
     if earned is not None:
         palette = cfg["colors"].get("chart_palette") or []
         color = palette[2] if len(palette) > 2 else cfg["colors"]["chart_actual"]
-        series.append(("earned", labels.get("financial_percent", "Earned Value"), round(float(earned), 1), color))
+        name = labels.get("financial_percent", "Earned Value")
+        # The dashboard dates its invoiced figure separately from the rest
+        # ("Actual Invo. (C.D 08/07/2026)"), so the bar says which date it is
+        # rather than passing a three-week-old figure off as current.
+        source = ctx.get("financial_percent_source") or {}
+        if source.get("date"):
+            day = datetime.date.fromisoformat(source["date"])
+            name = f"{name} ({day:%d/%m/%Y})"
+        series.append(("earned", name, float(earned), color))
     # One series, N categories (one bar per category) — NOT N series of one
     # value each, which reportlab would space out as N *grouped* categories
     # instead of N adjacent same-group bars. Per-bar color needs the
@@ -962,7 +1012,7 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
         chart.bars[(0, i)].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = pt(7)
-    chart.barLabelFormat = "%0.1f%%"
+    chart.barLabelFormat = _pct_label
     chart.barLabels.nudge = 7
     d.add(chart)
     return d
@@ -990,10 +1040,12 @@ def progress_tracking_chart(cfg, ctx, width, labels, height=None):
     # sat 8pt under the legend baseline, so a 100% bar's own value label
     # collided with the legend text (found 2026-08-30 on the summary page).
     chart.width, chart.height = width - 48, height - 58
-    periods = [p for p in (("previous", prev), ("current", cur)) if p[1].get("actual") is not None]
+    periods = [p for p in (("previous", prev), ("current", cur))
+               if p[1].get("actual") is not None or p[1].get("planned") is not None]
+    # A figure no source states is no bar at all — never a 0% bar.
     chart.data = [
-        [round(float(p["planned"]), 1) if p.get("planned") is not None else 0.0 for _, p in periods],
-        [round(float(p["actual"]), 1) for _, p in periods],
+        [float(p["planned"]) if p.get("planned") is not None else None for _, p in periods],
+        [float(p["actual"]) if p.get("actual") is not None else None for _, p in periods],
     ]
     names = {"previous": labels.get("tracking_previous", "Previous month"),
              "current": labels.get("tracking_current", "Current month")}
@@ -1010,7 +1062,7 @@ def progress_tracking_chart(cfg, ctx, width, labels, height=None):
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
     chart.barLabels.fontSize = pt(6)
-    chart.barLabelFormat = "%0.0f%%"
+    chart.barLabelFormat = _pct_label
     chart.barLabels.nudge = 6
     d.add(chart)
     # Wrapped legend, not reportlab's fixed-pitch Legend: this panel is narrow
@@ -1048,7 +1100,7 @@ def budget_total_cost_chart(cfg, ctx, width, labels, height=None):
     if len(slices) < 2:
         return None
     height = height or 60 * mm
-    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
+    return _reference_pie(cfg, slices, width, height, value_fmt=_money_label)
 
 
 def overall_donut(cfg, ctx, width, labels, height=None):
@@ -1087,7 +1139,7 @@ def overall_donut(cfg, ctx, width, labels, height=None):
 
 
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None,
-                      thresholds=None, value_fmt="{:.0f}%"):
+                      thresholds=None, value_fmt="{:.2f}%"):
     """Semicircular SPI/completion gauge — 4 labeled bands (Poor/Average/Good/
     Excellent, red->orange->yellow->green) with a needle at `value`
     (0..max_value). `value` is a plain number (not read from ctx) so the
@@ -1435,7 +1487,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
             value = rows[-1].get(key) or 0
             colour = cfg["colors"]["chart_planned" if row == 0 else "chart_actual"]
             y = plot_y + plot_h * (min(top, max(0.0, float(value))) / top if top else 0)
-            _callout(d, plot_x + (len(rows) - 1) * step - 2, y + 3, f"{value:,.0f}",
+            _callout(d, plot_x + (len(rows) - 1) * step - 2, y + 3, _money_label(value),
                      fontName=_SANS_BOLD, fontSize=pt(6),
                      fillColor=hexcolor(colour), textAnchor="end")
 

@@ -300,7 +300,8 @@ def import_workbook(project, file_obj, *, replace=True, snapshot_date=None, sour
     if schedule_roots:
         return build_from_p6_schedule(project, schedule_roots,
                                       snapshot_date=snapshot_date, source=source,
-                                      unwrap_single_root=not is_segmented_id)
+                                      unwrap_single_root=not is_segmented_id,
+                                      stated_progress=getattr(schedule_roots, "stated_progress", None))
 
     if not parsed:
         # No zone-matrix sheets — fall back to the legacy 'FOR (P6)' sheet if the

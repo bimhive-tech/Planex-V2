@@ -119,15 +119,14 @@ def _scope_roles(project, schedule_import=None):
             "zone": zone, "area": area}
 
 
-def _planned_progress(project, as_of, current=False):
+def _planned_progress(project, as_of, current=False, schedule_import=None):
     """Planned % (0-100) — how much of the work the BASELINE says should be done.
 
-    `current=True` is the report's single as-of figure, and takes planned cost
-    over budget (services.project_planned_progress): the share of the money the
-    baseline expected to have been earned, which is what the planners' own
-    dashboard quotes and what makes this directly comparable to actual
-    progress. It falls back to the project's stated Schedule % Complete, and
-    then to the calendar.
+    `current=True` is the report's single as-of figure: the schedule's own
+    stated Schedule % Complete when the report reads the batch that stated it,
+    else planned cost over budget (services.project_planned_progress) over the
+    report's batch, then the calendar. `schedule_import` is the batch the
+    report reads; the stated figure only ever belongs to the latest one.
 
     Without `current` it is time elapsed along the contract calendar, matching
     the reference where an overdue scope reads 100%. That path exists for the
@@ -139,16 +138,20 @@ def _planned_progress(project, as_of, current=False):
     last resort — a cost-loaded programme is S-shaped, which is the whole
     reason the cost-based figure is preferred above."""
     if current:
-        # Planned cost over budget — the baseline's own share of the money,
-        # which is what the planners' dashboard quotes. Only ever for the
-        # report's ONE current figure: the S-curve calls this per historical
-        # snapshot date and must keep computing live, or every point on the
-        # curve would flatten to today's single number.
-        planned = project_planned_progress(project)
+        # The schedule's own stated Schedule % Complete first (register A1:
+        # where P6 states a figure, P6's figure is the one printed), then
+        # planned cost over budget, which reproduces it to within rounding
+        # (94.455 against the file's 94.45). Only ever for the report's ONE
+        # current figure: the S-curve calls this per historical snapshot date
+        # and must keep computing live, or every point on the curve would
+        # flatten to today's single number.
+        latest = latest_schedule_import(project)
+        if (project.imported_planned_progress_percent is not None
+                and (schedule_import is None or schedule_import == latest)):
+            return float(project.imported_planned_progress_percent)
+        planned = project_planned_progress(project, schedule_import)
         if planned is not None:
             return planned
-        if project.imported_planned_progress_percent is not None:
-            return float(project.imported_planned_progress_percent)
     s, f = project.planned_start, project.planned_finish
     if not (s and f and as_of and f > s):
         return None
@@ -625,9 +628,11 @@ def _scope_planned_progress(scope, project, as_of, planned_map=None):
     which is over a year late (reported 2026-09-02).
     """
     if planned_map:
-        from_schedule = planned_map.get(str(scope.id))
-        if from_schedule is not None:
-            return from_schedule
+        # A schedule that carries the column answers for every scope it
+        # covers. One it leaves out has no baseline figure — the calendar
+        # estimate below would print a number the source never stated
+        # (register A3, 2026-09-14).
+        return planned_map.get(str(scope.id))
     start = scope.planned_start or project.planned_start
     finish = scope.planned_finish or project.planned_finish
     if not (start and finish and as_of and finish > start):
@@ -893,6 +898,54 @@ def _strip_report_bound_props(el):
         props.pop("hidden_rows", None)
 
 
+def _financial_progress(project, panel, schedule_import=None):
+    """(financial progress %, {"source", "date"}) for the Progress Comparison
+    chart's third bar.
+
+    The dashboard's "Actual Invo." — the share of the contract invoiced, from
+    مقارنة مستخلصات — when a dashboard was imported: that is the financial
+    figure the planners publish, and P6 has no equivalent for it. P6's earned
+    value over budget otherwise, labelled as such. On a cost-weighted P6 file
+    that ratio IS the physical % complete, which is why the chart printed
+    59.5% twice where the dashboard says 51.28% invoiced (register A1,
+    2026-09-14)."""
+    invoiced = (panel or {}).get("invoiced") or {}
+    if invoiced.get("value") is not None:
+        return float(invoiced["value"]) * 100, {"source": "dashboard", "date": invoiced.get("date")}
+    earned = _financial_percent_complete(project, schedule_import)
+    return earned, ({"source": "p6", "date": None} if earned is not None else None)
+
+
+def _monthly_tracking(planned, overall, prev_snap, panel):
+    """Previous vs current month, planned and actual — the Project Tracking
+    bars.
+
+    The current month is this report's own planned and actual (P6 where it
+    states them, see _planned_progress / project_overall_progress), falling
+    back to the dashboard's current column. The previous month is the latest
+    progress snapshot before the report date, else the dashboard's previous
+    column, else nothing at all. It used to take the current month's planned
+    figure for the previous month too, drawing a "previous planned" bar no
+    source had ever stated (register A1, 2026-09-14). Dashboard figures are
+    fractions of 1."""
+    def pct(value):
+        return float(value) * 100 if value is not None else None
+
+    prev_panel, cur_panel = panel.get("previous") or {}, panel.get("current") or {}
+    prev_planned = prev_snap.get("planned_progress") if prev_snap else None
+    prev_actual = prev_snap.get("overall_progress") if prev_snap else None
+    return {
+        "previous": {
+            "planned": float(prev_planned) if prev_planned is not None else pct(prev_panel.get("planned")),
+            "actual": float(prev_actual) if prev_actual is not None else pct(prev_panel.get("actual")),
+        },
+        "current": {
+            "planned": planned if planned is not None else pct(cur_panel.get("planned")),
+            "actual": overall if overall is not None else pct(cur_panel.get("actual")),
+        },
+    }
+
+
 def _financial_percent_complete(project, schedule_import=None):
     """Project-wide financial % complete — sum(earned_value_cost) /
     sum(budgeted_cost) across every real P6-imported Activity (2026-08-30,
@@ -965,8 +1018,8 @@ def _boq_financial_progress(project, limit=12, schedule_import=None):
             # The money itself, for a chart that plots amounts rather than
             # shares — a budget line means more read as a figure than as a
             # percentage of something (2026-09-03).
-            "budget": round(budget, 2),
-            "earned": round(earned, 2),
+            "budget": budget,
+            "earned": earned,
         })
     return out
 
@@ -1133,7 +1186,7 @@ def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
         return {
             "name": _text(scope), "level": level, "start": scope.planned_start,
             "finish": scope.planned_finish, "revised_finish": scope.revised_finish,
-            "progress": round(pweight[sid] / weight[sid], 1),
+            "progress": pweight[sid] / weight[sid],
         }
 
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
@@ -1221,43 +1274,50 @@ def _area_dashboards(project, hierarchy, as_of, schedule_import=None, phases=Non
     return out
 
 
-def _critical_path_rows(project, hierarchy, as_of, schedule_import=None):
-    """Per-zone baseline finish vs current forecast, for zones carrying their
-    own P6-imported schedule (planned_start/finish) — the "which buildings
-    are slipping and by how much" table. `schedule_import` pins the batch —
-    see build_report_context's own resolution of it.
+def _critical_path_rows(project, hierarchy, scope_ids=None, schedule_import=None):
+    """One row per zone: its start, finish and total float, exactly as the P6
+    schedule states them for that zone's own activities.
 
-    Delay/forecast come straight from `_zone_duration` (see its own and
-    `_duration_for`'s docstrings for the 3-signal priority: explicit
-    revised_finish, then officially-overdue, then a pace-based estimate) —
-    passing this zone's real planned/actual % is what makes signal 3 available
-    here, the fix for a real bug (found 2026-08-25): every zone in a real,
-    badly slipping project showed exactly 0 days delay simply because none of
-    their individual deadlines had technically arrived yet, even though the
-    project-level dashboard (a different, already-correct calculation)
-    reported months of real slippage for the same project."""
-    zone_ids = [z["id"] for z in hierarchy]
-    scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
-    zones_by_id = {str(s.id): s for s in scopes.filter(id__in=zone_ids)}
+      start        the earliest P6 Start among them
+      finish       the latest P6 Finish among them (an actual finish once the
+                   work is done)
+      total_float  the lowest P6 Total Float among them, in days — the
+                   controlling path, the same way P6 rolls float up a WBS.
+                   Negative is late.
+
+    Nothing here is estimated (register A4, 2026-09-14). The table this
+    replaces printed a "contractual finish" that was really P6's current
+    Finish, an "expected finish" that was either the report date or a
+    Planex pace projection (11 Nov 2028 for a level P6 finishes on
+    08 Nov 2026), and a delay derived from both — 892 days for a zone P6
+    gives zero float. P6 carries no baseline finish per zone, so there is no
+    contractual date to print; float is what the schedule says about delay.
+
+    Zones follow `hierarchy`'s order and scope selection. A zone with no
+    dated activity is left out."""
+    from django.db.models import Max, Min
+
+    predicate, scope_to_zone = _scope_context(project, scope_ids, schedule_import)
+    activities = (project.activities.filter(schedule_import=schedule_import)
+                  if schedule_import else project.activities.all())
+    by_zone: dict[str, list] = {}
+    for aid, sid in activities.values_list("id", "scope_id"):
+        if not predicate(str(sid), aid):
+            continue
+        zone = scope_to_zone.get(str(sid))
+        if zone:
+            by_zone.setdefault(zone, []).append(aid)
+
     rows = []
     for z in hierarchy:
-        zone = zones_by_id.get(z["id"])
-        if not zone or not (zone.planned_start and zone.planned_finish):
+        ids = by_zone.get(z["id"])
+        if not ids:
             continue
-        dur = _zone_duration(zone, project, as_of, planned_pct=z.get("planned"), actual_pct=z.get("actual"))
-        if not dur:
+        agg = activities.filter(id__in=ids).aggregate(
+            start=Min("planned_start"), finish=Max("planned_finish"), total_float=Min("total_float"))
+        if agg["start"] is None and agg["finish"] is None:
             continue
-        delay = dur["delay"]
-        if zone.revised_finish and zone.revised_finish > zone.planned_finish:
-            forecast = zone.revised_finish
-        else:
-            forecast = zone.planned_finish + datetime.timedelta(days=delay) if delay else zone.planned_finish
-        rows.append({
-            "name": z["name"],
-            "planned_finish": zone.planned_finish,
-            "forecast_finish": forecast,
-            "delay_days": delay,
-        })
+        rows.append({"name": z["name"], **agg})
     return rows
 
 
@@ -1301,7 +1361,7 @@ def _zone_grids(project, zone_ids, scope_ids=None, progress=None):
             ci = col_pos.get(a["subzone_index"])
             if ci is not None:
                 val = progress.get(str(a["id"]), float(a["progress_percent"])) if progress is not None else float(a["progress_percent"])
-                row["cells"][ci] = round(val, 1)
+                row["cells"][ci] = val
 
         rows = [rows_by_index[i] for i in order]
         if columns and rows:
@@ -1344,7 +1404,7 @@ def build_report_context(report):
     # `current=True` regardless of dated field entries: like actual progress,
     # the planned figure now comes from the resolved import batch rather than
     # from elapsed calendar time, so the two stay directly comparable.
-    planned = _planned_progress(project, as_of, current=True)
+    planned = _planned_progress(project, as_of, current=True, schedule_import=schedule_import)
     dashboard = _dashboard_panels(project)
     # The dashboard's own duration block when it was imported (register F3) —
     # it states the duration, the delay and the time performance the client
@@ -1378,23 +1438,23 @@ def build_report_context(report):
     prev_zone = {z.get("name"): z.get("progress") for z in (prev_snap["zones"] or [])} if prev_snap else {}
     prev_scopes_map = (prev_snap.get("scopes") or {}) if prev_snap else {}
     prev_overall = float(prev_snap["overall_progress"]) if prev_snap else None
-    # "Project Tracking" bars (2026-08-30 — previous month vs. current month,
-    # planned vs. actual): reuses prev_overall/overall/planned above rather
-    # than a new query. `previous.actual` is None (not 0 — see
-    # progress_tracking_chart) when there's no snapshot before as_of at all,
-    # e.g. a project's very first report.
-    monthly_tracking = {
-        "previous": {"planned": planned, "actual": prev_overall},
-        "current": {"planned": planned, "actual": overall},
-    }
+    monthly_tracking = _monthly_tracking(
+        planned, overall, prev_snap, (dashboard.get("tracking") or {}))
 
     # Scope-aware: only zones with selected tasks appear; progress rolls up over
     # the selected tasks (empty selection = whole project).
     zones = _zone_rows(project, report.scope_ids, progress, schedule_import)
     work_progress = _work_rows(project, report.scope_ids, progress, schedule_import)
+    # Each zone's own planned figure: P6's Schedule % Complete rolled up over
+    # that zone's activities, the same way actual is. This used to copy the
+    # project's planned % onto every zone ("time-based baseline is
+    # project-wide"), so nine different buildings all read 94.46% planned — a
+    # number no source ever stated for any of them (register A3, 2026-09-14).
+    # A zone the schedule carries no baseline percentage for shows none.
+    zone_planned = scope_planned_map(project, schedule_import) or {}
     for z in zones:
         z["previous"] = prev_zone.get(z["name"])
-        z["planned"] = planned  # time-based baseline is project-wide
+        z["planned"] = zone_planned.get(z["id"])
 
     # Project -> Zone -> Subzone breakdown (one level deeper than `zones` above).
     hierarchy = _hierarchy_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
@@ -1412,7 +1472,8 @@ def build_report_context(report):
     # P6 activities' cost columns otherwise, as before.
     boq_financial_progress = (_dashboard_boq_rows(dashboard.get("boq"))
                               or _boq_financial_progress(project, schedule_import=schedule_import))
-    financial_percent_complete = _financial_percent_complete(project, schedule_import)
+    financial_percent_complete, financial_percent_source = _financial_progress(
+        project, dashboard.get("progress") or {}, schedule_import)
     # BCWS — what the baseline says should have been spent by now. None for a
     # source carrying no baseline percentage or no budget.
     planned_cost = project_planned_cost(project, schedule_import)
@@ -1424,7 +1485,7 @@ def build_report_context(report):
     phase_dashboards = _phase_rows(project, report.scope_ids, progress, prev_scopes_map, as_of, schedule_import)
     area_dashboards = _area_dashboards(
         project, hierarchy, as_of, schedule_import, phases=phase_dashboards)
-    critical_path = _critical_path_rows(project, hierarchy, as_of, schedule_import)
+    critical_path = _critical_path_rows(project, hierarchy, report.scope_ids, schedule_import)
     gantt = _gantt_rows(project, report.scope_ids, progress, schedule_import)
 
     # Grids are heavy (tens of thousands of cells); the PDF computes them lazily
@@ -1632,6 +1693,7 @@ def build_report_context(report):
         "discipline_columns": discipline_columns,
         "boq_financial_progress": boq_financial_progress,
         "financial_percent_complete": financial_percent_complete,
+        "financial_percent_source": financial_percent_source,
         "planned_cost": planned_cost,
         "spi": spi,
         "area_dashboards": area_dashboards,

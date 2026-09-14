@@ -79,11 +79,12 @@ class DashboardChartTests(SimpleTestCase):
     def test_time_performance_with_no_duration_draws_nothing(self):
         self.assertIsNone(resolve_chart("time_performance", "column", self.cfg, {}, {}, 131 * mm, 75 * mm))
 
-    def test_project_duration_reaches_below_zero_for_an_early_finish(self):
+    def test_project_duration_is_the_dashboards_working_days_pie(self):
+        from reportlab.graphics.charts.piecharts import Pie
+
         ctx = {"duration": _dashboard_duration(PANEL_DURATION)}
-        bars = _chart(resolve_chart("project_duration", "column", self.cfg, ctx, {}, 131 * mm, 75 * mm))
-        self.assertEqual(bars.data, [[1380.0, -47.0]])
-        self.assertLess(bars.valueAxis.valueMin, -47)
+        pie = _chart(resolve_chart("project_duration", "pie", self.cfg, ctx, {}, 131 * mm, 75 * mm), Pie)
+        self.assertEqual(pie.labels, ["1,380", "1,313", "67"])
 
     def test_submittal_counts_come_from_the_dashboard_grid(self):
         ctx = {"dashboard": {"submittals": {"shop_drawing": [
@@ -124,7 +125,7 @@ class DashboardChartTests(SimpleTestCase):
                                  {"name": "MEP Works", "progress": 50.14, "planned": 88.76}],
                "zones": [{"name": "Zone A", "progress": 10.0, "planned": 20.0}]}
         bars = _chart(resolve_chart("work_progress", "column", self.cfg, ctx, {}, 131 * mm, 75 * mm))
-        self.assertEqual(bars.data, [[100.0, 88.8], [100.0, 50.1]])
+        self.assertEqual(bars.data, [[100.0, 88.76], [100.0, 50.14]])
 
 
 class WorkRowsTests(TestCase):

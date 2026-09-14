@@ -342,7 +342,7 @@ def _record_milestones(project, tasks, schedule_import=None):
 
 
 def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
-                          unwrap_single_root=True):
+                          unwrap_single_root=True, stated_progress=None):
     """Create scopes + activities from a parsed P6 schedule tree.
 
     Scope type comes from a node's height above the activities, so the shape
@@ -357,7 +357,12 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     "CON" segment is a real Stage level that can legitimately be the file's
     only root — so its caller passes False; unwrapping there would silently
     delete the whole Stage level whenever a file has just one Construction
-    code, which is the common case."""
+    code, which is the common case.
+
+    `stated_progress` is what that scheme's parser read off the file's own
+    project-title row ({"actual", "planned"}, see
+    p6_id_schedule_import.ScheduleRoots) — the row never joins its tree, so it
+    can't be found in `roots` the way the leading-space scheme's is."""
     from django.utils import timezone
 
     from .imports import _guess_discipline, _save_snapshot, parse_date_from_name
@@ -380,6 +385,11 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
     # what the source schedule itself reports.
     project_pct = roots[0].get("pct") if len(roots) == 1 and unwrap_single_root else None
     project_schedule_pct = roots[0].get("schedule_pct") if len(roots) == 1 and unwrap_single_root else None
+    if stated_progress:
+        if project_pct is None:
+            project_pct = stated_progress.get("actual")
+        if project_schedule_pct is None:
+            project_schedule_pct = stated_progress.get("planned")
 
     milestone_tasks = _extract_milestones(roots)
     _prune_empty(roots)
@@ -482,17 +492,11 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
 
     milestones = _record_milestones(project, milestone_tasks, schedule_import=schedule_import)
 
-    # The Planex-code scheme builds its tree from the code column, so the
-    # project-title row (which carries no code) never becomes a root and can't
-    # supply these. Fall back to the weighted mean over the activities, which is
-    # the same aggregation the client's own reports quote.
-    if project_schedule_pct is None:
-        sched_w = sum(float(a.weight) for a in activities if a.schedule_percent is not None)
-        if sched_w:
-            project_schedule_pct = sum(
-                float(a.weight) * float(a.schedule_percent)
-                for a in activities if a.schedule_percent is not None) / sched_w
-
+    # Only what the file itself states is stored as "imported". A figure worked
+    # out here used to be stored in the same field whenever the file's own was
+    # missed (a weighted mean, 94.46 against the file's 94.45) and then read
+    # back as if P6 had said it (2026-09-14). With nothing stated, the fields
+    # stay empty and readers compute from the activities in the open.
     project.imported_progress_percent = Decimal(str(project_pct)) if project_pct is not None else None
     project.imported_planned_progress_percent = (
         Decimal(str(project_schedule_pct)) if project_schedule_pct is not None else None
@@ -525,9 +529,13 @@ def build_from_p6_schedule(project, roots, *, snapshot_date=None, source="",
         # the normal answer for a cost-loaded export — the stated project-row
         # percentage is only a summary of the same money, so the sums win and
         # this must not claim otherwise (see services.project_earned_progress).
+        # Which figure project_overall_progress just returned: the file's own
+        # stated percentage first (register A1), earned value where the file
+        # states none, the weighted roll-up otherwise.
         "overall_progress_source": (
-            "earned_value" if project_earned_progress(project, schedule_import) is not None
-            else "imported" if project_pct is not None else "computed"),
+            "imported" if project_pct is not None
+            else "earned_value" if project_earned_progress(project, schedule_import) is not None
+            else "computed"),
         "planned_progress": float(project_schedule_pct) if project_schedule_pct is not None else None,
         "snapshot_date": snap_date.isoformat(),
         "source_kind": "p6_schedule",

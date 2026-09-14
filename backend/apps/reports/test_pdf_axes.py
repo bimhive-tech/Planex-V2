@@ -68,10 +68,12 @@ class NumberFormatTests(SimpleTestCase):
         fmt = number_format(700_000_000, 100_000_000, 131 * mm, 6)
         self.assertEqual(fmt(700_000_000), "700,000,000")
 
-    def test_a_narrow_chart_compacts_without_rounding_a_tick(self):
+    def test_a_narrow_chart_still_writes_amounts_in_full(self):
+        """Register A2: amounts in full everywhere, even where a K/M/B tick
+        would have been shorter."""
         fmt = number_format(2_750_000_000, 250_000_000, 50 * mm, 6)
-        self.assertEqual(fmt(2_750_000_000), "2.75B")
-        self.assertEqual(fmt(250_000_000), "0.25B")
+        self.assertEqual(fmt(2_750_000_000), "2,750,000,000")
+        self.assertEqual(fmt(250_000_000), "250,000,000")
 
     def test_the_axis_leaves_the_data_range_alone(self):
         """Snapping out to whole steps spent a quarter of a small chart on
@@ -157,7 +159,8 @@ class ChartsFollowTheirSizeTests(SimpleTestCase):
         small = self._bars(resolve_chart("cashflow_monthly", "column", cfg, self._ctx(), {}, 60 * mm, 45 * mm))
         large = self._bars(resolve_chart("cashflow_monthly", "column", cfg, self._ctx(), {}, 267 * mm, 150 * mm))
         self.assertGreater(small.valueAxis.valueStep, large.valueAxis.valueStep)
-        self.assertIn("M", small.valueAxis.labelTextFormat(small.valueAxis.valueStep))
+        self.assertEqual(small.valueAxis.labelTextFormat(small.valueAxis.valueStep),
+                         f"{small.valueAxis.valueStep:,.0f}")
         self.assertEqual(large.valueAxis.labelTextFormat(large.valueAxis.valueStep),
                          f"{large.valueAxis.valueStep:,.0f}")
         self.assertIn("Mar 22", large.categoryAxis.categoryNames)

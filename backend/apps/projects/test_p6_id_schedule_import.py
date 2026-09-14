@@ -455,15 +455,21 @@ class ScheduleCompletePlannedTests(TestCase):
         # wrong answer — kept only for sources carrying no such column.
         self.assertLess(_scope_planned_progress(zone, project, as_of), 100.0)
 
-    def test_project_planned_falls_back_to_the_weighted_activities(self):
-        """The Planex-code tree is built from the code column, so the project
-        title row never becomes a root and can't supply the project figure."""
+    def test_no_stated_planned_figure_is_stored_when_the_file_states_none(self):
+        """Only what the file states is stored as imported. Without a title
+        row there is nothing stated, so the field stays empty and the report
+        works the figure out in the open (planned cost over budget, 62.5% here)
+        instead of reading a Planex average back as if P6 had said it
+        (register A1, 2026-09-14)."""
+        from .services import project_planned_progress
+
         project = self._import([
             self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-1", "A-1", "Cheap", 1, 1000),
             self._row("MN(6)-CON-0-0-PH1-Z(A)-0-B6-Finishes-2", "A-2", "Dear", 0.5, 3000),
         ])
         project.refresh_from_db()
-        self.assertEqual(float(project.imported_planned_progress_percent), 62.5)
+        self.assertIsNone(project.imported_planned_progress_percent)
+        self.assertEqual(project_planned_progress(project), 62.5)
 
     def test_a_source_without_the_column_is_unchanged(self):
         """Zone trackers and older exports carry no Schedule % Complete; they

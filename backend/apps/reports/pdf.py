@@ -32,7 +32,8 @@ from .constants import PERCENT_DECIMALS, merged_config
 from .richtext import html_to_flowables
 from .services import _zone_grids
 from .pdf_base import (
-    BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, format_money, has_arabic, hexcolor, resolve_arabic, shape,
+    BOLD, FONT_NAME, cached_image_bytes, ensure_fonts, format_money, format_quantity, has_arabic, hexcolor,
+    resolve_arabic, shape,
 )
 from .pdf_charts import (
     area_units_chart,
@@ -57,6 +58,7 @@ from .pdf_tables import (
     _pct_or_dash,
     _styles,
     enum_label,
+    fmt_percent,
 )
 
 
@@ -335,7 +337,7 @@ def _grid_section(cfg, styles, grids, width, labels, rtl):
                     r += 1
                 vals = row["cells"][start:start + max_cols]
                 data.append([Paragraph(shape(row["name"]), task)] +
-                            [Paragraph(f"{v:.0f}%" if v is not None else "", cell) for v in vals])
+                            [Paragraph(fmt_percent(v) if v is not None else "", cell) for v in vals])
                 r += 1
             t = Table(data, colWidths=[task_w] + [sub_w] * n, repeatRows=2)
             t.setStyle(TableStyle([
@@ -555,7 +557,7 @@ def build_report_pdf(report, ctx, out_pages=None, *, cfg=None) -> bytes:
             (labels.get("info_revised", "Revised finish"), _fmt_date(p["revised_finish"]) if p.get("revised_finish") else ""),
             (labels.get("info_forecast", "Forecast finish"), _fmt_date(p.get("forecast_finish")) if p.get("forecast_finish") else ""),
             (labels.get("info_delay", "Delay"), f"{dur['delay']} {labels['unit_days']}" if dur.get("delay") else ""),
-            (labels["info_size"], f"{p['size_sqm']:,.0f} {labels['unit_sqm']}" if p["size_sqm"] else ""),
+            (labels["info_size"], f"{format_quantity(p['size_sqm'])} {labels['unit_sqm']}" if p["size_sqm"] else ""),
             (labels.get("info_part_amount", "(Part) Amount"), format_money(p.get("part_amount"), p.get("currency"))),
             (labels.get("info_part_completion_revised", "(Part) Completion Date (Revised Baseline)"),
              _fmt_date(p.get("part_completion_revised")) if p.get("part_completion_revised") else ""),

@@ -1,10 +1,14 @@
 """Read the summary panels off a dashboard workbook's "Dashboard" sheet.
 
-Three panels the report charts directly (planner review, register F3-F5):
+Panels the report charts directly (planner review, register F3-F5, A1):
 
   duration     the project duration block and its delay
   submittals   the shop-drawing and material-submittal grids
   boq          "Financial Progress according to BOQ"
+  progress     "Progress Comparison": planned, actual invoiced and earned
+               value, each with the data date its label states
+  tracking     "Project Tracking": planned and actual, previous and current
+               month
 
 Every panel is found by its own LABELS, never by a fixed cell. Two real
 dashboards built from the same template already disagree on where things sit
@@ -20,10 +24,15 @@ Shapes, as stored on DashboardPanels.data:
               "material": [...]}
   boq        {"total": float|None,
               "rows": [{"category", "budget_share", "financial_percent"}]}
+  progress   {"planned": {"value", "date"}, "invoiced": {...}, "earned": {...}}
+  tracking   {"previous": {"planned", "actual"}, "current": {"planned", "actual"}}
 
 Percentages are kept as the sheet stores them — fractions of 1 — and scaled to
 0-100 only where the report draws them, so nothing here rounds.
 """
+import datetime
+import re
+
 import openpyxl
 
 SHEET = "dashboard"
@@ -199,6 +208,79 @@ def parse_boq(rows) -> dict:
     return {}
 
 
+# "Planned (C.D 30/07/2026)" — the data date a Progress Comparison label
+# carries. C.D is the dashboard's own "cut-off date".
+_CUTOFF = re.compile(r"c\.?\s*d\.?\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?")
+
+# Progress Comparison rows, by what their label starts with. The template
+# repeats the block for the part further down the sheet; the first (the whole
+# contract) is the one read.
+_PROGRESS_ROWS = (("planned", "planned (c"), ("invoiced", "actual invo"), ("earned", "earned value (c"))
+
+
+def _cutoff_date(label):
+    match = _CUTOFF.search(label)
+    if not match or not match.group(3):
+        return None
+    day, month, year = (int(g) for g in match.groups())
+    try:
+        return datetime.date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def parse_progress(rows) -> dict:
+    """The "Progress Comparison" block: planned, actual invoiced and earned
+    value as the dashboard states them (fractions of 1), each with the
+    cut-off date its own label names — the invoiced figure is usually dated
+    earlier than the other two, and the report says so rather than hiding it.
+
+    Actual invoiced is the one figure here P6 has no equivalent for: it is
+    how much of the contract has been invoiced, from مقارنة مستخلصات, where
+    P6's earned value is how much work is done."""
+    out = {}
+    for row in rows:
+        for c, cell in enumerate(row):
+            label = _norm(cell)
+            for key, prefix in _PROGRESS_ROWS:
+                if key in out or not label.startswith(prefix):
+                    continue
+                value = next((_number(v) for v in row[c + 1:c + 1 + _VALUE_REACH]
+                              if _number(v) is not None), None)
+                if value is not None:
+                    out[key] = {"value": value, "date": _cutoff_date(label)}
+    return out
+
+
+def parse_tracking(rows) -> dict:
+    """The "Project Tracking" block: a header row naming the previous and the
+    current month's columns, then "% Planned" and "% Actual" rows beneath.
+    Only the first block (the whole contract) is read."""
+    for r, row in enumerate(rows):
+        cols = {}
+        for c, cell in enumerate(row):
+            label = _norm(cell)
+            if "progress previous month" in label:
+                cols.setdefault("previous", c)
+            elif "progress current month" in label:
+                cols.setdefault("current", c)
+        if len(cols) < 2:
+            continue
+        found = {}
+        for below in rows[r + 1:r + 10]:
+            for cell in below:
+                label = _norm(cell).replace(" ", "")
+                series = "planned" if label.startswith("%planned") else "actual" if label.startswith("%actual") else None
+                if series and series not in found:
+                    found[series] = {period: _number(below[col]) if col < len(below) else None
+                                     for period, col in cols.items()}
+        if not found:
+            return {}
+        return {period: {series: (found.get(series) or {}).get(period) for series in ("planned", "actual")}
+                for period in ("previous", "current")}
+    return {}
+
+
 def parse_dashboard_panels(wb) -> dict:
     """Every panel the workbook's Dashboard sheet carries, or {} without one."""
     sheet = next((ws for ws in wb.worksheets if ws.title.strip().lower() == SHEET), None)
@@ -209,6 +291,8 @@ def parse_dashboard_panels(wb) -> dict:
         "duration": parse_duration(rows),
         "submittals": parse_submittals(rows),
         "boq": parse_boq(rows),
+        "progress": parse_progress(rows),
+        "tracking": parse_tracking(rows),
     }
     return {k: v for k, v in out.items() if v}
 

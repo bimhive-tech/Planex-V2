@@ -193,6 +193,19 @@ def _looks_like_planex_code(rows, code_col) -> bool:
     return seen > 0 and hits / seen >= _MATCH_RATIO
 
 
+class ScheduleRoots(list):
+    """The parsed tree, plus what the file's own project-title row states.
+
+    `stated_progress` is {"actual": Performance % Complete, "planned": Schedule
+    % Complete} off that row — the figures P6 itself reports for the whole
+    project. The title row carries no Planex Code, so it never becomes part of
+    the tree; without keeping it here the import stored a weighted average of
+    its own instead (94.46 where the file says 94.45, 2026-09-14). Still a
+    list, so every caller that only wants the roots is unaffected."""
+
+    stated_progress: dict | None = None
+
+
 def _new_group(name: str, stype: str | None = None, placeholder: bool = False) -> dict:
     # `stype` is set only when the file's own legend says what this segment is
     # (see slot_path); otherwise it stays None and the tree falls back to
@@ -418,9 +431,10 @@ def parse_id_schedule_sheets(wb):
         # schedule, which has already absorbed the delay, so elapsed time
         # against them can never show a project as behind (2026-09-02).
         sched_pct_c = cols.get("schedule % complete")
+        perf_pct_c = cols.get("performance % complete")
 
         by_path: dict[tuple, dict] = {}
-        roots: list[dict] = []
+        roots = ScheduleRoots()
 
         def node_for(path: tuple, stypes: tuple = (), empties: tuple = ()) -> dict:
             """Get-or-create the group node at `path`, creating any missing
@@ -462,6 +476,15 @@ def parse_id_schedule_sheets(wb):
                 # A WBS heading row (no Activity Name) — just update the label
                 # stack; it carries no Planex Code of its own either way.
                 depth = _leading_spaces(act_id)
+                if depth == 0 and roots.stated_progress is None and not heading_stack:
+                    # The project-title row, the first heading in the file:
+                    # what P6 states for the whole project.
+                    roots.stated_progress = {
+                        "actual": _to_pct_optional(row[perf_pct_c]) if perf_pct_c is not None
+                                  and perf_pct_c < len(row) else None,
+                        "planned": _to_pct_optional(row[sched_pct_c]) if sched_pct_c is not None
+                                   and sched_pct_c < len(row) else None,
+                    }
                 while heading_stack and heading_stack[-1][0] >= depth:
                     heading_stack.pop()
                 heading_stack.append((depth, act_id.strip()))

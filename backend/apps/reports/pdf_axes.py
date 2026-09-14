@@ -6,8 +6,7 @@ choice here is made from the space the axis actually has, and both the canvas
 and the PDF land on the same answer:
 
   value axes  the finest 1-2-2.5-5 tick step whose labels stand clear of each
-              other; money writes out in full while it fits and in K/M/B once
-              it would crowd the plot
+              other; amounts are always written in full
   date axes   the finest calendar unit — day, month, quarter, year — whose
               labels fit, so a long cash flow reads in years on a small chart
               and month by month on a large one
@@ -38,12 +37,6 @@ DATE_LABEL_PITCH = 1.6
 _LABEL_GAP = 3
 
 _NICE_MULTIPLIERS = (1, 2, 2.5, 5)
-
-# Money compacts only when its full figure would take more than this share of
-# the chart's width as a tick label.
-MONEY_LABEL_SHARE = 0.14
-
-_MONEY_UNITS = ((1e9, "B"), (1e6, "M"), (1e3, "K"))
 
 
 def text_width(text, font_size):
@@ -94,20 +87,16 @@ def _decimals_for(step):
 
 
 def number_format(top, step, chart_width, font_size):
-    """Tick-label formatter for a count or money axis reaching `top`.
+    """Tick-label formatter for a count or money axis reaching `top`: every
+    tick written in full ("2,750,000,000"), with just enough decimals to write
+    every multiple of the step exactly.
 
-    Written in full ("2,750,000,000") while that fits within
-    MONEY_LABEL_SHARE of the chart's width, else in the largest of K/M/B that
-    the top reaches ("2.75B"), with just enough decimals to write every tick
-    step exactly — a compact label is shorter, never rounded."""
-    full = lambda v: f"{v:,.{_decimals_for(step)}f}"  # noqa: E731
-    if text_width(full(top), font_size) <= chart_width * MONEY_LABEL_SHARE:
-        return full
-    for unit, suffix in _MONEY_UNITS:
-        if abs(top) >= unit:
-            places = _decimals_for(step / unit)
-            return lambda v, u=unit, s=suffix, p=places: f"{v / u:,.{p}f}{s}"
-    return full
+    Axes used to shorten to K/M/B once the full figure crowded a small chart.
+    The planners want amounts in full everywhere a report prints one
+    (register A2, 2026-09-14), so a small chart spends the width instead.
+    `top`, `chart_width` and `font_size` stay in the signature for callers
+    that size the plot from the result."""
+    return lambda v: f"{v:,.{_decimals_for(step)}f}"
 
 
 def number_axis(axis, lo, hi, length, font_size, chart_width, *, headroom=1.0):

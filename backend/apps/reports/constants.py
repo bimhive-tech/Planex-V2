@@ -294,7 +294,8 @@ DEFAULT_CONFIG = {
         "time_performance": "الأداء الزمني",
         # The summary's two progress bar charts (F6): by place, and by trade.
         "work_progress": "الإنجاز حسب التخصص",
-        "project_duration": "مدة المشروع والتأخير",
+        # The dashboard's own "DURATION (Working Days)" pie (register A6).
+        "project_duration": "المدة (أيام العمل)",
         "time_elapsed": "المدة المنقضية",
         "time_remaining": "المدة المتبقية",
         "delay_days": "Delay (days)",
@@ -341,6 +342,10 @@ DEFAULT_CONFIG = {
         "col_task": "Task",
         "critical_path_delays": "المسار الحرج للتأخيرات",
         "col_forecast_finish": "النهاية المتوقعة",
+        # The critical path table's P6 columns (register A4).
+        "col_start": "البداية",
+        "col_finish": "النهاية",
+        "col_total_float": "الفائض الكلي (يوم)",
         "activity_schedule": "Activity Schedule Detail",
         "col_bl_duration": "BL Duration",
         "col_original_duration": "Original Duration",

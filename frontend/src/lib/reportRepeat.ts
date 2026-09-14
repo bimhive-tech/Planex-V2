@@ -109,7 +109,8 @@ export function resolveItemField(source: string, item: RepeatItem | null): strin
   if (key === "caption") return item.caption != null ? String(item.caption) : null;
   if (key === "progress" || key === "planned" || key === "previous") {
     const value = key === "progress" ? (item.progress ?? item.actual) : item[key];
-    return typeof value === "number" ? `${value.toFixed(1)}%` : null;
+    // The report's precision (pdf_tables.fmt_percent), never rounded further.
+    return typeof value === "number" ? `${value.toFixed(2)}%` : null;
   }
   return null;
 }
