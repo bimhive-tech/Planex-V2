@@ -409,19 +409,30 @@ function HeaderCell({
  * pre-formatted strings, unlike every other table kind. */
 const fmtPctOrDash = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
 
+/** Left/right cell padding pdf_tables.py sets on every table (LEFTPADDING/
+ * RIGHTPADDING, in points). */
+const TABLE_CELL_PAD_X_PT = 8;
+
 /** CSS custom properties, not literal colors — the one CLAUDE.md-sanctioned
  * use of inline style, since these values are genuinely dynamic (the real
  * PDF's own per-report color scheme, from cfg["colors"]/cfg["table"] — see
- * table_data's docstring), not something a stylesheet could hardcode. */
-function tableStyleVars(style: TableStyle | null | undefined): React.CSSProperties {
+ * table_data's docstring), not something a stylesheet could hardcode.
+ *
+ * Font size and padding are points on the PDF, converted through `scale`
+ * like every other piece of text on the canvas. As fixed pixels they stayed
+ * the same size while the box around them grew and shrank with zoom, so the
+ * summary page's info table filled its box at one zoom and a third of it at
+ * another (reported 2026-09-14). */
+function tableStyleVars(style: TableStyle | null | undefined, scale: number): React.CSSProperties {
   return {
     "--tableBorder": style?.border ? (style?.border_color ?? "#000000") : "transparent",
     "--tableHeaderBg": style?.header_bg ?? "#1F4E79",
     "--tableHeaderText": style?.header_text ?? "#ffffff",
     "--tableZebra": style?.zebra_color ?? "#eef3f8",
     "--tableSummary": style?.summary_bg ?? "#dce6f1",
-    "--tableFontSize": `${style?.font_size ?? 8}px`,
-    "--tableCellPadding": `${style?.cell_padding ?? 3}px`,
+    "--tableFontSize": `${ptToPx(style?.font_size ?? 8, scale)}px`,
+    "--tableCellPadding": `${ptToPx(style?.cell_padding ?? 3, scale)}px`,
+    "--tableCellPadX": `${ptToPx(TABLE_CELL_PAD_X_PT, scale)}px`,
   } as React.CSSProperties;
 }
 
@@ -810,6 +821,15 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
   );
 }
 
+/** The strips pdf_canvas.py reserves above/below a table or chart box
+ * (_TITLE_H/_CAPTION_H, mm) and the text sizes _draw_title_text/
+ * _draw_caption_text draw in them (pt) — so the canvas takes the same space
+ * off the box at every zoom, and the chart inside is the size it prints. */
+const TITLE_STRIP_MM = 7;
+const TITLE_FONT_PT = 9;
+const CAPTION_STRIP_MM = 8;
+const CAPTION_FONT_PT = 8;
+
 /** Reserves a header strip above and/or a footer strip under a table/chart
  * box — mirrors apps/reports/pdf_canvas.py's _TITLE_H/_CAPTION_H reservation
  * in _draw_table_element/_draw_chart_element. `titleShow` defaults to shown
@@ -825,13 +845,20 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
  * PreviewProps.labels — so the only gap left versus the download is the
  * missing running number, not the language/wording. */
 function CaptionedBox({
-  titleShow, titleText, captionShow, captionText, children,
+  titleShow, titleText, captionShow, captionText, scale, children,
 }: {
-  titleShow: boolean; titleText: string; captionShow: boolean; captionText: string; children: React.ReactNode;
+  titleShow: boolean; titleText: string; captionShow: boolean; captionText: string; scale: number;
+  children: React.ReactNode;
 }) {
   if (!titleShow && !captionShow) return <>{children}</>;
+  const strips = {
+    "--stripTitleH": `${TITLE_STRIP_MM * scale}px`,
+    "--stripTitleFont": `${ptToPx(TITLE_FONT_PT, scale)}px`,
+    "--stripCaptionH": `${CAPTION_STRIP_MM * scale}px`,
+    "--stripCaptionFont": `${ptToPx(CAPTION_FONT_PT, scale)}px`,
+  } as React.CSSProperties;
   return (
-    <div className={styles.captionedBox}>
+    <div className={styles.captionedBox} style={strips}>
       {titleShow && <div className={styles.elementTitle}>{titleText}</div>}
       <div className={styles.captionedBoxBody}>{children}</div>
       {captionShow && <div className={styles.elementCaption}>{captionText}</div>}
@@ -1264,6 +1291,7 @@ export function ElementPreview({
           titleText={String(p.title_text || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
           captionShow={Boolean(p.show_caption)}
           captionText={String(p.caption || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
+          scale={scale}
         >
           <TablePreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
@@ -1280,6 +1308,7 @@ export function ElementPreview({
           titleText={String(p.title_text || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
           captionShow={Boolean(p.show_caption)}
           captionText={String(p.caption || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
+          scale={scale}
         >
           <ChartPreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}
@@ -1345,7 +1374,7 @@ function LiveTableBody({
   // the PDF itself uses for this table's source.
   const sized = cols.pinned;
 
-  const vars = tableStyleVars(live.style);
+  const vars = tableStyleVars(live.style, scale);
   const tint = new Set(live.tint_rows ?? []);
 
   if (live.kind === "info") {

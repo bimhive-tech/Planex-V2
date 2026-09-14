@@ -94,7 +94,7 @@ export function ReportLayoutEditor({
   // Debounced and cheap (no PDF assembly, no full-page rasterization), so
   // every edit updates them directly instead of waiting on an explicit
   // refresh or a save.
-  const { charts: chartSvgs, labels: chartLabels, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
+  const { charts: chartSvgs, labels: chartLabels, colors: chartColors, loaded: chartsLoaded } = useChartSvgs(reportId, pages, masterElements);
   const { tables: tableData, labels: tableLabels, loaded: tablesLoaded } = useTableData(reportId, pages, masterElements);
   // Same dict from either endpoint (both derive it from this report's own
   // cfg) — whichever fired first (a report might have only tables, or only
@@ -225,6 +225,7 @@ export function ReportLayoutEditor({
         tocCaptions={tocCaptions}
         previewsReady={previewsReady}
         labels={labels}
+        chartColors={chartColors}
       />
       <Modal
         open={confirmingReset}

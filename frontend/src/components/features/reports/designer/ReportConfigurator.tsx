@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { newElementId, REPEAT_SOURCES } from "@/lib/reportLayout";
+import type { ReportColors } from "@/lib/reportLayout";
 import { buildTocOverflowPages, tocEntriesFor } from "@/lib/reportToc";
 import type {
   ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, ReportLabels, TableDataMap,
@@ -73,11 +74,14 @@ interface Props {
    * alongside liveData; undefined in the Template Builder (no real report to
    * derive an effective config from). */
   labels?: ReportLabels;
+  /** This report's effective colour scheme — see ReportColors; the chart
+   * style block's pickers default to it. Same scoping as `labels`. */
+  chartColors?: ReportColors;
 }
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, projectId, onAssetsChanged, masterElements, onMasterElementsChange,
-  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true, labels,
+  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true, labels, chartColors,
 }: Props) {
   // Real, downloaded-PDF-accurate continuation pages spliced in after any
   // page whose table overflows its box (see buildOverflowPages) — these
@@ -610,6 +614,7 @@ export function ReportConfigurator({
       tocEntries={tocEntries}
       ownPageId={active.id}
       labels={labels}
+      chartColors={chartColors}
       history={history}
       historyPageId={editingHeader ? HEADER_PAGE_ID : active.id}
       // 2026-08-26 (client ask): the bottom Canva-style page-thumbnail

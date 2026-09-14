@@ -53,6 +53,12 @@ export type ChartSvgMap = Record<string, ChartSvgResult>;
  * than in the download. */
 export type ReportLabels = Record<string, string>;
 
+/** This report's effective colour scheme (cfg["colors"] — see
+ * apps/reports/constants.py), as chart_svgs returns it: the defaults a
+ * chart element's own colour pickers show until it overrides one. The
+ * palette is a list; everything else a hex string. */
+export type ReportColors = Record<string, string | string[]>;
+
 /** One table element's live, real data — see useTableData and
  * apps/reports/views.py's table_data action, which returns the exact same
  * header/rows resolve_table computes for the real PDF table (raw=True mode)

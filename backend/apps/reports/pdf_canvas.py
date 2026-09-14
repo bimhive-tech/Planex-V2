@@ -537,6 +537,19 @@ def _draw_title_text(c, x, y, w, title_h, text):
     para.drawOn(c, x, y)
 
 
+def chart_box_content(props, cfg, h):
+    """(content height, caption strip, title strip) of a chart box `h` tall.
+
+    One helper so the PDF, the has-content check and the Customize canvas's
+    live SVGs all draw a chart at the same size. The canvas used to request
+    its SVG at the full box height and then fit it under its own title
+    strip, so a chart on the canvas never quite matched the download and
+    its text read smaller (2026-09-14)."""
+    caption_h = _CAPTION_H if props.get("show_caption") else 0
+    title_h = _TITLE_H if _table_or_chart_title(props, cfg) else 0
+    return h - caption_h - title_h, caption_h, title_h
+
+
 def _table_or_chart_title(props, cfg):
     """The title text a table/chart element draws above its own box, or None
     when explicitly turned off. Defaults to **shown** (missing/unset
@@ -782,10 +795,8 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
 def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_id=None):
     source = props.get("source", "")
     show_caption = bool(props.get("show_caption"))
-    caption_h = _CAPTION_H if show_caption else 0
     title = _table_or_chart_title(props, cfg)
-    title_h = _TITLE_H if title else 0
-    content_h = h - caption_h - title_h
+    content_h, caption_h, title_h = chart_box_content(props, cfg, h)
     min_w, min_h = MIN_CHART_W_MM * mm, MIN_CHART_H_MM * mm
     if w < min_w or content_h < min_h:
         # Draw nothing, same as the no-data case: a dashed "Chart too small"
@@ -795,7 +806,8 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
         # tab flags this per element, where the author can act on it.
         return
     drawing = resolve_chart(
-        source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h, scope_zone_id=props.get("scope_zone_id"),
+        source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
+        scope_zone_id=props.get("scope_zone_id"), props=props,
     )
     if drawing is None:
         return  # nothing real to draw — see _draw_placeholder's docstring
@@ -1599,7 +1611,26 @@ def _spi_gauge(value, w, cfg, labels, h):
 
 
 def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float,
-                  scope_zone_id: str | None = None):
+                  scope_zone_id: str | None = None, props: dict | None = None):
+    """`_resolve_chart` under the element's own style: its colours and
+    wording patched into a copy of `cfg` (pdf_charts.chart_style_override),
+    its text size and legend applied while it draws (chart_options), and its
+    printed values stripped afterwards when it turned them off. One wrapper,
+    so the PDF, the has-content check, the Customize canvas and a rich-text
+    embed all style a chart the same way."""
+    from .pdf_charts import chart_options, chart_style_override, hide_values
+
+    props = props or {}
+    with chart_options(props):
+        drawing = _resolve_chart(source, chart_type, chart_style_override(cfg, props), ctx, scope, w, h,
+                                 scope_zone_id=scope_zone_id, props=props)
+    if drawing is not None and props.get("show_values") is False:
+        hide_values(drawing)
+    return drawing
+
+
+def _resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float,
+                   scope_zone_id: str | None = None, props: dict | None = None):
     """Build a ready-to-draw Drawing for one of reportElements.ts's
     CHART_SOURCES (plus the item-scoped `item.units`/`item.duration`,
     available on a repeating page), at the given box size (points) — or None
@@ -1610,8 +1641,12 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     before handing off to the chart builder, the same "filter the already-
     computed context, don't re-query" approach `resolve_table` uses below.
     Only `zone_progress` reads it today — the other chart sources aren't
-    zone-shaped data to begin with."""
+    zone-shaped data to begin with.
+
+    `props` is the element's whole props dict, for the few choices a chart
+    element makes about its own drawing (the BOQ chart's `value_mode`)."""
     labels = cfg["labels"]
+    props = props or {}
 
     if source == "item.units":
         item = scope.get("item") or {}
@@ -1673,7 +1708,8 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     if source == "budget_total_cost":
         return budget_total_cost_chart(cfg, ctx, w, labels, height=h)
     if source == "boq_financial_progress":
-        return boq_financial_progress_chart(cfg, ctx, w, labels, height=h)
+        return boq_financial_progress_chart(cfg, ctx, w, labels, height=h,
+                                            value_mode=props.get("value_mode"))
     if source == "progress_comparison":
         return progress_comparison_chart(cfg, ctx, w, labels, height=h)
     if source == "progress_tracking":
@@ -2108,9 +2144,7 @@ def _element_will_draw(el, inst, cfg, ctx) -> bool:
     props = el.get("props") or {}
     source = props.get("source", "")
     w, h = float(el.get("w", 0)) * mm, float(el.get("h", 0)) * mm
-    caption_h = _CAPTION_H if props.get("show_caption") else 0
-    title_h = _TITLE_H if _table_or_chart_title(props, cfg) else 0
-    content_h = h - caption_h - title_h
+    content_h, _, _ = chart_box_content(props, cfg, h)
 
     # Memoized: _collect_captions runs TWICE (before and after overflow
     # expansion), so an un-cached check here resolved every captioned chart
@@ -2135,7 +2169,7 @@ def _element_will_draw(el, inst, cfg, ctx) -> bool:
                 return _remember(False)
             return _remember(resolve_chart(
                 source, props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
-                scope_zone_id=props.get("scope_zone_id")) is not None)
+                scope_zone_id=props.get("scope_zone_id"), props=props) is not None)
         return _remember(resolve_table(
             source, cfg, ctx, inst.scope, avail_width=w,
             overrides=props.get("overrides"), style=props,

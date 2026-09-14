@@ -401,7 +401,8 @@ class ReportViewSet(viewsets.ModelViewSet):
         from reportlab.lib.units import mm as _mm
 
         from .pdf_base import ensure_fonts
-        from .pdf_canvas import MIN_CHART_H_MM, MIN_CHART_W_MM, expand_pages, resolve_chart
+        from .pdf_canvas import (MIN_CHART_H_MM, MIN_CHART_W_MM, chart_box_content, expand_pages,
+                                 resolve_chart)
 
         report = self.get_object()
         override = request.data.get("layout_override")
@@ -419,18 +420,23 @@ class ReportViewSet(viewsets.ModelViewSet):
                     continue
                 props = el.get("props") or {}
                 w, h = float(el.get("w", 0)) * _mm, float(el.get("h", 0)) * _mm
-                if w < min_w or h < min_h:
+                # The same strips the PDF takes off for the title and caption,
+                # so the canvas shows the chart at the size it will print.
+                content_h, _, _ = chart_box_content(props, cfg, h)
+                if w < min_w or content_h < min_h:
                     charts[el["id"]] = {"status": "too_small"}
                     continue
                 drawing = resolve_chart(
-                    props.get("source", ""), props.get("chart_type"), cfg, ctx, inst.scope, w, h,
-                    scope_zone_id=props.get("scope_zone_id"),
+                    props.get("source", ""), props.get("chart_type"), cfg, ctx, inst.scope, w, content_h,
+                    scope_zone_id=props.get("scope_zone_id"), props=props,
                 )
                 if drawing is None:
                     charts[el["id"]] = {"status": "no_data"}
                     continue
                 charts[el["id"]] = {"status": "ok", "svg": renderSVG.drawToString(drawing)}
-        return Response({"charts": charts, "labels": cfg["labels"]})
+        # The colours too: the Properties panel's colour pickers show the
+        # report's own defaults for a chart that hasn't overridden them.
+        return Response({"charts": charts, "labels": cfg["labels"], "colors": cfg["colors"]})
 
     @action(detail=True, methods=["post"], url_path="table-data")
     def table_data(self, request, pk=None):

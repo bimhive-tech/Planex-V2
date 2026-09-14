@@ -3190,7 +3190,10 @@ class ReportsApiTests(TestCase):
                 "id": "p1", "name": "Page 1", "elements": [
                     # "breakdown" (overall_donut) always resolves — ctx["overall"]
                     # is computed for every real project, even with no activities.
-                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 50, "z": 0,
+                    # 60mm tall: the default title strip comes off the box first,
+                    # exactly as it does in the PDF (pdf_canvas.chart_box_content),
+                    # and what's left has to clear MIN_CHART_H_MM.
+                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 60, "z": 0,
                      "props": {"source": "breakdown", "chart_type": "donut"}},
                 ],
             }]},
@@ -3241,7 +3244,7 @@ class ReportsApiTests(TestCase):
         draft_override = {
             "layout": {"pages": [{
                 "id": "p1", "name": "Page 1", "elements": [
-                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 50, "z": 0,
+                    {"id": "chart1", "type": "chart", "x": 10, "y": 10, "w": 80, "h": 60, "z": 0,
                      "props": {"source": "cashflow_monthly"}},
                 ],
             }]},

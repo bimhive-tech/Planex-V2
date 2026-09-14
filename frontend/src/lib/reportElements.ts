@@ -23,6 +23,66 @@ export interface ElementCategory {
   items: ElementSpec[];
 }
 
+/** The label keys (cfg["labels"], see apps/reports/constants.py) each chart
+ * source prints — its legend entries, bar names and gauge bands — so the
+ * Properties panel can offer exactly that chart's wording for override
+ * (props.text_labels, read by pdf_charts.chart_style_override). Mirrors the
+ * labels.get(...) calls in pdf_charts.py per builder. */
+const PROGRESS_SERIES = ["planned", "actual"];
+const GAUGE_TEXT = ["spi", "gauge_poor", "gauge_average", "gauge_good", "gauge_excellent"];
+const DURATION_TEXT = ["duration_days", "delay_days", "duration_elapsed", "duration_remaining"];
+export const CHART_TEXT_KEYS: Record<string, string[]> = {
+  zone_progress: PROGRESS_SERIES,
+  area_progress: PROGRESS_SERIES,
+  work_progress: PROGRESS_SERIES,
+  scurve: ["scurve_early_planned", "scurve_late_planned", "scurve_actual", "scurve_remaining",
+           "scurve_forecast", ...PROGRESS_SERIES],
+  breakdown: [...PROGRESS_SERIES, "variance", "not_started"],
+  spi: GAUGE_TEXT,
+  duration: DURATION_TEXT,
+  time_performance: ["time_elapsed", "time_remaining"],
+  project_duration: ["duration_days", "delay_days"],
+  cashflow_monthly: ["cashflow_planned_monthly", "cashflow_actual_monthly", "cashflow_cum_planned", "cashflow_cum_actual"],
+  cashflow_cumulative: PROGRESS_SERIES,
+  invoice_status: ["invoice_invoiced", "invoice_remaining"],
+  budget_total_cost: ["budget_contract", "budget_new_items", "budget_for_part"],
+  boq_financial_progress: ["budget_planned_value", "budget_earned_value", "budget_share", "financial_percent"],
+  progress_comparison: [...PROGRESS_SERIES, "financial_percent"],
+  progress_tracking: [...PROGRESS_SERIES, "tracking_previous", "tracking_current"],
+  gantt: [...PROGRESS_SERIES, "gantt_revised"],
+  submittals_material: ["submittals_total", "enum_approved", "enum_rejected", "enum_pending"],
+  submittals_shop_drawing: ["submittals_total", "enum_approved", "enum_rejected", "enum_pending"],
+  "item.units": PROGRESS_SERIES,
+  "item.duration": DURATION_TEXT,
+  "item.progress": ["actual", "variance"],
+  "item.earned": ["budget_planned_value", "budget_earned_value", "budget_remaining_value"],
+  "item.spi": GAUGE_TEXT,
+};
+
+/** The colour props a chart element can set, and the report colour each
+ * one replaces (pdf_charts.chart_style_override) — the Properties panel
+ * shows the report's own value as the picker's default. */
+export const CHART_COLOR_PROPS: { path: string; label: string; colorKey: string; paletteIndex?: number }[] = [
+  { path: "color_a", label: "Planned / first series", colorKey: "chart_planned" },
+  { path: "color_b", label: "Actual / second series", colorKey: "chart_actual" },
+  { path: "color_1", label: "Palette 1", colorKey: "chart_palette", paletteIndex: 0 },
+  { path: "color_2", label: "Palette 2", colorKey: "chart_palette", paletteIndex: 1 },
+  { path: "color_3", label: "Palette 3", colorKey: "chart_palette", paletteIndex: 2 },
+  { path: "color_4", label: "Palette 4", colorKey: "chart_palette", paletteIndex: 3 },
+  { path: "color_5", label: "Palette 5", colorKey: "chart_palette", paletteIndex: 4 },
+  { path: "color_6", label: "Palette 6", colorKey: "chart_palette", paletteIndex: 5 },
+  { path: "color_grid", label: "Gridlines", colorKey: "chart_grid" },
+  { path: "color_text", label: "Text", colorKey: "text" },
+  { path: "color_muted", label: "Muted (remaining / axis notes)", colorKey: "muted" },
+];
+
+/** Every prop the chart style block writes — cleared together by "Reset". */
+export const CHART_STYLE_PROPS = ["font_size", "show_values", "legend", "text_labels",
+  ...CHART_COLOR_PROPS.map((c) => c.path)];
+
+/** The point size chart text is designed at (pdf_charts.BASE_FONT_PT). */
+export const CHART_BASE_FONT_PT = 7;
+
 /** Chart styles offered on any `chart` element (the inspector's type picker). */
 export const CHART_TYPES = [
   { value: "bar", label: "Bar" },
@@ -227,7 +287,7 @@ export const ELEMENT_CATALOG: ElementCategory[] = [
         props: { source: "cashflow_monthly", chart_type: "bar", legend: true,
                  color_a: "#4F81BD", color_b: "#C0504D" } },
       { key: "chart_gantt", label: "Gantt schedule", type: "chart", icon: "calendar", w: 170, h: 80,
-        props: { source: "gantt", chart_type: "bar", legend: false,
+        props: { source: "gantt", chart_type: "bar", legend: true,
                  color_a: "#4F81BD", color_b: "#C0504D" } },
       { key: "chart_submittals", label: "Material submittals", type: "chart", icon: "table", w: 150, h: 60,
         props: { source: "submittals_material", chart_type: "stacked", legend: true },

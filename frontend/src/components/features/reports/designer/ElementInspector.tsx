@@ -8,17 +8,20 @@ import { Button } from "@/components/ui/Button";
 import { DraftInput } from "@/components/ui/DraftInput";
 import { api, ApiError } from "@/lib/api";
 import {
-  CHART_SOURCES, CHART_TYPES, FIELD_SOURCES, ITEM_CHART_SOURCES, ITEM_FIELD_SOURCES,
+  CHART_BASE_FONT_PT, CHART_SOURCES, CHART_TYPES, FIELD_SOURCES, ITEM_CHART_SOURCES, ITEM_FIELD_SOURCES,
   ITEM_TABLE_SOURCES, TABLE_SOURCES,
 } from "@/lib/reportElements";
-import type { LayoutElement } from "@/lib/reportLayout";
+import type { LayoutElement, ReportColors, ReportLabels } from "@/lib/reportLayout";
 import type { ReportData, ReportImage } from "@/types/report";
+import { ChartStyleBlock } from "./ChartStyleBlock";
 import { SlotImageUpload, isSlotSource } from "./SlotImageUpload";
 import styles from "./designer.module.css";
 
 type PropField =
   | { path: string; label: string; kind: "text" }
-  | { path: string; label: string; kind: "number"; step?: number }
+  // defaultValue: what an unset prop renders as on the backend, so the box
+  // shows the real value in effect rather than a misleading 0.
+  | { path: string; label: string; kind: "number"; step?: number; defaultValue?: number }
   | { path: string; label: string; kind: "color" }
   // defaultOn: an unset prop reads as ON, not off — for a toggle whose
   // backend counterpart also defaults to shown when the prop is missing
@@ -65,9 +68,17 @@ const LOGO_SOURCES = [
   { value: "upload", label: "Uploaded image" },
 ];
 
+/** How the BOQ financial-progress chart states its bars — see
+ * pdf_charts.boq_financial_progress_chart's `value_mode`. */
+const BOQ_VALUE_MODES = [
+  { value: "percent", label: "Percent of the contract (as the dashboard states them)" },
+  { value: "money", label: "Amounts, in the project's currency" },
+];
+
 /** Field lists per element type. `repeating` appends the item-scoped sources
- * (only resolvable on a page that clones itself per photo/zone/etc). */
-function typeFields(type: string, repeating: boolean): PropField[] {
+ * (only resolvable on a page that clones itself per photo/zone/etc);
+ * `source` adds the knobs only one chart source has. */
+function typeFields(type: string, repeating: boolean, source?: unknown): PropField[] {
   switch (type) {
     case "text":
       return [
@@ -156,9 +167,13 @@ function typeFields(type: string, repeating: boolean): PropField[] {
         { path: "source", label: "Data", kind: "select",
           options: repeating ? [...CHART_SOURCES, ...ITEM_CHART_SOURCES] : CHART_SOURCES },
         { path: "chart_type", label: "Chart type", kind: "select", options: CHART_TYPES },
-        { path: "legend", label: "Show legend", kind: "toggle" },
-        { path: "color_a", label: "Series A", kind: "color" },
-        { path: "color_b", label: "Series B", kind: "color" },
+        ...(source === "boq_financial_progress"
+          ? [{ path: "value_mode", label: "Show values as", kind: "select" as const, options: BOQ_VALUE_MODES }]
+          : []),
+        // Read by pdf_charts.chart_options — unset means shown, like the title.
+        { path: "legend", label: "Show legend", kind: "toggle", defaultOn: true },
+        { path: "show_values", label: "Show values on bars / wedges", kind: "toggle", defaultOn: true },
+        { path: "font_size", label: "Chart text size (pt)", kind: "number", step: 0.5, defaultValue: CHART_BASE_FONT_PT },
         { path: "show_title", label: "Show title", kind: "toggle", defaultOn: true },
         { path: "title_text", label: "Title text (optional — defaults to the data source's name)", kind: "text" },
         { path: "show_caption", label: "Show caption", kind: "toggle" },
@@ -206,6 +221,11 @@ interface Props {
    * specific zone instead of the whole project — see props.scope_zone_id,
    * read by apps/reports/pdf_canvas.py's resolve_table/resolve_chart). */
   liveData?: ReportData | null;
+  /** This report's effective labels and colours — what a chart's style
+   * block shows as the defaults its own overrides replace (see
+   * ChartStyleBlock). Undefined in the Template Builder. */
+  labels?: ReportLabels;
+  chartColors?: ReportColors;
 }
 
 /** Commit only real numbers — an empty or half-typed box ("", "12.") must
@@ -214,7 +234,7 @@ const isFiniteNumber = (v: string) => v.trim() !== "" && Number.isFinite(Number(
 
 export function ElementInspector({
   el, onChange, repeating = false, reportId, projectId, onAssetsChanged, selectedCount = 0,
-  onDeleteSelection, liveData,
+  onDeleteSelection, liveData, labels, chartColors,
 }: Props) {
   // Hooks must run every render regardless of `el`, so these sit above the
   // early returns below.
@@ -247,7 +267,7 @@ export function ElementInspector({
     );
   }
 
-  const fields = typeFields(el.type, repeating);
+  const fields = typeFields(el.type, repeating, el.props.source);
   // Manual edits carried by a bound table — surfaced (and made reversible)
   // in the table block below.
   const hiddenRowCount = Array.isArray(el.props.hidden_rows) ? el.props.hidden_rows.length : 0;
@@ -466,6 +486,10 @@ export function ElementInspector({
         </div>
       )}
 
+      {el.type === "chart" && (
+        <ChartStyleBlock el={el} labels={labels} chartColors={chartColors} onChange={onChange} />
+      )}
+
       <div className={styles.propFields}>
         {fields.map((f) => {
           const value = el.props[f.path];
@@ -500,7 +524,7 @@ export function ElementInspector({
                 <DraftInput
                   type="number"
                   step={f.step ?? 1}
-                  value={Number(value ?? 0)}
+                  value={Number(value ?? f.defaultValue ?? 0)}
                   validate={isFiniteNumber}
                   onCommit={(v) => setProp(f.path, Number(v))}
                 />

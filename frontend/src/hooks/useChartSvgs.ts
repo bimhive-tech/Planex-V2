@@ -8,7 +8,7 @@
 // edit instead of needing an explicit refresh.
 import { useEffect, useState } from "react";
 
-import type { ChartSvgMap, LayoutElement, LayoutPage, ReportLabels } from "@/lib/reportLayout";
+import type { ChartSvgMap, LayoutElement, LayoutPage, ReportColors, ReportLabels } from "@/lib/reportLayout";
 
 const DEBOUNCE_MS = 800;
 
@@ -17,6 +17,9 @@ export interface ChartSvgsState {
   /** This report's effective label dict — see ReportLabels. Undefined until
    * the first response lands. */
   labels?: ReportLabels;
+  /** This report's effective colour scheme — see ReportColors. Undefined
+   * until the first response lands. */
+  colors?: ReportColors;
   /** True once the first real response has landed (or there's nothing to
    * wait for) — lets the canvas grey out chart boxes instead of showing the
    * generic client-side mockup while the real look is still in flight. */
@@ -30,6 +33,7 @@ export function useChartSvgs(
 ): ChartSvgsState {
   const [charts, setCharts] = useState<ChartSvgMap>({});
   const [labels, setLabels] = useState<ReportLabels | undefined>(undefined);
+  const [colors, setColors] = useState<ReportColors | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const hasChart = pages.some((p) => p.elements.some((e) => e.type === "chart"))
     || masterElements.some((e) => e.type === "chart");
@@ -47,8 +51,8 @@ export function useChartSvgs(
         }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("chart-svgs fetch failed"))))
-        .then((data: { charts: ChartSvgMap; labels: ReportLabels }) => {
-          if (alive) { setCharts(data.charts); setLabels(data.labels); }
+        .then((data: { charts: ChartSvgMap; labels: ReportLabels; colors?: ReportColors }) => {
+          if (alive) { setCharts(data.charts); setLabels(data.labels); setColors(data.colors); }
         })
         .catch(() => {})
         .finally(() => { if (alive) setLoaded(true); });
@@ -56,5 +60,5 @@ export function useChartSvgs(
     return () => { alive = false; clearTimeout(timer); };
   }, [reportId, hasChart, pages, masterElements]);
 
-  return { charts, labels, loaded };
+  return { charts, labels, colors, loaded };
 }

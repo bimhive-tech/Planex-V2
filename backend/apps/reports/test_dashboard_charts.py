@@ -96,11 +96,28 @@ class DashboardChartTests(SimpleTestCase):
         # the sheet states, then approved/rejected/pending.
         self.assertEqual(bars.data, [[426, 424, 2, 0], [82, 82, 0, 0]])
 
-    def test_the_progress_pie_states_its_planned_figure(self):
-        ctx = {"overall": 59.55, "planned": 94.46}
+    def test_the_progress_pie_is_the_dashboards_three_wedges(self):
+        """Planned, earned and the variance, each a wedge sized by its
+        magnitude and labelled with its sign — the panel the planners read."""
+        from reportlab.graphics.charts.piecharts import Pie
+
+        ctx = {"overall": 59.55, "planned": 94.45}
         drawing = resolve_chart("breakdown", "donut", self.cfg, ctx, {}, 80 * mm, 75 * mm)
+        pie = _chart(drawing, Pie)
+        self.assertEqual([round(v, 2) for v in pie.data], [94.45, 59.55, 34.9])
+        self.assertEqual(pie.labels, ["94.45%", "59.55%", "-34.90%"])
         planned = self.cfg["labels"].get("planned", "Planned")
-        self.assertIn(f"{planned} 94.46%", _texts(drawing))
+        self.assertIn(planned, _texts(drawing))
+
+    def test_the_boq_chart_states_percent_by_default_and_money_on_request(self):
+        rows = [{"name": "Civil", "budget_share": 25.0, "financial_percent": 12.5,
+                 "budget": 250.0, "earned": 125.0}]
+        ctx = {"boq_financial_progress": rows, "project": {"currency": "EGP"}}
+        percent = _chart(resolve_chart("boq_financial_progress", "column", self.cfg, ctx, {}, 131 * mm, 75 * mm))
+        self.assertEqual(percent.data, [[25.0], [12.5]])
+        money = _chart(resolve_chart("boq_financial_progress", "column", self.cfg, ctx, {}, 131 * mm, 75 * mm,
+                                     props={"value_mode": "money"}))
+        self.assertEqual(money.data, [[250.0], [125.0]])
 
     def test_progress_by_phase_draws_planned_beside_actual(self):
         ctx = {"work_progress": [{"name": "Civil Works", "progress": 100.0, "planned": 100.0},
@@ -153,8 +170,108 @@ class WorkRowsTests(TestCase):
         self.assertEqual(_work_rows(self.project, progress=progress)[1]["progress"], 80.0)
 
 
+class ChartStyleTests(SimpleTestCase):
+    """A chart element's own colours, wording, text size and toggles reach
+    the drawing (pdf_charts.chart_style_override / chart_options)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        ensure_fonts()
+
+    def setUp(self):
+        self.cfg = default_config()
+        self.ctx = {"zones": [{"name": "Zone A", "progress": 40.0, "planned": 90.0},
+                              {"name": "Zone B", "progress": 70.0, "planned": 95.0}]}
+
+    def _bars(self, props=None):
+        drawing = resolve_chart("zone_progress", "column", self.cfg, self.ctx, {}, 131 * mm, 75 * mm, props=props)
+        return drawing, _chart(drawing)
+
+    def test_series_colours_and_wording_are_the_elements_own(self):
+        _, plain = self._bars()
+        drawing, bars = self._bars({"color_a": "#112233", "color_b": "#445566",
+                                    "text_labels": {"planned": "Baseline"}})
+        self.assertEqual(plain.bars[0].fillColor.hexval(), "0x4f81bd")
+        self.assertEqual((bars.bars[0].fillColor.hexval(), bars.bars[1].fillColor.hexval()), ("0x112233", "0x445566"))
+        self.assertIn("Baseline", _texts(drawing))
+        self.assertNotIn(self.cfg["labels"]["planned"], _texts(drawing))
+
+    def test_text_size_scales_every_font_in_the_chart(self):
+        _, plain = self._bars()
+        _, bigger = self._bars({"font_size": 10.5})
+        self.assertAlmostEqual(bigger.categoryAxis.labels.fontSize, plain.categoryAxis.labels.fontSize * 1.5)
+        self.assertAlmostEqual(bigger.valueAxis.labels.fontSize, plain.valueAxis.labels.fontSize * 1.5)
+
+    def test_legend_and_values_can_be_turned_off(self):
+        drawing, bars = self._bars({"legend": False, "show_values": False})
+        self.assertEqual(_texts(drawing), [])
+        self.assertIsNone(bars.barLabelFormat)
+
+    def test_untouched_props_leave_the_report_config_alone(self):
+        from .pdf_charts import chart_style_override
+
+        self.assertIs(chart_style_override(self.cfg, {"source": "scurve", "legend": True}), self.cfg)
+        patched = chart_style_override(self.cfg, {"color_3": "#abcdef"})
+        self.assertEqual(patched["colors"]["chart_palette"][2], "#abcdef")
+        self.assertEqual(self.cfg["colors"]["chart_palette"][2], "#9BBB59")
+
+
+class CanvasChartSizeTests(SimpleTestCase):
+    """The Customize canvas asks for a chart at the size the PDF draws it:
+    the box minus the title and caption strips."""
+
+    def test_the_canvas_and_the_pdf_take_the_same_strips_off_a_box(self):
+        from .pdf_canvas import _CAPTION_H, _TITLE_H, chart_box_content
+
+        cfg = default_config()
+        h = 75 * mm
+        both, caption_h, title_h = chart_box_content({"source": "scurve", "show_caption": True}, cfg, h)
+        self.assertEqual((both, caption_h, title_h), (h - _CAPTION_H - _TITLE_H, _CAPTION_H, _TITLE_H))
+        bare, _, _ = chart_box_content({"source": "scurve", "show_title": False}, cfg, h)
+        self.assertEqual(bare, h)
+
+
 _wording = importlib.import_module("apps.reports.migrations.0011_wording_on_saved_reports")
 _split = importlib.import_module("apps.reports.migrations.0012_summary_over_two_pages")
+_duration = importlib.import_module("apps.reports.migrations.0013_dashboard_duration_charts")
+
+
+def _progress_page(orientation=None, zone_w=87):
+    def chart(source, x, y, w, h):
+        return {"id": source, "type": "chart", "x": x, "y": y, "w": w, "h": h,
+                "props": {"source": source, "chart_type": "column", "show_caption": True}}
+    page = {"id": "p", "name": "تقدم المشروع", "elements": [
+        chart("spi", 16, 62, 87, 65), chart("duration", 107, 62, 87, 65),
+        chart("zone_progress", 16, 152, zone_w, 115),
+    ]}
+    if orientation:
+        page["orientation"] = orientation
+    return page
+
+
+class DurationChartsMigrationTests(SimpleTestCase):
+    def test_places_both_charts_in_the_free_half_beside_the_zone_bars(self):
+        layout = {"pages": [_progress_page()]}
+        self.assertTrue(_duration._rearrange(layout, "portrait"))
+        charts = {(el["props"]["source"]): el for el in layout["pages"][0]["elements"]}
+        self.assertEqual(set(charts), {"spi", "duration", "zone_progress", "time_performance", "project_duration"})
+        top, bottom = charts["time_performance"], charts["project_duration"]
+        self.assertEqual((top["x"], top["w"], top["y"]), (107, 87, 152))
+        self.assertEqual(bottom["y"], top["y"] + top["h"] + 4)
+        self.assertAlmostEqual(bottom["y"] + bottom["h"], 152 + 115)
+        self.assertTrue(top["props"]["show_caption"])      # as the page's other charts
+
+    def test_a_page_with_no_room_beside_the_bars_is_left_alone(self):
+        layout = {"pages": [_progress_page(zone_w=178)]}
+        self.assertFalse(_duration._rearrange(layout, "portrait"))
+        self.assertEqual(len(layout["pages"][0]["elements"]), 3)
+
+    def test_running_twice_adds_nothing(self):
+        layout = {"pages": [_progress_page()]}
+        _duration._rearrange(layout, "portrait")
+        self.assertFalse(_duration._rearrange(layout, "portrait"))
+        self.assertEqual(len(layout["pages"][0]["elements"]), 5)
 
 
 def _summary_layout():

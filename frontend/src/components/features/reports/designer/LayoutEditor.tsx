@@ -10,6 +10,7 @@ import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
 import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
+import type { ReportColors } from "@/lib/reportLayout";
 import type {
   ChartSvgMap, LayoutElement, PageDesign, ReportLabels, TableDataMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
@@ -92,6 +93,8 @@ interface Props {
   previewsReady?: boolean;
   /** This report's effective label dict — see ReportLabels. */
   labels?: ReportLabels;
+  /** This report's effective colour scheme — see ReportColors. */
+  chartColors?: ReportColors;
   /** Document-level undo/redo owned by the parent, so history survives a page
    * switch (which remounts this component — see the `key` in
    * ReportConfigurator). When omitted, this editor keeps its own local
@@ -132,8 +135,8 @@ interface Props {
 export function LayoutEditor({
   design, elements, onElementsChange, leftHeader, masterElements, masterDesign, emptyHint, repeating = false, liveData,
   projectId, onAssetsChanged,
-  pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries, ownPageId, bottomPanel,
-  onNavigatePage, initialScrollToBottom = false, history, historyPageId,
+  pinnedItem, reportId, chartSvgs, tableData, tocCaptions, previewsReady, labels, chartColors, tocEntries, ownPageId,
+  bottomPanel, onNavigatePage, initialScrollToBottom = false, history, historyPageId,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
@@ -581,6 +584,8 @@ export function LayoutEditor({
         selectedCount={selectedIds.length}
         onDeleteSelection={deleteSelection}
         liveData={liveData}
+        labels={labels}
+        chartColors={chartColors}
       />
     </div>
   );

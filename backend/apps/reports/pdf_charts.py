@@ -1,20 +1,22 @@
 """Charts for the report (reportlab.graphics), styled after the reference's
 planned/actual bars, duration pie, overall donut, and Time-Performance S-curve.
 All built from data we already have (actual + derived planned/previous/duration)."""
+import contextlib
+import contextvars
 import datetime
 import math
 
-from reportlab.graphics.charts.barcharts import HorizontalBarChart, VerticalBarChart
+from reportlab.graphics.charts.barcharts import BarChart, HorizontalBarChart, VerticalBarChart
 from reportlab.graphics.charts.legends import Legend
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.piecharts import Pie
-from reportlab.graphics.shapes import Circle, Drawing, Line, Polygon, Rect, String, Wedge
+from reportlab.graphics.shapes import Circle, Drawing, Group, Line, Polygon, Rect, String, Wedge
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 
 from .pdf_axes import (calendar_ticks, date_unit_labels, horizontal_number_axis, number_axis,
                        percent_axis, text_width)
-from .pdf_base import _LRM, BOLD, FONT_NAME, has_arabic, hexcolor, shape
+from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
 
 # The reference gauge's own text is plain Latin sans-serif — Helvetica is a
 # standard PDF font (no embedding needed) and reads much closer to it than
@@ -28,6 +30,106 @@ def _gauge_font(text, bold=False):
     if has_arabic(text):
         return BOLD if bold else FONT_NAME
     return _SANS_BOLD if bold else _SANS
+
+
+# A chart element's own drawing choices, set by resolve_chart around one
+# chart's build (see chart_options): its text size as a scale on every font
+# size in this module, and whether its legend and value labels are drawn at
+# all. A context variable rather than a parameter threaded through forty
+# builders and helpers — none of which needs to know the choice exists.
+_OPTIONS = contextvars.ContextVar("chart_options", default=None)
+
+# The size most chart text is set in; an element's `font_size` scales
+# everything relative to it, so 7 leaves a chart exactly as designed.
+BASE_FONT_PT = 7
+
+
+@contextlib.contextmanager
+def chart_options(props):
+    """Apply one chart element's `font_size`, `legend` and `show_values`
+    props to everything drawn inside the block."""
+    props = props or {}
+    size = props.get("font_size")
+    token = _OPTIONS.set({
+        "font_scale": float(size) / BASE_FONT_PT if size else 1.0,
+        "legend": props.get("legend") is not False,
+        "values": props.get("show_values") is not False,
+    })
+    try:
+        yield
+    finally:
+        _OPTIONS.reset(token)
+
+
+def pt(size):
+    """`size`, in points, at the current element's text scale."""
+    return size * ((_OPTIONS.get() or {}).get("font_scale") or 1.0)
+
+
+def _legend_on() -> bool:
+    return (_OPTIONS.get() or {}).get("legend", True)
+
+
+def _values_on() -> bool:
+    return (_OPTIONS.get() or {}).get("values", True)
+
+
+_PALETTE_PROPS = tuple(f"color_{i}" for i in range(1, 7))
+_COLOR_PROPS = {"color_a": "chart_planned", "color_b": "chart_actual", "color_grid": "chart_grid",
+                "color_text": "text", "color_muted": "muted"}
+STYLE_PROP_KEYS = ("text_labels", *_COLOR_PROPS, *_PALETTE_PROPS)
+
+
+def chart_style_override(cfg, props):
+    """A chart element's own colours and wording layered over the report's,
+    as a patched copy of `cfg` — every builder reads cfg["colors"] and
+    cfg["labels"] exactly as it always did.
+
+    `color_a`/`color_b` are the planned and actual series (the Properties
+    panel offered them long before anything read them; this makes them
+    real), `color_1`..`color_6` the palette the other series draw from,
+    `color_grid`/`color_text`/`color_muted` the rest, and `text_labels`
+    {label key: text} the legend entries and axis names this one chart
+    prints. `cfg` comes back untouched when the element sets none."""
+    props = props or {}
+    if not any(props.get(k) for k in STYLE_PROP_KEYS):
+        return cfg
+    cfg = {**cfg, "colors": {**cfg["colors"]}, "labels": {**cfg["labels"]}}
+    for prop, key in _COLOR_PROPS.items():
+        if props.get(prop):
+            cfg["colors"][key] = props[prop]
+    palette = list(cfg["colors"].get("chart_palette") or [])
+    for i, prop in enumerate(_PALETTE_PROPS):
+        if props.get(prop):
+            while len(palette) <= i:
+                palette.append(props[prop])
+            palette[i] = props[prop]
+    cfg["colors"]["chart_palette"] = palette
+    texts = props.get("text_labels")
+    if isinstance(texts, dict):
+        cfg["labels"].update({k: v for k, v in texts.items() if isinstance(v, str) and v.strip()})
+    return cfg
+
+
+def hide_values(drawing):
+    """Strip the printed values off a finished drawing — bar labels and pie
+    wedge figures — for an element whose `show_values` is off. Callouts
+    drawn as plain text go through `_callout`, which already skipped them."""
+    for el in drawing.contents:
+        if isinstance(el, BarChart):
+            el.barLabelFormat = None
+        elif isinstance(el, Pie):
+            el.labels = None
+        elif isinstance(el, Group):
+            hide_values(el)
+    return drawing
+
+
+def _callout(d, x, y, text, **kw):
+    """A value printed beside its line or bar — skipped when the element's
+    values are off."""
+    if _values_on():
+        d.add(String(x, y, text, **kw))
 
 
 # Bar thickness, in the reference workbook's own terms.
@@ -75,7 +177,7 @@ def _grid(value_axis, cfg):
     value_axis.gridStrokeWidth = 0.4
 
 
-def _thinned_labels(names, avail_width, font_size=7, angled=True, vertical=False):
+def _thinned_labels(names, avail_width, font_size=None, angled=True, vertical=False):
     """Blank out category-axis labels beyond what `avail_width` can legibly
     fit, keeping every Nth one — a long monthly series (e.g. a multi-year
     S-curve with 50+ points) otherwise draws a label at every single point
@@ -91,6 +193,7 @@ def _thinned_labels(names, avail_width, font_size=7, angled=True, vertical=False
     names on a chart with room for every one (2026-09-03)."""
     if not names:
         return names
+    font_size = pt(7) if font_size is None else font_size
     if vertical:
         per_label = font_size * 1.25          # line height, plus a little air
     else:
@@ -103,7 +206,7 @@ def _thinned_labels(names, avail_width, font_size=7, angled=True, vertical=False
     return [n if i % step == 0 else "" for i, n in enumerate(names)]
 
 
-def _date_category_axis(axis, dates, avail_width, font_size=6):
+def _date_category_axis(axis, dates, avail_width, font_size=None):
     """Label a one-point-per-date category axis at the calendar unit that
     fits `avail_width` (pdf_axes.date_unit_labels), hiding the tick marks
     whenever some points go unlabelled. Ticks are drawn at every data point
@@ -111,7 +214,7 @@ def _date_category_axis(axis, dates, avail_width, font_size=6):
     a narrow panel renders a solid black band along the axis where the ticks
     merge (found 2026-08-30 comparing the S-curve against the client's
     reference report, whose own charts carry no category ticks at all)."""
-    _, names = date_unit_labels(dates, avail_width, font_size)
+    _, names = date_unit_labels(dates, avail_width, pt(6) if font_size is None else font_size)
     axis.categoryNames = names
     if any(n == "" for n in names):
         axis.visibleTicks = 0
@@ -128,7 +231,7 @@ _text_width = text_width
 _ELLIPSIS = "\u2026"
 
 
-def _vertical_names(raw_names, height, font_size=7, min_font_size=5, pad=10, share=0.45):
+def _vertical_names(raw_names, height, font_size=None, min_font_size=None, pad=10, share=0.45):
     """(shaped names, bottom inset, font size) for a category axis with labels
     rotated to 90 degrees: a vertical label is as tall as the text is long, so
     the fixed ~26pt that suited 30-degree labels clipped them to "ilding 6"
@@ -148,9 +251,10 @@ def _vertical_names(raw_names, height, font_size=7, min_font_size=5, pad=10, sha
     (2026-09-14)."""
     cap = max(26, height * share)
     raw_names = [str(n) for n in raw_names]
-    for size in range(font_size, min_font_size - 1, -1):
-        if all(_text_width(shape(n), size) + pad <= cap for n in raw_names):
-            break
+    size = pt(7) if font_size is None else font_size
+    floor = pt(5) if min_font_size is None else min_font_size
+    while size - 0.5 >= floor and not all(_text_width(shape(n), size) + pad <= cap for n in raw_names):
+        size -= 0.5
     names = []
     for text in raw_names:
         if _text_width(shape(text), size) + pad > cap:
@@ -186,13 +290,16 @@ def _value_labels(chart, categories, font_size, series):
     return fits, nudge
 
 
-def _top_legend(d, swatches, width, y_top, font_size=7):
+def _top_legend(d, swatches, width, y_top, font_size=None):
     """A legend centred along the top of a chart while it fits on one row,
     wrapping from the left edge when it doesn't. reportlab's own Legend
     spaces entries a fixed 95pt apart from a fixed x, which put the first
     swatch outside a small chart's own box (2026-09-14)."""
     # Twice the space between entries as within one, so each swatch reads as
     # belonging to the label beside it rather than to its neighbour.
+    if not _legend_on():
+        return
+    font_size = pt(7) if font_size is None else font_size
     swatch, gap, item_gap = 6, 3, 16
     row = sum(swatch + gap + _text_width(shape(label), font_size) + item_gap
               for _, label in swatches) - item_gap
@@ -201,10 +308,14 @@ def _top_legend(d, swatches, width, y_top, font_size=7):
                          swatch_size=swatch, gap=gap, item_gap=item_gap)
 
 
-def _legend(colors_labels, x, y, font_size=7, vertical=False, deltax=95):
+def _legend(colors_labels, x, y, font_size=None, vertical=False, deltax=95):
     """Swatch+label legend. Horizontal by default; `vertical=True` stacks the
     entries in one column (used when labels carry values and would otherwise
-    collide, e.g. the duration pie)."""
+    collide, e.g. the duration pie). Nothing when the element's legend is
+    off."""
+    if not _legend_on():
+        return Group()
+    font_size = pt(7) if font_size is None else font_size
     leg = Legend()
     leg.x, leg.y = x, y
     leg.alignment = "right"
@@ -227,9 +338,12 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4,
     panels). Replaces the older "values live in a side legend" treatment,
     which read nothing like the reference.
 
-    `slices` is [(label, value, color), ...]. Zero-valued slices keep their
-    legend entry — the reference shows "0" rather than dropping the series —
-    but are given no popout, so they don't push a visible gap into the ring.
+    `slices` is [(label, value, color), ...], or [(label, value, color,
+    text), ...] when a wedge's printed figure is not simply its size — a
+    negative variance is drawn as big as its magnitude and labelled with its
+    sign. Zero-valued slices keep their legend entry — the reference shows
+    "0" rather than dropping the series — but are given no popout, so they
+    don't push a visible gap into the ring.
 
     `extra_legend` is [(color, text), ...] for a figure the reader needs that
     is not a wedge of its own — the planned baseline the progress pie's
@@ -237,8 +351,10 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4,
     """
     if not slices:
         return None
+    slices = [(s[0], abs(float(s[1])), s[2], s[3] if len(s) > 3 else value_fmt.format(s[1]))
+              for s in slices]
     d = Drawing(width, height)
-    legend = [(c, n) for n, _, c in slices] + list(extra_legend)
+    legend = [(c, n) for n, _, c, _ in slices] + list(extra_legend)
     legend_rows = _wrapped_legend_rows(legend, width - 16)
     legend_h = 6 + legend_rows * 8
     # Leave room on all sides for the outside value labels, which sit at
@@ -247,18 +363,18 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt="{:,.0f}", popout=4,
     pie = Pie()
     pie.x, pie.y = (width - pw) / 2, legend_h + 6
     pie.width = pie.height = pw
-    pie.data = [max(0.0001, float(v)) for _, v, _ in slices]
-    pie.labels = [value_fmt.format(v) for _, v, _ in slices]
+    pie.data = [max(0.0001, v) for _, v, _, _ in slices]
+    pie.labels = [text for _, _, _, text in slices]
     pie.simpleLabels = 0
     pie.sideLabels = 0
     pie.slices.labelRadius = 1.15
     pie.slices.fontName = FONT_NAME
-    pie.slices.fontSize = 6
+    pie.slices.fontSize = pt(6)
     pie.slices.strokeColor = hexcolor("#ffffff")
     pie.slices.strokeWidth = 0.75
-    for i, (_, value, color) in enumerate(slices):
+    for i, (_, value, color, _) in enumerate(slices):
         pie.slices[i].fillColor = hexcolor(color)
-        if float(value) > 0:
+        if value > 0:
             pie.slices[i].popout = popout
     d.add(pie)
     _draw_wrapped_legend(d, legend, 8, legend_h, width - 16)
@@ -289,15 +405,15 @@ def zone_progress_chart(cfg, ctx, width, height=None):
     # chart is resized (pdf_axes).
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
-    percent_axis(chart.valueAxis, chart.height, 7)
+    percent_axis(chart.valueAxis, chart.height, pt(7))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress Area"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[0].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 7
+    chart.barLabels.fontSize = pt(7)
     fits, chart.barLabels.dx = _value_labels(chart, len(zones), 7, series=1)
     chart.barLabelFormat = "%0.0f%%" if fits else None
     chart.barLabels.nudge = 7
@@ -345,16 +461,16 @@ def planned_actual_chart(cfg, ctx, width, labels, height=None):
     # chart is resized (pdf_axes).
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
-    percent_axis(chart.valueAxis, chart.height, 7)
+    percent_axis(chart.valueAxis, chart.height, pt(7))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress Area"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 6
+    chart.barLabels.fontSize = pt(6)
     chart.barLabels.nudge = 6
     # See _unit_bars: planned is flat, so only actual gets a printed value —
     # and only while the bars are wide enough to hold one.
@@ -397,9 +513,9 @@ def _unit_bars(cfg, units, width, labels, height=None):
     # chart is resized (pdf_axes).
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
-    percent_axis(chart.valueAxis, chart.height, 7)
+    percent_axis(chart.valueAxis, chart.height, pt(7))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Project Progress (Unit)"
     chart.bars[0].strokeColor = None
@@ -410,7 +526,7 @@ def _unit_bars(cfg, units, width, labels, height=None):
     else:
         chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 6
+    chart.barLabels.fontSize = pt(6)
     chart.barLabels.nudge = 6
     # Only the ACTUAL bars carry a printed value (reportlab takes one format
     # per series). Planned is a flat 100% across the whole chart, so labelling
@@ -624,25 +740,24 @@ def invoice_status_chart(cfg, ctx, width, labels, height=None):
     return _reference_pie(cfg, slices, width, height, value_fmt="{:,.0f}")
 
 
-def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
-    """Budgeted vs earned cost per BOQ phase — the reference dashboard's
+def boq_financial_progress_chart(cfg, ctx, width, labels, height=None, value_mode=None):
+    """Budgeted vs earned per BOQ category — the reference dashboard's
     "Financial Progress according to BOQ" grouped bars. Data assembled in
-    services._boq_financial_progress.
+    services (the dashboard panel when imported, else the P6 cost import).
 
-    Plotted as MONEY, not percentages. This is a budget line, and a reader
-    comparing trades wants to know that finishes are 2.4bn against 1.1bn
-    earned, not that they are "45% vs 39%" of something they then have to
-    multiply back out (the client asked for the amounts, 2026-09-03). The
-    percentages are still what services computes and what the value axis
-    ordering follows; they're just not what the bars are labelled with.
+    `value_mode` is the element's own choice of what the bars say: "percent"
+    (the default) plots each category's share of the contract and how much
+    of the contract it has earned, exactly as the dashboard panel states
+    them; "money" multiplies those back out to amounts. The planners asked
+    for the choice, and for percentages on the airport report (2026-09-14);
+    an earlier client had asked for the amounts (2026-09-03), which is why
+    both stay. Money falls back to percentages when no amounts exist.
 
-    `None` (not an empty chart) when the project has no P6 cost import."""
+    `None` (not an empty chart) when the project has neither source."""
     rows = ctx.get("boq_financial_progress") or []
     if not rows:
         return None
-    # Fall back to the percentages for data captured before the money was
-    # carried through, so an older saved context still renders something.
-    money = all(r.get("budget") is not None for r in rows)
+    money = value_mode == "money" and all(r.get("budget") is not None for r in rows)
     key_planned, key_actual = ("budget", "earned") if money else ("budget_share", "financial_percent")
     height = height or 78 * mm
     d = Drawing(width, height)
@@ -650,7 +765,7 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
     names = [shape(r["name"]) for r in rows]
     # A name at 30 degrees drops half its length below the axis; a fixed 26pt
     # let the longest category run out of the chart's box when it was small.
-    widest = max((_text_width(n, 7) for n in names), default=0)
+    widest = max((_text_width(n, pt(7)) for n in names), default=0)
     chart.y = min(max(26, height * 0.35), max(26, widest * 0.5 + 12))
     chart.height = height - chart.y - 34
     chart.data = [
@@ -663,41 +778,44 @@ def boq_financial_progress_chart(cfg, ctx, width, labels, height=None):
     fmt, label_w = number_axis(chart.valueAxis, 0, top, chart.height, 7, width, headroom=1.15)
     if not money:
         chart.valueAxis.labelTextFormat = lambda v: f"{fmt(v)}%"
-        label_w += _text_width("%", 7)
+        label_w += _text_width("%", pt(7))
     chart.x = max(24, label_w + 8)
     chart.width = width - chart.x - 24
     chart.categoryAxis.categoryNames = _thinned_labels(names, chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.fontSize = pt(7)
     chart.categoryAxis.labels.angle = 30
     chart.categoryAxis.labels.boxAnchor = "ne"
     cur = (ctx.get("project") or {}).get("currency") or ""
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE, OVERLAP_WIDE)  # "Financial Progress according to BOQ"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
+    from .constants import PERCENT_DECIMALS
+
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 6
+    chart.barLabels.fontSize = pt(6)
     # Millions, so a nine-figure budget doesn't print a number wider than its
-    # own bar; the axis carries the full scale.
-    chart.barLabelFormat = (lambda v: f"{v / 1e6:,.1f}M" if v else "") if money else "%0.0f%%"
+    # own bar; the axis carries the full scale. Percentages keep the report's
+    # decimals (register C2) rather than rounding to a whole number.
+    chart.barLabelFormat = ((lambda v: f"{v / 1e6:,.1f}M" if v else "") if money
+                            else (lambda v: f"{v:.{PERCENT_DECIMALS}f}%" if v else ""))
     chart.barLabels.nudge = 6
-    chart.barLabels.angle = 90 if money else 0
-    if money:
-        # A label turned upright starts at the bar top and runs up the page.
-        # Centred on the top instead, its first digits were drawn inside the
-        # bar and read "98.3M" for 198.3M (2026-09-14).
-        chart.barLabels.boxAnchor = "w"
+    # A label turned upright starts at the bar top and runs up the page.
+    # Centred on the top instead, its first digits were drawn inside the bar
+    # and read "98.3M" for 198.3M (2026-09-14).
+    chart.barLabels.angle = 90
+    chart.barLabels.boxAnchor = "w"
     d.add(chart)
     if money and cur:
         # The currency belongs on the axis, said once — every tick and bar
         # label would otherwise repeat "EGP" down the side of the chart. The
         # ticks carry their own scale (full figures, or a K/M/B suffix).
         d.add(String(4, chart.y + chart.height + 4, shape(cur),
-                     fontName=FONT_NAME, fontSize=6,
+                     fontName=FONT_NAME, fontSize=pt(6),
                      fillColor=hexcolor(cfg["colors"].get("muted", "#A5A5A5"))))
     keys = (("budget_planned_value", "Budget"), ("budget_earned_value", "Earned value")) if money         else (("budget_share", "Budget"), ("financial_percent", "Actual"))
     _top_legend(d, [
@@ -720,7 +838,7 @@ def _single_series_bars(cfg, bars, width, height, *, value_min, value_max, bar_f
     chart.height = max(10, height - 40)
     chart.x = 30
     if percent:
-        percent_axis(chart.valueAxis, chart.height, 7, lo=value_min, hi=value_max)
+        percent_axis(chart.valueAxis, chart.height, pt(7), lo=value_min, hi=value_max)
     else:
         _, label_w = number_axis(chart.valueAxis, value_min, value_max, chart.height, 7, width)
         chart.x = max(chart.x, label_w + 8)
@@ -728,19 +846,19 @@ def _single_series_bars(cfg, bars, width, height, *, value_min, value_max, bar_f
     chart.data = [[value for _, value, _ in bars]]
     chart.categoryAxis.categoryNames = [shape(label) for label, _, _ in bars]
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.fontSize = pt(7)
     # Along the bottom of the plot, not on the zero line: a negative delay
     # bar hangs below zero, and its name and value were drawn over it.
     chart.categoryAxis.joinAxisMode = "bottom"
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_CLUSTERED, OVERLAP_CLUSTERED)
     for i, (_, _, colour) in enumerate(bars):
         chart.bars[(0, i)].fillColor = hexcolor(colour)
         chart.bars[(0, i)].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 7
+    chart.barLabels.fontSize = pt(7)
     chart.barLabelFormat = bar_fmt
     chart.barLabels.nudge = 7
     d.add(chart)
@@ -833,17 +951,17 @@ def progress_comparison_chart(cfg, ctx, width, labels, height=None):
     chart.data = [[s[2] for s in series]]
     chart.categoryAxis.categoryNames = [shape(s[1]) for s in series]
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 7
-    percent_axis(chart.valueAxis, chart.height, 7)
+    chart.categoryAxis.labels.fontSize = pt(7)
+    percent_axis(chart.valueAxis, chart.height, pt(7))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_CLUSTERED, OVERLAP_CLUSTERED)  # "Progress Comparison"
     for i, s in enumerate(series):
         chart.bars[(0, i)].fillColor = hexcolor(s[3])
         chart.bars[(0, i)].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 7
+    chart.barLabels.fontSize = pt(7)
     chart.barLabelFormat = "%0.1f%%"
     chart.barLabels.nudge = 7
     d.add(chart)
@@ -881,17 +999,17 @@ def progress_tracking_chart(cfg, ctx, width, labels, height=None):
              "current": labels.get("tracking_current", "Current month")}
     chart.categoryAxis.categoryNames = [shape(names[key]) for key, _ in periods]
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 7
-    percent_axis(chart.valueAxis, chart.height, 7)
+    chart.categoryAxis.labels.fontSize = pt(7)
+    percent_axis(chart.valueAxis, chart.height, pt(7))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 7
+    chart.valueAxis.labels.fontSize = pt(7)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_CLUSTERED, OVERLAP_CLUSTERED)  # "Project Tracking"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.bars[1].fillColor = hexcolor(cfg["colors"]["chart_actual"])
     chart.bars[0].strokeColor = chart.bars[1].strokeColor = None
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 6
+    chart.barLabels.fontSize = pt(6)
     chart.barLabelFormat = "%0.0f%%"
     chart.barLabels.nudge = 6
     d.add(chart)
@@ -934,46 +1052,38 @@ def budget_total_cost_chart(cfg, ctx, width, labels, height=None):
 
 
 def overall_donut(cfg, ctx, width, labels, height=None):
-    """Planned / actual / variance — the three slices the reference report's
-    own PROGRESS pie carries (2026-08-30). Was a two-slice done-vs-remaining
-    donut, which matched nothing in the reference; variance is simply
-    planned - actual, both already in ctx. Falls back to the two real slices
-    when there's no planned baseline to compare against."""
+    """Planned / actual / variance — the dashboard's own "Progress Complete
+    %" pie, drawn the way that panel draws it (register F2, from the
+    planners' own screenshot of it, 2026-09-14): planned 94.45, earned
+    59.55 and a variance of -34.90, each a wedge of its own sized by its
+    magnitude and labelled with its signed figure. An earlier version kept
+    planned to the legend because three wedges double-count; the planners
+    read this pie every month and asked for that one, so that is the one
+    drawn. Falls back to done-vs-remaining when there's no planned baseline
+    to compare against."""
+    from .constants import PERCENT_DECIMALS
+
     overall = float(ctx["overall"])
     planned = ctx.get("planned")
     grey = cfg["colors"].get("muted", "#A5A5A5")
     height = height or 56 * mm
+    value_fmt = f"{{:,.{PERCENT_DECIMALS}f}}%"
     if planned is None:
         slices = [(labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
                   (labels.get("not_started", "Remaining"), max(0.0, 100 - overall), grey)]
-    else:
-        planned = float(planned)
-        # Actual + variance, which together ARE the planned figure — not
-        # planned plotted beside them as a third slice. That was the same
-        # self-defeating shape the duration pie had: the total takes half the
-        # disc by construction, so the pie says the same thing whatever the
-        # project is doing (here 100 beside 88 + 12). The planned figure is
-        # still the one the variance is measured against, and it reads off the
-        # legend (2026-08-30 critic pass).
-        slices = [
-            (labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
-            (labels.get("variance", "Variance"), max(0.0, planned - overall), grey),
-        ]
-        # ...but it has to be ON the chart. The comment above said planned
-        # "reads off the legend", and the legend held only Actual and Variance,
-        # so the baseline the whole pie is measured against appeared nowhere —
-        # the planners flagged exactly that (register F2). Stated with its
-        # value, since it is not a wedge that carries one of its own.
-        from .constants import PERCENT_DECIMALS
-
-        # The figure is pinned left-to-right: bidi otherwise moves a trailing
-        # "%" to the front of the number inside Arabic text ("%94.46").
-        planned_text = (f"{labels.get('planned', 'Planned')} "
-                        f"{_LRM}{planned:.{PERCENT_DECIMALS}f}%{_LRM}")
-        return _reference_pie(
-            cfg, slices, width, height, value_fmt="{:,.2f}%",
-            extra_legend=[(cfg["colors"]["chart_planned"], planned_text)])
-    return _reference_pie(cfg, slices, width, height, value_fmt="{:,.2f}%")
+        return _reference_pie(cfg, slices, width, height, value_fmt=value_fmt)
+    planned = float(planned)
+    variance = overall - planned
+    palette = cfg["colors"].get("chart_palette") or []
+    slices = [
+        (labels.get("planned", "Planned"), planned, cfg["colors"]["chart_planned"]),
+        (labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
+        # Drawn as big as the gap, labelled with its sign — the dashboard's
+        # green "-34.90%".
+        (labels.get("variance", "Variance"), variance, palette[2] if len(palette) > 2 else grey,
+         value_fmt.format(variance)),
+    ]
+    return _reference_pie(cfg, slices, width, height, value_fmt=value_fmt)
 
 
 def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=None,
@@ -998,7 +1108,7 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     text_h = 24          # room below the hub for the value line + caption
     label_pad = 11        # room above the arc for the band labels
     cy = text_h + 6
-    band_font_size = 6.5
+    band_font_size = pt(6.5)
     r_label_factor = 1.08
 
     # Band cutoffs are in the same units as `max_value`, so a ratio dial has to
@@ -1065,10 +1175,10 @@ def speedometer_chart(value, width, cfg, *, title=None, max_value=100.0, height=
     # full logical string to place the trailing "=", not just the title.
     reading = value_fmt.format(v)
     value_text = shape(f"{title}= {reading}") if title else reading
-    d.add(String(cx, cy - 14, value_text, fontName=_gauge_font(title or ""), fontSize=11,
+    d.add(String(cx, cy - 14, value_text, fontName=_gauge_font(title or ""), fontSize=pt(11),
                  fillColor=hexcolor(cfg["colors"]["text"]), textAnchor="middle"))
     if title:
-        d.add(String(cx, cy - 26, shape(title), fontName=_gauge_font(title), fontSize=8,
+        d.add(String(cx, cy - 26, shape(title), fontName=_gauge_font(title), fontSize=pt(8),
                      fillColor=hexcolor(cfg["colors"]["muted"]), textAnchor="middle"))
     return d
 
@@ -1084,14 +1194,14 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
     dashboard's own four-series curve and the snapshot-derived one."""
     _date_category_axis(chart.categoryAxis, [p["date"] for p in series], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.fontSize = pt(6)
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
     # A 0-100 range in the reference's 10% steps at the default size, finer or
     # coarser as the chart is resized.
-    percent_axis(chart.valueAxis, chart.height, 6)
+    percent_axis(chart.valueAxis, chart.height, pt(6))
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 6
+    chart.valueAxis.labels.fontSize = pt(6)
     _grid(chart.valueAxis, cfg)
     for i, (color, _) in enumerate(swatches):
         chart.lines[i].strokeColor = hexcolor(color)
@@ -1123,9 +1233,9 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
         placed.append((x, y))
         # Nudge in from the right edge so a final-column label isn't clipped.
         anchor = "end" if last >= len(values) - 1 else "start"
-        d.add(String(x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
-                     fontName=_SANS_BOLD, fontSize=6,
-                     fillColor=hexcolor(color), textAnchor=anchor))
+        _callout(d, x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
+                 fontName=_SANS_BOLD, fontSize=pt(6),
+                 fillColor=hexcolor(color), textAnchor=anchor)
     _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
     return d
 
@@ -1278,7 +1388,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     # its top to a whole step, and the plot is inset by exactly what the
     # widest tick label needs — full figures, or K/M/B on a narrow chart.
     _, label_w = number_axis(chart.valueAxis, 0, max(monthly + cumulative + [0]) or 1,
-                             plot_h, 6, width, headroom=1.08)
+                             plot_h, pt(6), width, headroom=1.08)
     top = chart.valueAxis.valueMax
     plot_x = label_w + 8
     plot_w = width - plot_x - 12
@@ -1287,11 +1397,11 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     chart.data = [[r["planned"] for r in rows], [r["actual"] for r in rows]]
     _date_category_axis(chart.categoryAxis, [r["month"] for r in rows], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.fontSize = pt(6)
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 6
+    chart.valueAxis.labels.fontSize = pt(6)
     _grid(chart.valueAxis, cfg)
     _bar_geometry(chart, GAP_WIDE)  # "Cash flow - Tentative Records"
     chart.bars[0].fillColor = hexcolor(cfg["colors"]["chart_planned"])
@@ -1325,9 +1435,9 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
             value = rows[-1].get(key) or 0
             colour = cfg["colors"]["chart_planned" if row == 0 else "chart_actual"]
             y = plot_y + plot_h * (min(top, max(0.0, float(value))) / top if top else 0)
-            d.add(String(plot_x + (len(rows) - 1) * step - 2, y + 3, f"{value:,.0f}",
-                         fontName=_SANS_BOLD, fontSize=6,
-                         fillColor=hexcolor(colour), textAnchor="end"))
+            _callout(d, plot_x + (len(rows) - 1) * step - 2, y + 3, f"{value:,.0f}",
+                     fontName=_SANS_BOLD, fontSize=pt(6),
+                     fillColor=hexcolor(colour), textAnchor="end")
 
     _draw_wrapped_legend(d, [
         (cfg["colors"]["chart_planned"], labels.get("cashflow_planned_monthly", labels["planned"])),
@@ -1351,19 +1461,19 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     # final plateau sits under a labelled tick rather than above the scale.
     _, label_w = number_axis(
         chart.valueAxis, 0, max([r["cum_planned"] for r in rows] + [r["cum_actual"] for r in rows] + [0]) or 1,
-        chart.height, 6, width, headroom=1.08)
+        chart.height, pt(6), width, headroom=1.08)
     chart.x = label_w + 8
     chart.width = width - chart.x - 12
     chart.data = [[r["cum_planned"] for r in rows], [r["cum_actual"] for r in rows]]
     _date_category_axis(chart.categoryAxis, [r["month"] for r in rows], chart.width)
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 6
+    chart.categoryAxis.labels.fontSize = pt(6)
     # Vertical, like every other date axis: the label budget counts one line
     # height per label, which only holds for text running down the page.
     chart.categoryAxis.labels.angle = 90
     chart.categoryAxis.labels.boxAnchor = "e"
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 6
+    chart.valueAxis.labels.fontSize = pt(6)
     _grid(chart.valueAxis, cfg)
     chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
@@ -1450,7 +1560,7 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     height = height or 60 * mm
     d = Drawing(width, height)
     chart = HorizontalBarChart()
-    label_font_size = 7
+    label_font_size = pt(7)
     # Localize the enum display labels — the same values render Arabic in
     # the submittals TABLE, so leaving the chart English put both in one
     # document (2026-08-30).
@@ -1473,12 +1583,12 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     # `deltax` column spacing was found to overflow the panel width outright
     # for a 4-discipline legend at 52mm — same investigation).
     min_side_legend_w = 25 * mm
-    side_legend = width - label_w - legend_w - 8 >= min_side_legend_w
+    side_legend = _legend_on() and width - label_w - legend_w - 8 >= min_side_legend_w
     palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
     swatches = [(palette[i % len(palette)], enum_label(cfg, disciplines[i])) for i in range(len(disciplines))]
     legend_rows = 0
     if not side_legend:
-        legend_rows = _wrapped_legend_rows(swatches, width, font_size=6)
+        legend_rows = _wrapped_legend_rows(swatches, width, font_size=pt(6))
     legend_h = (legend_rows * 8) if not side_legend else 0
     chart.x, chart.y = label_w, 6 + legend_h
     chart_legend_w = legend_w if side_legend else 0
@@ -1489,9 +1599,9 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     chart.categoryAxis.style = "stacked"
     _bar_geometry(chart, GAP_STACKED, 100)  # "MATERIAL SUBMITTALS" / "SHOP DRAWING"
     chart.categoryAxis.labels.fontName = FONT_NAME
-    chart.categoryAxis.labels.fontSize = 7
+    chart.categoryAxis.labels.fontSize = pt(7)
     chart.valueAxis.labels.fontName = FONT_NAME
-    chart.valueAxis.labels.fontSize = 6
+    chart.valueAxis.labels.fontSize = pt(6)
     _grid(chart.valueAxis, cfg)
     for i in range(len(disciplines)):
         chart.bars[i].fillColor = hexcolor(palette[i % len(palette)])
@@ -1512,11 +1622,11 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
                  default=0)
     # Count ticks across the bars, spaced by their own label widths so a
     # narrow panel steps in hundreds where a wide one steps in fifties.
-    horizontal_number_axis(chart.valueAxis, widest, chart.width, 6)
+    horizontal_number_axis(chart.valueAxis, widest, chart.width, pt(6))
     min_label = widest * 0.04
     chart.barLabelFormat = lambda v: "%d" % v if v and v >= min_label else ""
     chart.barLabels.fontName = FONT_NAME
-    chart.barLabels.fontSize = 6
+    chart.barLabels.fontSize = pt(6)
     # In the middle of its own segment. At the default end position each
     # count sat on the join with the next colour, and the last hung past the
     # bar's end.
@@ -1525,15 +1635,18 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     if side_legend:
         d.add(_legend(swatches, width - legend_w, height - 8, vertical=True))
     else:
-        _draw_wrapped_legend(d, swatches, 2, height - 6, width, font_size=6)
+        _draw_wrapped_legend(d, swatches, 2, height - 6, width, font_size=pt(6))
     return d
 
 
-def _wrapped_legend_rows(swatches, max_width, font_size=6, swatch_size=6, gap=3, item_gap=8):
+def _wrapped_legend_rows(swatches, max_width, font_size=None, swatch_size=6, gap=3, item_gap=8):
     """How many rows `_draw_wrapped_legend` will need for this width — called
     first to reserve the right amount of chart height before anything is
     drawn (drawing top-down would otherwise need a second pass to fix up
     `chart.height` after the fact)."""
+    if not _legend_on():
+        return 0
+    font_size = pt(6) if font_size is None else font_size
     rows, x = 1, 0.0
     for _, label in swatches:
         w = swatch_size + gap + pdfmetrics.stringWidth(shape(label), FONT_NAME, font_size) + item_gap
@@ -1544,12 +1657,15 @@ def _wrapped_legend_rows(swatches, max_width, font_size=6, swatch_size=6, gap=3,
     return rows
 
 
-def _draw_wrapped_legend(d, swatches, x0, y_top, max_width, font_size=6, swatch_size=6, gap=3, item_gap=8, row_h=8):
+def _draw_wrapped_legend(d, swatches, x0, y_top, max_width, font_size=None, swatch_size=6, gap=3, item_gap=8, row_h=8):
     """Swatch+label legend that wraps to a new row instead of overflowing
     the panel — reportlab's own `Legend` flowable only supports a fixed
     column pitch (`deltax`), which overflows a narrow chart panel's width
     when there are more than 2-3 items (found 2026-08-26, see
     submittals_breakdown_chart)."""
+    if not _legend_on():
+        return
+    font_size = pt(6) if font_size is None else font_size
     x, y = x0, y_top
     for color, label in swatches:
         text = shape(label)
@@ -1626,14 +1742,14 @@ def gantt_chart(cfg, rows, width, labels, height=None):
 
     # Gridlines at the finest calendar step — days, weeks, months, quarters,
     # years — whose labels fit side by side across the bar area.
-    for tick, text in calendar_ticks(min_d, max_d, chart_w, 6):
+    for tick, text in calendar_ticks(min_d, max_d, chart_w, pt(6)):
         gx = x(tick)
         # The opening label names the period the schedule starts in; a
         # gridline there would pass it off as that period's boundary.
         if tick > min_d:
             d.add(Line(gx, bottom_pad - 4, gx, chart_top,
                        strokeColor=hexcolor(c["table_border"]), strokeWidth=0.3))
-        d.add(String(gx + 2, chart_top + 3, text, fontName=FONT_NAME, fontSize=6,
+        d.add(String(gx + 2, chart_top + 3, text, fontName=FONT_NAME, fontSize=pt(6),
                      fillColor=hexcolor(c["muted"])))
 
     for i, r in enumerate(rows):
@@ -1653,15 +1769,15 @@ def gantt_chart(cfg, rows, width, labels, height=None):
             d.add(Line(rx, y, rx, y + bar_h, strokeColor=delay_color, strokeWidth=1.3))
         raw_name = (r["name"] if r["level"] == 0 else "    " + r["name"])[:42]
         # Cut to the label column, which narrows with the chart.
-        while len(raw_name) > 1 and _text_width(shape(raw_name), 7) > label_w - 4:
+        while len(raw_name) > 1 and _text_width(shape(raw_name), pt(7)) > label_w - 4:
             raw_name = raw_name[:-1]
         d.add(String(2, row_top - row_h / 2 - 2, shape(raw_name),
-                     fontName=BOLD if r["level"] == 0 else FONT_NAME, fontSize=7,
+                     fontName=BOLD if r["level"] == 0 else FONT_NAME, fontSize=pt(7),
                      fillColor=hexcolor(c["text"])))
 
     legend_x = width - 150
     d.add(_legend([(c["chart_planned"], labels["planned"]), (c["chart_actual"], labels["actual"])],
-                  legend_x, height - 6, font_size=7))
+                  legend_x, height - 6, font_size=pt(7)))
     if has_slip:
         # To the legend's left on the same row, not stacked below it — a
         # fixed vertical offset collided with the legend's own swatch/text
@@ -1672,5 +1788,5 @@ def gantt_chart(cfg, rows, width, labels, height=None):
         note = shape("— " + labels.get("gantt_revised", "Revised finish"))
         note_w = pdfmetrics.stringWidth(note, FONT_NAME, 7)
         d.add(String(legend_x - note_w - 10, height - 6, note,
-                     fontName=FONT_NAME, fontSize=7, fillColor=delay_color))
+                     fontName=FONT_NAME, fontSize=pt(7), fillColor=delay_color))
     return d

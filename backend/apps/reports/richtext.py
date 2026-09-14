@@ -299,7 +299,7 @@ def _resolve_embed(node, cfg, ctx, scope, avail_width):
         height = float(props.get("embed_height_mm", 80)) * mm
         return resolve_chart(
             props.get("source", ""), props.get("chart_type"), cfg, ctx, scope,
-            avail_width, height, scope_zone_id=props.get("scope_zone_id"),
+            avail_width, height, scope_zone_id=props.get("scope_zone_id"), props=props,
         )
     if kind == "image":
         upload_id, report = props.get("upload_id"), ctx.get("_report")
