@@ -1347,8 +1347,13 @@ def scurve_chart(cfg, ctx, width, labels, height=None):
             ([p.get("forecast") for p in series], remaining_color,
              labels.get("scurve_remaining", "Cummulative Remaining %")),
         ]
+        # A series that is zero in every month is one the sheet never filled
+        # in: the airport dashboard's late-planned rows are formulas over an
+        # empty "Late Budget Cost" row, and the curve drew a flat line along
+        # the axis with a "0.00%" callout that read as real data (register
+        # B5, 2026-09-14).
         drawn = [(values, color, label) for values, color, label in candidates
-                 if any(v is not None for v in values)]
+                 if any(v not in (None, 0) for v in values)]
         if not drawn:
             return None
         chart.data = [values for values, _, _ in drawn]
