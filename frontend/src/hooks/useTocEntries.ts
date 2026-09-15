@@ -21,10 +21,14 @@ export interface TocEntriesState {
   loaded: boolean;
 }
 
-function hasNonContentsToc(pages: LayoutPage[], masterElements: LayoutElement[]): boolean {
-  const isNonContents = (e: LayoutElement) =>
-    e.type === "toc" && String(e.props.variant ?? "contents") !== "contents";
-  return pages.some((p) => p.elements.some(isNonContents)) || masterElements.some(isNonContents);
+/** Whether anything on the draft reads this endpoint: a caption list, a
+ * captioned table/chart/image (its running number), a field (its PDF value)
+ * or a description (its text style) — see TocCaptionsData. */
+function needsCanvasText(pages: LayoutPage[], masterElements: LayoutElement[]): boolean {
+  const reads = (e: LayoutElement) =>
+    e.type === "toc" || e.type === "field" || e.type === "description"
+    || Boolean(e.props.show_caption);
+  return pages.some((p) => p.elements.some(reads)) || masterElements.some(reads);
 }
 
 export function useTocEntries(
@@ -33,7 +37,7 @@ export function useTocEntries(
   masterElements: LayoutElement[],
 ): TocEntriesState {
   const [state, setState] = useState<TocEntriesState>({ captions: EMPTY, loaded: false });
-  const needed = hasNonContentsToc(pages, masterElements);
+  const needed = needsCanvasText(pages, masterElements);
 
   useEffect(() => {
     if (!reportId || !needed) { setState((s) => ({ ...s, loaded: true })); return; }

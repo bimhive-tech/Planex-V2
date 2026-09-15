@@ -85,6 +85,49 @@ def _cached_report_context(report):
     return ctx
 
 
+def _canvas_inputs(report, request):
+    """`(ctx, cfg)` for a Customize-canvas action, set up the way
+    build_canvas_pdf sets them up before it draws: the draft layout merged
+    over the report's, the fonts registered, and the report's direction on
+    ctx. The actions skipped the last two — the table and caption pre-passes
+    then failed in a fresh process on an unregistered font, and resolved an
+    Arabic report's tables and period field as left-to-right (register C4)."""
+    from .pdf_base import ensure_fonts, resolve_arabic
+
+    override = request.data.get("layout_override")
+    ctx = _cached_report_context(report)
+    cfg = merged_config(report.template.config if report.template else None)
+    applied = override if override is not None else getattr(report, "layout_override", None)
+    cfg = merge_layout_override(cfg, applied)
+    ensure_fonts()
+    ctx["arabic"] = resolve_arabic(cfg, ctx["project"])
+    return ctx, cfg
+
+
+def _canvas_table_style(cfg, ctx, props):
+    """What pdf_tables draws a table element with, for the canvas: its
+    colours, font size and padding, plus (register C4) the body text colour,
+    the info table's label colour, the body line spacing and the report's
+    direction (an RTL info table puts its label on the right). One helper
+    for table_data and table_overflow, so a continuation page is styled like
+    the page it continues."""
+    from .pdf_tables import table_style_override
+
+    patched = table_style_override(cfg, props)
+    c, tcfg, fonts = patched["colors"], patched["table"], patched["fonts"]
+    return {
+        "header_bg": c["table_header_bg"], "header_text": c["table_header_text"],
+        "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
+        "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
+        "header_bold": bool(tcfg.get("header_bold")),
+        "summary_bg": c.get("table_summary_bg", "#DCE6F1"),
+        "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
+        "text_color": c["text"], "label_color": c["heading"],
+        "line_spacing": float(fonts.get("line_spacing", 1.5)),
+        "rtl": bool(ctx.get("arabic")),
+    }
+
+
 # Deliberately NOT Django's cache: these hold live ReportLab flowables (a
 # pre-split table chunk per continuation page), which the cache would have to
 # pickle on every get/set — the exact cost this exists to avoid. Django's
@@ -401,18 +444,12 @@ class ReportViewSet(viewsets.ModelViewSet):
 
         from .svg_export import drawing_to_canvas_svg
 
-        from .pdf_base import ensure_fonts
         from .pdf_canvas import (MIN_CHART_H_MM, MIN_CHART_W_MM, chart_box_content, expand_pages,
                                  resolve_chart)
 
         report = self.get_object()
-        override = request.data.get("layout_override")
-        ctx = _cached_report_context(report)
-        cfg = merged_config(report.template.config if report.template else None)
-        applied = override if override is not None else getattr(report, "layout_override", None)
-        cfg = merge_layout_override(cfg, applied)
+        ctx, cfg = _canvas_inputs(report, request)
 
-        ensure_fonts()  # normally done inside build_canvas_pdf — this path skips that entirely
         min_w, min_h = MIN_CHART_W_MM * _mm, MIN_CHART_H_MM * _mm
         charts = {}
         for inst in expand_pages(cfg, ctx, report):
@@ -475,26 +512,12 @@ class ReportViewSet(viewsets.ModelViewSet):
         from reportlab.lib.units import mm as _mm
 
         from .pdf_canvas import expand_pages, resolve_table
-        from .pdf_tables import table_style_override
 
         report = self.get_object()
-        override = request.data.get("layout_override")
-        ctx = _cached_report_context(report)
-        cfg = merged_config(report.template.config if report.template else None)
-        applied = override if override is not None else getattr(report, "layout_override", None)
-        cfg = merge_layout_override(cfg, applied)
+        ctx, cfg = _canvas_inputs(report, request)
 
         def effective_style(props):
-            patched = table_style_override(cfg, props)
-            c, tcfg, fonts = patched["colors"], patched["table"], patched["fonts"]
-            return {
-                "header_bg": c["table_header_bg"], "header_text": c["table_header_text"],
-                "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
-                "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
-                "header_bold": bool(tcfg.get("header_bold")),
-                "summary_bg": c.get("table_summary_bg", "#DCE6F1"),
-                "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
-            }
+            return _canvas_table_style(cfg, ctx, props)
 
         tables = {}
         for inst in expand_pages(cfg, ctx, report):
@@ -541,31 +564,21 @@ class ReportViewSet(viewsets.ModelViewSet):
         from reportlab.lib.units import mm as _mm
 
         from .pdf_canvas import _page_size_mm, el_box, resolve_table
-        from .pdf_tables import table_style_override
 
         report = self.get_object()
-        override = request.data.get("layout_override")
-        ctx = _cached_report_context(report)
-        cfg = merged_config(report.template.config if report.template else None)
-        applied = override if override is not None else getattr(report, "layout_override", None)
-        cfg = merge_layout_override(cfg, applied)
+        ctx, cfg = _canvas_inputs(report, request)
         design = cfg.get("page_design") or {}
 
         def effective_style(props):
-            patched = table_style_override(cfg, props)
-            c, tcfg, fonts = patched["colors"], patched["table"], patched["fonts"]
-            return {
-                "header_bg": c["table_header_bg"], "header_text": c["table_header_text"],
-                "border_color": c["table_border"], "zebra_color": c["table_row_alt"],
-                "border": bool(tcfg.get("border", True)), "zebra": bool(tcfg.get("zebra")),
-                "header_bold": bool(tcfg.get("header_bold")),
-                "summary_bg": c.get("table_summary_bg", "#DCE6F1"),
-                "font_size": fonts["base_size"], "cell_padding": tcfg.get("cell_padding", 6),
-            }
+            return _canvas_table_style(cfg, ctx, props)
 
         instances = _cached_expansion(report, cfg, ctx)
 
         continuations = {}
+        # How many of each split table's rows its own page prints — the
+        # canvas used to draw every row into the box and clip, so the page
+        # showed rows the PDF moves to the continuation page (register C4).
+        first_rows = {}
         i = 0
         while i < len(instances):
             inst = instances[i]
@@ -622,6 +635,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                     for group in grid.get("column_groups") or []:
                         seq += [(group["header"], r) for r in group["rows"]]
                     offset = len(chunk0._cellvalues) - header_rows
+                    first_rows[el_id] = offset
                     chunks = []
                     for flowable in chunk_flowables[1:]:
                         count = len(flowable._cellvalues) - header_rows
@@ -638,7 +652,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                     continuations[el_id] = chunks
             i = j
 
-        return Response({"continuations": continuations})
+        return Response({"continuations": continuations, "first_rows": first_rows})
 
     @action(detail=True, methods=["post"], url_path="toc-entries")
     def toc_entries(self, request, pk=None):
@@ -664,11 +678,7 @@ class ReportViewSet(viewsets.ModelViewSet):
         from .pdf_canvas import _collect_captions, _expand_toc_overflow, _index_toc_context
 
         report = self.get_object()
-        override = request.data.get("layout_override")
-        ctx = _cached_report_context(report)
-        cfg = merged_config(report.template.config if report.template else None)
-        applied = override if override is not None else getattr(report, "layout_override", None)
-        cfg = merge_layout_override(cfg, applied)
+        ctx, cfg = _canvas_inputs(report, request)
 
         design = cfg.get("page_design") or {}
         instances = _cached_expansion(report, cfg, ctx)
@@ -691,8 +701,42 @@ class ReportViewSet(viewsets.ModelViewSet):
         def rows(key):
             return [{"text": text, "page": page} for text, page in ctx.get(key) or []]
 
+        # The same numbered caption text each element prints under itself
+        # ("جدول 3 - المسار الحرج للتأخيرات"), by element id — the canvas
+        # showed the name without its running number (register C4).
+        captions = {}
+        for key in ("_table_caption_text", "_figure_caption_text", "_image_caption_text"):
+            for (_inst, el_id), text in (ctx.get(key) or {}).items():
+                if el_id and el_id not in captions:
+                    captions[el_id] = text
+
+        # Field values exactly as the PDF resolves them: a header's report
+        # period read "Jun 30 – Jul 30" on the canvas and "يوليو 2026" in the
+        # PDF, because the canvas formatted it itself. Page-dependent sources
+        # (page.number, page.title) and repeat-item ones stay the canvas's own.
+        from .pdf_canvas import resolve_field
+
+        field_values = {}
+        for inst in instances:
+            elements = list(inst.page.get("elements") or []) + list(design.get("master_elements") or [])
+            for el in elements:
+                source = (el.get("props") or {}).get("source") or ""
+                if (el.get("type") == "field" and source not in field_values
+                        and not source.startswith(("page.", "item."))):
+                    field_values[source] = resolve_field(source, ctx, inst.scope, inst.number,
+                                                         inst.page.get("name") or "")
+
+        description = cfg.get("description") or {}
         return Response({
             "tables": rows("_table_captions"),
             "figures": rows("_figure_captions"),
             "images": rows("_image_captions"),
+            "captions": captions,
+            "field_values": field_values,
+            # How a description element's text is set (richtext.html_to_flowables).
+            "description_style": {
+                "size": float(description.get("size", cfg["fonts"]["base_size"])),
+                "color": description.get("color", cfg["colors"]["text"]),
+                "line_spacing": float(cfg["fonts"].get("line_spacing", 1.5)),
+            },
         })

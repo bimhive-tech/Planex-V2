@@ -17,6 +17,8 @@ const DEBOUNCE_MS = 800;
 
 export interface TableOverflowState {
   continuations: TableOverflowMap;
+  /** Rows each split table prints on its own page, by element id. */
+  firstRows: Record<string, number>;
   /** True once the first real response has landed (or there's nothing to
    * wait for) — mirrors useChartSvgs/useTableData/useTocEntries' `loaded`. */
   loaded: boolean;
@@ -27,7 +29,7 @@ export function useTableOverflow(
   pages: LayoutPage[],
   masterElements: LayoutElement[],
 ): TableOverflowState {
-  const [state, setState] = useState<TableOverflowState>({ continuations: {}, loaded: false });
+  const [state, setState] = useState<TableOverflowState>({ continuations: {}, firstRows: {}, loaded: false });
   const hasTable = pages.some((p) => p.elements.some((e) => e.type === "table"))
     || masterElements.some((e) => e.type === "table");
 
@@ -44,8 +46,8 @@ export function useTableOverflow(
         }),
       })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("table-overflow fetch failed"))))
-        .then((data: { continuations: TableOverflowMap }) => {
-          if (alive) setState({ continuations: data.continuations, loaded: true });
+        .then((data: { continuations: TableOverflowMap; first_rows?: Record<string, number> }) => {
+          if (alive) setState({ continuations: data.continuations, firstRows: data.first_rows ?? {}, loaded: true });
         })
         .catch(() => { if (alive) setState((s) => ({ ...s, loaded: true })); });
     }, DEBOUNCE_MS);

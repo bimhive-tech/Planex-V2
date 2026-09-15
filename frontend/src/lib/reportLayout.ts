@@ -94,6 +94,12 @@ export interface TableStyle {
   header_bold: boolean;
   font_size: number;
   cell_padding: number;
+  /** Body text colour, the info table's label colour, body line spacing and
+   * the report's direction — what pdf_tables.py draws with (register C4). */
+  text_color?: string;
+  label_color?: string;
+  line_spacing?: number;
+  rtl?: boolean;
 }
 /** The column proportions the REAL PDF draws this table with, as fractions of
  * the element's width summing to 1 (see pdf_canvas.TABLE_COL_WIDTHS_MM). The
@@ -153,6 +159,14 @@ export interface TocCaptionsData {
   tables: TocCaptionRow[];
   figures: TocCaptionRow[];
   images: TocCaptionRow[];
+  /** The numbered caption each element prints under itself ("جدول 3 - …"),
+   * by element id — apps/reports/views.py's toc_entries (register C4). */
+  captions?: Record<string, string>;
+  /** Field values exactly as the PDF resolves them, by field source.
+   * Page- and repeat-item sources are not included. */
+  field_values?: Record<string, string>;
+  /** How a description element's text is set (richtext.html_to_flowables). */
+  description_style?: { size: number; color: string; line_spacing: number };
 }
 
 /** A `source: "custom"` table element's own authored data — built by hand or

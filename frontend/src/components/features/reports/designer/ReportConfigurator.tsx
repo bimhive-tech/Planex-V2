@@ -13,7 +13,7 @@ import type {
   ChartSvgMap, LayoutElement, LayoutPage, PageDesign, PageRepeat, RepeatSource, ReportLabels, TableDataMap,
   TableOverflowMap, TocCaptionsData, TocEntry,
 } from "@/lib/reportLayout";
-import { buildOverflowPages, overflowTableData } from "@/lib/reportOverflow";
+import { buildOverflowPages, firstChunkTableData, overflowTableData } from "@/lib/reportOverflow";
 import { resolvePinnedItem } from "@/lib/reportRepeat";
 import type { ReportData } from "@/types/report";
 import { LayoutEditor } from "./LayoutEditor";
@@ -60,6 +60,8 @@ interface Props {
    * whether/where a table would even overflow). Drives buildOverflowPages
    * below, which is what actually turns this into extra page-list rows. */
   tableOverflow?: TableOverflowMap;
+  /** Rows each split table prints on its own page — see firstChunkTableData. */
+  tableFirstRows?: Record<string, number>;
   /** Live, real "List of tables/figures/images" content — see
    * useTocEntries. Present only alongside liveData; undefined in the
    * Template Builder, where those variants keep their static placeholder
@@ -81,7 +83,7 @@ interface Props {
 
 export function ReportConfigurator({
   design, pages, onChange, liveData, reportId, projectId, onAssetsChanged, masterElements, onMasterElementsChange,
-  chartSvgs, tableData, tableOverflow, tocCaptions, previewsReady = true, labels, chartColors,
+  chartSvgs, tableData, tableOverflow, tableFirstRows, tocCaptions, previewsReady = true, labels, chartColors,
 }: Props) {
   // Real, downloaded-PDF-accurate continuation pages spliced in after any
   // page whose table overflows its box (see buildOverflowPages) — these
@@ -92,7 +94,8 @@ export function ReportConfigurator({
   // accidentally edited, saved, or duplicated as if it were real.
   const withTables = tableOverflow ? buildOverflowPages(pages, tableOverflow) : pages;
   const overflowData = tableOverflow ? overflowTableData(tableOverflow) : undefined;
-  const mergedTableData = overflowData ? { ...tableData, ...overflowData } : tableData;
+  const pageTableData = tableData && tableFirstRows ? firstChunkTableData(tableData, tableFirstRows) : tableData;
+  const mergedTableData = overflowData ? { ...pageTableData, ...overflowData } : pageTableData;
   // Two passes, in build_canvas_pdf's own order: number the pages the tables
   // produced, use those numbers to decide how a long contents list paginates,
   // then re-number — because splicing a TOC continuation page shifts every

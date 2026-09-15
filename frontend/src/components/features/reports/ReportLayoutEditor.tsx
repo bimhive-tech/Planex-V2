@@ -101,7 +101,9 @@ export function ReportLayoutEditor({
   // charts, on its very first page) is as good as the other.
   const labels = chartLabels ?? tableLabels;
   const { captions: tocCaptions, loaded: tocLoaded } = useTocEntries(reportId, pages, masterElements);
-  const { continuations: tableOverflow, loaded: overflowLoaded } = useTableOverflow(reportId, pages, masterElements);
+  const {
+    continuations: tableOverflow, firstRows: tableFirstRows, loaded: overflowLoaded,
+  } = useTableOverflow(reportId, pages, masterElements);
   // None of the four hooks has produced its first real response yet —
   // chart/table boxes grey out instead of showing the generic client-side
   // mockup, so a still-loading canvas never looks like it's already showing
@@ -222,6 +224,7 @@ export function ReportLayoutEditor({
         chartSvgs={chartSvgs}
         tableData={tableData}
         tableOverflow={tableOverflow}
+        tableFirstRows={tableFirstRows}
         tocCaptions={tocCaptions}
         previewsReady={previewsReady}
         labels={labels}

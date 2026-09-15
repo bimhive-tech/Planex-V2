@@ -46,7 +46,7 @@ from .pdf_charts import (
 )
 from .pdf_layout import _draw_contained_image, _period_str, draw_fitted_image
 from .pdf_tables import (
-    _data_table as _data_table_impl, _fmt_date,
+    INFO_LABEL_COL_MM, _data_table as _data_table_impl, _fmt_date,
     _hierarchy_table_flat as _hierarchy_table_flat_impl,
     _info_table as _info_table_impl, _pct_or_dash, _styles,
     _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label,
@@ -968,6 +968,8 @@ def _resolve_item_field(source: str, scope: dict) -> str:
 # page it was previewing (2026-09-03). Sources absent from this map are all-auto
 # in the PDF too, where content sizing is what both renderers already do.
 TABLE_COL_WIDTHS_MM = {
+    # Label then value, the canvas's order — _info_table mirrors it under RTL.
+    "project_info": [INFO_LABEL_COL_MM, None],
     "item.children": [None, 30, 30],
     "zone_progress": [None, 40],
     "progress_compare": [None, 28, 28, 28],

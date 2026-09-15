@@ -51,16 +51,13 @@ export function resolveColWidths(widths: Sizes, count: number): number[] {
 /** <colgroup> that pins each column to its resolved fraction. Paired with
  * `table-layout: fixed` this is what stops a many-column table from growing
  * past its element box and being clipped. */
-export function ColGroup({ widths, count, leadingHandle }: {
-  widths: Sizes; count: number; leadingHandle?: boolean;
-}) {
+export function ColGroup({ widths, count }: { widths: Sizes; count: number }) {
   // Nothing to pin — neither a drag nor a PDF default. Forcing equal columns
   // here would contradict the PDF, whose widths are nothing like equal.
   if (!widths?.some((w) => typeof w === "number" && w > 0)) return null;
   const resolved = resolveColWidths(widths, count);
   return (
     <colgroup>
-      {leadingHandle && <col className={styles.tableHandleCol} />}
       {/* Widths are dynamic, so they ride in on a custom property rather than
           a literal inline style (CLAUDE.md §1). */}
       {resolved.map((w, i) => (
@@ -70,7 +67,9 @@ export function ColGroup({ widths, count, leadingHandle }: {
   );
 }
 
-type DragState = { index: number; startPos: number; startSizes: number[]; total: number };
+/** `mirrored`: the table runs right-to-left, so a column grows as its
+ * boundary is dragged leftwards. */
+type DragState = { index: number; startPos: number; startSizes: number[]; total: number; mirrored: boolean };
 
 /**
  * Shared drag machinery for both axes. Returns the live (uncommitted) sizes so
@@ -102,7 +101,7 @@ function useResizeDrag(
       if (!d) return;
       // `live` stays null until the pointer actually moves, so a stray click
       // on a grip can't silently freeze the table's sizes into the props.
-      const delta = (axis === "x" ? e.clientX : e.clientY) - d.startPos;
+      const delta = ((axis === "x" ? e.clientX : e.clientY) - d.startPos) * (d.mirrored ? -1 : 1);
       const next = [...d.startSizes];
       const step = delta / d.total;
       const a = d.startSizes[d.index];
@@ -136,12 +135,12 @@ function useResizeDrag(
     };
   }, [drag, axis, minSize, compensate]);
 
-  function start(e: React.PointerEvent, index: number, sizes: number[], total: number) {
+  function start(e: React.PointerEvent, index: number, sizes: number[], total: number, mirrored = false) {
     // Without this the press also reaches CanvasElementView and drags the
     // whole table element across the page instead of resizing a column.
     e.preventDefault();
     e.stopPropagation();
-    setDrag({ index, startPos: axis === "x" ? e.clientX : e.clientY, startSizes: sizes, total });
+    setDrag({ index, startPos: axis === "x" ? e.clientX : e.clientY, startSizes: sizes, total, mirrored });
   }
 
   return { live, start, dragging: drag !== null };
@@ -178,12 +177,8 @@ export function useColumnResize(
           aria-label={`Resize column ${index + 1}`}
           onPointerDown={(e) => {
             const table = (e.currentTarget as HTMLElement).closest("table");
-            // The row-handle gutter is a fixed pixel column outside the
-            // fractions, so the drag denominator has to exclude it or every
-            // fraction lands short by the gutter's share.
-            const gutter = table?.querySelector<HTMLElement>("thead th:first-child[class*='RowHandle']");
-            const total = Math.max(1, (table?.clientWidth ?? 1) - (gutter?.offsetWidth ?? 0));
-            start(e, index, current, total);
+            const total = Math.max(1, table?.clientWidth ?? 1);
+            start(e, index, current, total, table?.dir === "rtl");
           }}
         />
       )

@@ -354,20 +354,26 @@ function originalColIndices(shown: number, hiddenCols: number[] | undefined): nu
   return out;
 }
 
-function RowHideButton({ onHide, grip }: { onHide: () => void; grip?: React.ReactNode }) {
+/** The row's "hide" control and resize grip, overlaid on its first cell
+ * rather than given a column of their own. As a column they took width from
+ * the table, so every real column was narrower than the PDF's and text
+ * wrapped where the print doesn't (register C4). The button shows on hover. */
+function RowControls({ onHide, grip }: { onHide?: () => void; grip?: React.ReactNode }) {
   return (
-    <td className={styles.tableLiveRowHandle}>
+    <>
       {grip}
-      <button
-        type="button"
-        className={styles.tableLiveRowHideBtn}
-        onClick={onHide}
-        onPointerDown={(e) => e.stopPropagation()}
-        aria-label="Hide this row"
-      >
-        <Icon name="close" size={10} />
-      </button>
-    </td>
+      {onHide && (
+        <button
+          type="button"
+          className={styles.tableLiveRowHideBtn}
+          onClick={onHide}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label="Hide this row"
+        >
+          <Icon name="close" size={10} />
+        </button>
+      )}
+    </>
   );
 }
 
@@ -411,9 +417,16 @@ function HeaderCell({
  * pre-formatted strings, unlike every other table kind. */
 const fmtPctOrDash = (v: number | null) => (v == null ? "—" : `${v.toFixed(PERCENT_DECIMALS)}%`);
 
-/** Left/right cell padding pdf_tables.py sets on every table (LEFTPADDING/
- * RIGHTPADDING, in points). */
-const TABLE_CELL_PAD_X_PT = 8;
+/** Left/right cell padding in points: _info_table sets 8, _data_table and
+ * _hierarchy_table leave reportlab's default of 6. */
+const INFO_CELL_PAD_X_PT = 8;
+const DATA_CELL_PAD_X_PT = 6;
+/** Grid line width in points (_info_table 0.7, _data_table 0.6). */
+const INFO_GRID_PT = 0.7;
+const DATA_GRID_PT = 0.6;
+/** _info_table's own compact leading, where the other tables use the
+ * report's line spacing. */
+const INFO_LEADING = 1.15;
 
 /** CSS custom properties, not literal colors — the one CLAUDE.md-sanctioned
  * use of inline style, since these values are genuinely dynamic (the real
@@ -425,16 +438,25 @@ const TABLE_CELL_PAD_X_PT = 8;
  * the same size while the box around them grew and shrank with zoom, so the
  * summary page's info table filled its box at one zoom and a third of it at
  * another (reported 2026-09-14). */
-function tableStyleVars(style: TableStyle | null | undefined, scale: number): React.CSSProperties {
+function tableStyleVars(style: TableStyle | null | undefined, scale: number, kind: string): React.CSSProperties {
+  const info = kind === "info";
   return {
     "--tableBorder": style?.border ? (style?.border_color ?? "#000000") : "transparent",
+    // Floored at half a pixel, not one: a whole pixel per grid line added
+    // half a millimetre to every row at a small zoom, so a long table ran
+    // visibly longer than the print.
+    "--tableBorderWidth": `${Math.max(0.5, ptToPx(info ? INFO_GRID_PT : DATA_GRID_PT, scale))}px`,
     "--tableHeaderBg": style?.header_bg ?? "#1F4E79",
     "--tableHeaderText": style?.header_text ?? "#ffffff",
     "--tableZebra": style?.zebra_color ?? "#eef3f8",
     "--tableSummary": style?.summary_bg ?? "#dce6f1",
+    "--tableText": style?.text_color ?? "#1e2430",
+    "--tableLabel": style?.label_color ?? "#1F4E79",
+    "--tableValueAlign": style?.rtl ? "right" : "left",
     "--tableFontSize": `${ptToPx(style?.font_size ?? 8, scale)}px`,
-    "--tableCellPadding": `${ptToPx(style?.cell_padding ?? 3, scale)}px`,
-    "--tableCellPadX": `${ptToPx(TABLE_CELL_PAD_X_PT, scale)}px`,
+    "--tableLineHeight": String(info ? INFO_LEADING : (style?.line_spacing ?? 1.5)),
+    "--tableCellPadding": `${ptToPx(style?.cell_padding ?? 6, scale)}px`,
+    "--tableCellPadX": `${ptToPx(info ? INFO_CELL_PAD_X_PT : DATA_CELL_PAD_X_PT, scale)}px`,
   } as React.CSSProperties;
 }
 
@@ -453,17 +475,23 @@ function OverflowClip({ children, note = "More rows than fit here — continues 
   children: React.ReactNode; note?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
+  // The content alone is measured, never the note: measuring the box with the
+  // note inside let the note's own presence decide whether it should show, and
+  // a table centred in its box flipped it on and off every render until React
+  // gave up ("Maximum update depth exceeded", register C4).
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
-    setOverflowing(node.scrollHeight > node.clientHeight + 1);
+    const content = contentRef.current;
+    if (!node || !content) return;
+    setOverflowing(content.offsetHeight > node.clientHeight + 1);
   });
 
   return (
     <div ref={ref} className={styles.tableClip}>
-      {children}
+      <div ref={contentRef} className={styles.tableClipContent}>{children}</div>
       {overflowing && <div className={styles.tableOverflowNote}>{note}</div>}
     </div>
   );
@@ -1089,14 +1117,27 @@ function effectiveDescriptionHtml(props: Record<string, unknown>, liveData: Repo
 }
 
 function DescriptionPreview({
-  el, reportId, onElementChange, liveData,
+  el, reportId, onElementChange, liveData, scale, textStyle,
 }: {
   el: LayoutElement;
   reportId?: string;
   onElementChange?: (el: LayoutElement) => void;
   liveData?: ReportData | null;
+  scale: number;
+  textStyle?: TocCaptionsData["description_style"];
 }) {
   const html = effectiveDescriptionHtml(el.props, liveData);
+  // Set as the PDF sets it (richtext._line_para): the description's point
+  // size through this canvas's scale, its colour, the report's line spacing
+  // and 4pt between paragraphs. A fixed 11px wrapped the text at different
+  // words than the print (register C4).
+  const size = textStyle?.size ?? 12;
+  const textVars = {
+    "--descSize": `${ptToPx(size, scale)}px`,
+    "--descColor": textStyle?.color ?? "#1e2430",
+    "--descLineHeight": String(textStyle?.line_spacing ?? 1.5),
+    "--descGap": `${ptToPx(4, scale)}px`,
+  } as React.CSSProperties;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(html);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1151,7 +1192,7 @@ function DescriptionPreview({
     return (
       <OverflowClip note="More content than fits here — continues in the downloaded PDF">
         {/* eslint-disable-next-line react/no-danger -- sanitize_html's whitelisted-tags-only output */}
-        <div className={styles.descriptionPreview} dangerouslySetInnerHTML={{ __html: html }} />
+        <div className={styles.descriptionPreview} style={textVars} dangerouslySetInnerHTML={{ __html: html }} />
       </OverflowClip>
     );
   }
@@ -1165,7 +1206,7 @@ function DescriptionPreview({
         {html ? (
           <OverflowClip note="More content than fits here — continues in the downloaded PDF">
             {/* eslint-disable-next-line react/no-danger -- sanitize_html's whitelisted-tags-only output */}
-            <div className={styles.descriptionPreview} dangerouslySetInnerHTML={{ __html: html }} />
+            <div className={styles.descriptionPreview} style={textVars} dangerouslySetInnerHTML={{ __html: html }} />
           </OverflowClip>
         ) : (
           <div className={styles.chartPlaceholder}>Double-click to write the description</div>
@@ -1225,7 +1266,11 @@ export function ElementPreview({
       // the live-computed value outright — real PDF and preview both check
       // it before falling back to resolveField.
       const override = p.value_override as string | undefined;
-      const real = override ?? resolveField(p.source, liveData, pinnedItem, ownPage?.number, ownPage?.name);
+      // The PDF's own resolved value where the backend sent one — the canvas
+      // formatting its own copy made a header read "Jun 30 – Jul 30" where
+      // the PDF prints "يوليو 2026" (register C4).
+      const pdfValue = tocCaptions?.field_values?.[String(p.source ?? "")];
+      const real = override ?? pdfValue ?? resolveField(p.source, liveData, pinnedItem, ownPage?.number, ownPage?.name);
       const commitValue = onElementChange
         ? (v: string) => onElementChange({ ...el, props: { ...p, value_override: v } })
         : undefined;
@@ -1274,26 +1319,19 @@ export function ElementPreview({
       );
     }
 
+    // Shapes draw exactly what pdf_canvas.py's _draw_rect/_draw_ellipse/
+    // _draw_line draw: a fill only when one is set, a border only when a
+    // stroke is set, a line in black by default. Defaults of their own gave
+    // the cover's plain maroon bars a navy outline on the canvas (register C4).
     case "rect":
-      return (
-        <div
-          className={styles.shapePreview}
-          style={{
-            background: String(p.fill ?? "#eef3f8"),
-            border: `${Number(p.stroke_width ?? 0.5)}mm solid ${String(p.stroke ?? "#1F4E79")}`,
-            borderRadius: `${Number(p.radius ?? 0)}mm`,
-          }}
-        />
-      );
-
     case "ellipse":
       return (
         <div
           className={styles.shapePreview}
           style={{
-            background: String(p.fill ?? "#eef3f8"),
-            border: `${Number(p.stroke_width ?? 0.5)}mm solid ${String(p.stroke ?? "#1F4E79")}`,
-            borderRadius: "50%",
+            background: p.fill ? String(p.fill) : "transparent",
+            border: p.stroke ? `${Number(p.stroke_width ?? 0.5)}mm solid ${String(p.stroke)}` : "none",
+            borderRadius: el.type === "ellipse" ? "50%" : `${Number(p.radius ?? 0)}mm`,
           }}
         />
       );
@@ -1304,7 +1342,7 @@ export function ElementPreview({
           <div
             className={styles.linePreview}
             style={{
-              borderTop: `${Number(p.stroke_width ?? 0.6)}mm solid ${String(p.stroke ?? "#1F4E79")}`,
+              borderTop: `${Number(p.stroke_width ?? 0.5)}mm solid ${String(p.stroke ?? "#000000")}`,
             }}
           />
         </div>
@@ -1316,7 +1354,8 @@ export function ElementPreview({
           titleShow={p.show_title !== false}
           titleText={String(p.title_text || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
           captionShow={Boolean(p.show_caption)}
-          captionText={String(p.caption || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
+          captionText={tocCaptions?.captions?.[el.id]
+            ?? String(p.caption || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
           scale={scale}
         >
           <TablePreview
@@ -1333,7 +1372,8 @@ export function ElementPreview({
           titleShow={p.show_title !== false}
           titleText={String(p.title_text || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
           captionShow={Boolean(p.show_caption)}
-          captionText={String(p.caption || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
+          captionText={tocCaptions?.captions?.[el.id]
+            ?? String(p.caption || sourceLabel(labels, CHART_SOURCES, p.source, "Chart"))}
           scale={scale}
         >
           <ChartPreview
@@ -1352,7 +1392,12 @@ export function ElementPreview({
       );
 
     case "description":
-      return <DescriptionPreview el={el} reportId={reportId} onElementChange={onElementChange} liveData={liveData} />;
+      return (
+        <DescriptionPreview
+          el={el} reportId={reportId} onElementChange={onElementChange} liveData={liveData}
+          scale={scale} textStyle={tocCaptions?.description_style}
+        />
+      );
 
     default:
       return null;
@@ -1400,25 +1445,29 @@ function LiveTableBody({
   // the PDF itself uses for this table's source.
   const sized = cols.pinned;
 
-  const vars = tableStyleVars(live.style, scale);
+  const vars = tableStyleVars(live.style, scale, live.kind);
   const tint = new Set(live.tint_rows ?? []);
 
   if (live.kind === "info") {
     return (
       <OverflowClip>
-        <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="info" style={vars}>
-          {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+        {/* An RTL report prints the label on the right (_info_table emits
+            [value, label]); `dir` mirrors the columns without reordering the
+            cells, so widths and overrides keep their label-first indices. */}
+        <table
+          ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="info"
+          dir={live.style?.rtl ? "rtl" : undefined} style={vars}
+        >
+          {sized && <ColGroup widths={cols.widths} count={colIdx.length} />}
           <tbody>
             {live.rows.map(([labelText, valueText], i) => {
               const oi = rowIdx[i];
               return (
                 <tr key={i} {...rowProps(i)}>
-                  {commitHideRow && (
-                    <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
-                  )}
                   <td className={styles.tableLiveInfoLabel}>
+                    <RowControls onHide={commitHideRow && (() => commitHideRow(oi))} grip={rows.grip?.(i)} />
                     {cols.grip?.(0)}
-                    <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} /> •
+                    <TableCell text={labelText} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} />
                   </td>
                   <td className={styles.tableLiveInfoValue}>
                     <TableCell text={valueText} onCommit={commitCell && ((v) => commitCell(`r${oi}c1`, v))} />
@@ -1436,10 +1485,9 @@ function LiveTableBody({
     return (
       <OverflowClip>
         <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="hierarchy" style={vars}>
-          {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+          {sized && <ColGroup widths={cols.widths} count={colIdx.length} />}
           <thead>
             <tr>
-              {commitHideRow && <th className={styles.tableLiveRowHandle} />}
               {live.header.map((h, i) => (
                 <th key={i}>
                   {cols.grip?.(i)}
@@ -1453,10 +1501,8 @@ function LiveTableBody({
               const oi = rowIdx[i];
               return (
                 <tr key={i} data-zone={row.level === 0 ? "on" : undefined} {...rowProps(i)}>
-                  {commitHideRow && (
-                    <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
-                  )}
                   <td className={row.level === 0 ? styles.tableLiveZoneName : undefined}>
+                    <RowControls onHide={commitHideRow && (() => commitHideRow(oi))} grip={rows.grip?.(i)} />
                     <span className={row.level === 1 ? styles.tableLiveIndent : undefined}>
                       <TableCell text={row.name} onCommit={commitCell && ((v) => commitCell(`r${oi}c0`, v))} />
                     </span>
@@ -1484,10 +1530,9 @@ function LiveTableBody({
   return (
     <OverflowClip>
       <table ref={tableRef} data-sized={sized ? "on" : undefined} className={styles.tableLive} data-kind="data" style={vars}>
-        {sized && <ColGroup widths={cols.widths} count={colIdx.length} leadingHandle={Boolean(commitHideRow)} />}
+        {sized && <ColGroup widths={cols.widths} count={colIdx.length} />}
         <thead>
           <tr>
-            {commitHideRow && <th className={styles.tableLiveRowHandle} />}
             {live.header.map((h, i) => {
               const oc = colIdx[i];
               return (
@@ -1512,11 +1557,11 @@ function LiveTableBody({
             return (
               <tr key={i} data-tint={tinted ? "on" : undefined}
                   data-zebra={live.style.zebra && !tinted && i % 2 === 1 ? "on" : undefined} {...rowProps(i)}>
-                {commitHideRow && (
-                  <RowHideButton onHide={() => commitHideRow(oi)} grip={rows.grip?.(i)} />
-                )}
                 {row.map((cell, j) => (
                   <td key={j} data-align="center">
+                    {j === 0 && (
+                      <RowControls onHide={commitHideRow && (() => commitHideRow(oi))} grip={rows.grip?.(i)} />
+                    )}
                     <TableCell text={cell} onCommit={commitCell && ((v) => commitCell(`r${oi}c${j}`, v))} />
                   </td>
                 ))}

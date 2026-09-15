@@ -8,7 +8,7 @@
 // content: baking it in would freeze it exactly like the "report was
 // stale for a whole session" bug from earlier this project (see
 // REPORT_BUILDER_FEEDBACK.md, 2026-08-26).
-import type { LayoutPage, TableDataMap, TableOverflowMap } from "./reportLayout";
+import type { LayoutPage, TableDataMap, TableDataResult, TableOverflowMap } from "./reportLayout";
 
 /** One extra page per continuation chunk, spliced in right after the page
  * whose table produced it — same box position as the original (the real
@@ -45,6 +45,21 @@ export function buildOverflowPages(pages: LayoutPage[], continuations: TableOver
         });
       });
     }
+  }
+  return out;
+}
+
+/** `tableData` with each split table cut to the rows its own page prints —
+ * the rest are on the continuation pages buildOverflowPages adds. Without
+ * this the page drew every row into its box and clipped mid-row, showing
+ * rows the PDF prints on the next page. */
+export function firstChunkTableData(tableData: TableDataMap, firstRows: Record<string, number>): TableDataMap {
+  const out: TableDataMap = { ...tableData };
+  for (const [id, count] of Object.entries(firstRows)) {
+    const table = tableData[id];
+    if (table?.status !== "ok" || table.rows.length <= count) continue;
+    // Each kind keeps its own row type; the cast only re-joins the union.
+    out[id] = { ...table, rows: table.rows.slice(0, count) } as TableDataResult;
   }
   return out;
 }

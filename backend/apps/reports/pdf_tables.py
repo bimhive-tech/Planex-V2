@@ -241,6 +241,10 @@ def apply_table_overrides(kind, header, rows, overrides, hidden_rows=None, hidde
             rows[i] = [c for j, c in enumerate(row) if j not in drop]
 
 
+# The info table's label column; its value column takes the rest.
+INFO_LABEL_COL_MM = 50
+
+
 def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None,
                 col_widths_frac=None, hidden_cols=None, row_heights_mm=None, hidden_rows=None):
     """Bordered 2-col table: label on the right, value on the left (RTL look).
@@ -280,7 +284,7 @@ def _info_table(cfg, styles, rows, rtl, avail_width=None, highlight_labels=None,
                                  textColor=hexcolor(c["text"]), leading=lead)
     label_highlight_style = ParagraphStyle("lblh", parent=label_style, fontName=BOLD)
     body_highlight_style = ParagraphStyle("bodyh", parent=body_style, fontName=BOLD)
-    label_w = 50 * mm
+    label_w = INFO_LABEL_COL_MM * mm
     value_max_width = max(avail_width - label_w - CELL_H_PADDING, MIN_COL_WIDTH) if avail_width else None
     highlight_labels = highlight_labels or set()
     data = []

@@ -4244,7 +4244,7 @@ class CanvasColumnWidthParityTests(TestCase):
         day = datetime.date(2026, 1, 31)
         ctx = {
             "arabic": False,
-            "project": {"currency": "EGP"},
+            "project": {"currency": "EGP", "name": "Tower", "code": "T-1"},
             "zones": [{"id": "z1", "name": "Zone A", "progress": 42.0,
                        "planned": 50.0, "previous": 30.0}],
             "milestones": [{"title": "Handover", "date": day, "status": "on_track"}],
