@@ -1065,14 +1065,38 @@ function resolveImageUrl(props: Record<string, unknown>, pinnedItem: RepeatItem 
  * inline-editable field on this canvas already uses (see
  * InlineEditableText) — editing a letter at a time would otherwise flood
  * undo history with one entry per keystroke. */
+/** Escape plain text for use as HTML content. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The html a description element prints — mirrors apps/reports/
+ * pdf_canvas.py's _effective_description_html exactly: the element's own
+ * text, else the report's rich narrative, else the project description one
+ * paragraph per line. The canvas used to show an empty "double-click to
+ * write" box where the PDF printed the project description (register C3,
+ * 2026-09-15). */
+function effectiveDescriptionHtml(props: Record<string, unknown>, liveData: ReportData | null | undefined): string {
+  if (typeof props.html === "string" && props.html) return props.html;
+  const project = liveData?.project;
+  if (project?.description_html) return project.description_html;
+  return (project?.description ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join("");
+}
+
 function DescriptionPreview({
-  el, reportId, onElementChange,
+  el, reportId, onElementChange, liveData,
 }: {
   el: LayoutElement;
   reportId?: string;
   onElementChange?: (el: LayoutElement) => void;
+  liveData?: ReportData | null;
 }) {
-  const html = typeof el.props.html === "string" ? el.props.html : "";
+  const html = effectiveDescriptionHtml(el.props, liveData);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(html);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1328,7 +1352,7 @@ export function ElementPreview({
       );
 
     case "description":
-      return <DescriptionPreview el={el} reportId={reportId} onElementChange={onElementChange} />;
+      return <DescriptionPreview el={el} reportId={reportId} onElementChange={onElementChange} liveData={liveData} />;
 
     default:
       return null;

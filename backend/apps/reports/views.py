@@ -397,8 +397,9 @@ class ReportViewSet(viewsets.ModelViewSet):
         the response is unique. Not used by the project-agnostic Template
         Builder, which has no real project data for a chart to match anyway.
         """
-        from reportlab.graphics import renderSVG
         from reportlab.lib.units import mm as _mm
+
+        from .svg_export import drawing_to_canvas_svg
 
         from .pdf_base import ensure_fonts
         from .pdf_canvas import (MIN_CHART_H_MM, MIN_CHART_W_MM, chart_box_content, expand_pages,
@@ -433,7 +434,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 if drawing is None:
                     charts[el["id"]] = {"status": "no_data"}
                     continue
-                charts[el["id"]] = {"status": "ok", "svg": renderSVG.drawToString(drawing)}
+                charts[el["id"]] = {"status": "ok", "svg": drawing_to_canvas_svg(drawing)}
         # The colours too: the Properties panel's colour pickers show the
         # report's own defaults for a chart that hasn't overridden them.
         return Response({"charts": charts, "labels": cfg["labels"], "colors": cfg["colors"]})

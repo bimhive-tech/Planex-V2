@@ -26,7 +26,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph
 
-from .pdf_base import FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
+from .pdf_base import BOLD, FONT_NAME, ensure_fonts, has_arabic, hexcolor, shape, storage_image_reader
 # resolve_table/resolve_chart live in pdf_canvas.py, which never imports this
 # module back (any drawing code that needs html_to_flowables imports it
 # locally, inside the function that calls it) — so this stays a one-way
@@ -257,13 +257,67 @@ def _line_markup(line_runs, rtl, prefix=""):
     return f"{core}{gap}{marker}" if rtl else f"{marker}{gap}{core}"
 
 
-def _line_para(line_runs, cfg, base_size, default_color, default_align, prefix=""):
+def _run_width(text, fmt, base_size):
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    font = BOLD if fmt.get("bold") else FONT_NAME
+    return stringWidth(shape(text), font, fmt.get("size", base_size))
+
+
+def _wrap_rtl_runs(line_runs, base_size, max_width, prefix=""):
+    """Break one right-to-left line into the visual lines it occupies at
+    `max_width`, BEFORE any of it is shaped.
+
+    Shaping reorders a line for display; handing reportlab that already
+    reordered text and letting it wrap breaks the line in display order, so
+    the end of the sentence lands on the first line and its start on the last
+    — the project description on page 6 printed its second line first
+    (register C3, 2026-09-15). Same cure as pdf_tables._wrap_shape, kept
+    run-aware here so bold and coloured words keep their formatting."""
+    words = []
+    for text, fmt in line_runs:
+        for i, part in enumerate(text.split(" ")):
+            if i:
+                words.append((" ", fmt))
+            if part:
+                words.append((part, fmt))
+    reserve = _run_width(prefix + "  ", {}, base_size) if prefix else 0.0
+    lines, current, width = [], [], 0.0
+    for word in words:
+        w = _run_width(word[0], word[1], base_size)
+        if current and word[0] != " " and width + w > max_width - reserve:
+            lines.append(current)
+            current, width = [], 0.0
+        if not current and word[0] == " ":
+            continue
+        current.append(word)
+        width += w
+    if current:
+        lines.append(current)
+    merged = []
+    for line in lines:
+        runs = []
+        for text, fmt in line:
+            if runs and runs[-1][1] == fmt:
+                runs[-1] = (runs[-1][0] + text, fmt)
+            else:
+                runs.append((text, fmt))
+        merged.append(runs)
+    return merged
+
+
+def _line_para(line_runs, cfg, base_size, default_color, default_align, prefix="", max_width=None):
     plain = "".join(t for t, _ in line_runs)
     rtl = has_arabic(plain)
     align = default_align if default_align is not None else (TA_RIGHT if rtl else TA_LEFT)
     size = max([f.get("size", base_size) for _, f in line_runs] or [base_size])
     lead = float(cfg["fonts"].get("line_spacing", 1.5))
-    markup = _line_markup(line_runs, rtl, prefix)
+    if rtl and max_width:
+        visual = _wrap_rtl_runs(line_runs, base_size, max_width, prefix)
+        markup = "<br/>".join(_line_markup(runs, rtl, prefix if i == 0 else "")
+                              for i, runs in enumerate(visual))
+    else:
+        markup = _line_markup(line_runs, rtl, prefix)
     st = ParagraphStyle("rt", fontName=FONT_NAME, fontSize=size, leading=size * lead,
                         textColor=hexcolor(default_color), alignment=align, spaceAfter=4)
     return Paragraph(markup or "&nbsp;", st)
@@ -431,7 +485,8 @@ def _render_block(node, cfg, base_size, default_color, flow, ctx=None, scope=Non
 
     if node.tag is None:
         if node.data and node.data.strip():
-            flow.append(_line_para([(node.data, {})], cfg, base_size, default_color, None))
+            flow.append(_line_para([(node.data, {})], cfg, base_size, default_color, None,
+                                   max_width=avail_width))
         return
 
     if node.tag in _LIST:
@@ -451,7 +506,7 @@ def _render_block(node, cfg, base_size, default_color, flow, ctx=None, scope=Non
             prefix = f"{idx}." if ordered else "•"
             for i, ln in enumerate(lines):
                 flow.append(_line_para(ln, cfg, base_size, default_color, align,
-                                       prefix=prefix if i == 0 else ""))
+                                       prefix=prefix if i == 0 else "", max_width=avail_width))
         return
 
     # Paragraph / div / stray inline → one or more lines. For a stray inline tag
@@ -461,7 +516,7 @@ def _render_block(node, cfg, base_size, default_color, flow, ctx=None, scope=Non
     _collect_runs(node, seed, runs)
     align = _block_align(node)
     for ln in _split_lines(runs):
-        flow.append(_line_para(ln, cfg, base_size, default_color, align))
+        flow.append(_line_para(ln, cfg, base_size, default_color, align, max_width=avail_width))
 
 
 def html_to_flowables(html, cfg, styles, *, ctx=None, scope=None, avail_width=None):
