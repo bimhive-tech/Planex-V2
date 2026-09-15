@@ -13,6 +13,8 @@ import {
 } from "@/lib/reportElements";
 import type { LayoutElement, ReportColors, ReportLabels } from "@/lib/reportLayout";
 import type { ReportData, ReportImage } from "@/types/report";
+import { ChartLayoutBlock } from "./ChartLayoutBlock";
+import { useTextToolbarSlot } from "./TextToolbarSlot";
 import { ChartStyleBlock } from "./ChartStyleBlock";
 import { SlotImageUpload, isSlotSource } from "./SlotImageUpload";
 import styles from "./designer.module.css";
@@ -226,6 +228,8 @@ interface Props {
    * ChartStyleBlock). Undefined in the Template Builder. */
   labels?: ReportLabels;
   chartColors?: ReportColors;
+  /** What each palette colour of the selected chart paints — see ChartSvgResult. */
+  chartSeries?: string[];
 }
 
 /** Commit only real numbers — an empty or half-typed box ("", "12.") must
@@ -234,10 +238,11 @@ const isFiniteNumber = (v: string) => v.trim() !== "" && Number.isFinite(Number(
 
 export function ElementInspector({
   el, onChange, repeating = false, reportId, projectId, onAssetsChanged, selectedCount = 0,
-  onDeleteSelection, liveData, labels, chartColors,
+  onDeleteSelection, liveData, labels, chartColors, chartSeries,
 }: Props) {
   // Hooks must run every render regardless of `el`, so these sit above the
   // early returns below.
+  const { setSlot: setTextToolbarSlot } = useTextToolbarSlot();
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -393,12 +398,12 @@ export function ElementInspector({
       {el.type === "description" && (
         <div className={styles.uploadBlock}>
           <p className={styles.panelHint}>
-            <strong>Double-click this box on the canvas to open its formatting toolbar</strong> — bold,
-            italic, underline, bullet/numbered lists, right/center/left alignment, text size, and text
-            color all live there (this isn&apos;t a plain text box). The same toolbar also has table/chart/
-            image embed buttons, and you can drag a table or chart from the palette straight into the text
-            while editing. Continues onto extra pages if it doesn&apos;t fit this box.
+            <strong>Double-click this box on the canvas to edit its text.</strong> The formatting controls
+            (bold, italic, underline, lists, alignment, text size and colour, and the table/chart/image
+            embeds) appear here while you edit. Continues onto extra pages if it doesn&apos;t fit this box.
           </p>
+          {/* The editing description's toolbar portals in here (TextToolbarSlot). */}
+          <div ref={setTextToolbarSlot} className={styles.textToolbarSlot} />
         </div>
       )}
 
@@ -487,7 +492,12 @@ export function ElementInspector({
       )}
 
       {el.type === "chart" && (
-        <ChartStyleBlock el={el} labels={labels} chartColors={chartColors} onChange={onChange} />
+        <>
+          <ChartStyleBlock
+            el={el} labels={labels} chartColors={chartColors} series={chartSeries} onChange={onChange}
+          />
+          <ChartLayoutBlock el={el} chartColors={chartColors} onChange={onChange} />
+        </>
       )}
 
       <div className={styles.propFields}>

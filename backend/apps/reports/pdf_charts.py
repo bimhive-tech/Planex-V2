@@ -14,8 +14,8 @@ from reportlab.graphics.shapes import Circle, Drawing, Group, Line, Polygon, Rec
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 
-from .pdf_axes import (calendar_ticks, date_unit_labels, horizontal_number_axis, number_axis,
-                       percent_axis, text_width)
+from .pdf_axes import (AXIS_OVERRIDE, calendar_ticks, date_unit_labels, horizontal_number_axis,
+                       number_axis, percent_axis, text_width)
 from .pdf_base import BOLD, FONT_NAME, has_arabic, hexcolor, shape
 
 # The reference gauge's own text is plain Latin sans-serif — Helvetica is a
@@ -26,18 +26,30 @@ _SANS = "Helvetica"
 _SANS_BOLD = "Helvetica-Bold"
 
 
+def _decimals():
+    """Decimal places a chart prints its values with: the report's two
+    (register A2) unless this chart element chose fewer (register D2)."""
+    from .constants import PERCENT_DECIMALS
+
+    chosen = (_OPTIONS.get() or {}).get("decimals")
+    return PERCENT_DECIMALS if chosen is None else chosen
+
+
 def _pct_label(v):
     """A percentage as the report prints every percentage: the report's own
     decimals, never rounded further (register A2). Blank for no value."""
-    from .constants import PERCENT_DECIMALS
-
-    return f"{v:.{PERCENT_DECIMALS}f}%" if v is not None else ""
+    return f"{v:.{_decimals()}f}%" if v is not None else ""
 
 
 def _money_label(v):
     """An amount in full, to the cent (register A2) — never shortened to
     "198.3M"."""
-    return f"{v:,.2f}" if v is not None else ""
+    return f"{v:,.{_decimals()}f}" if v is not None else ""
+
+
+def _line_width(default):
+    """Line thickness in points: this element's `line_width`, else `default`."""
+    return (_OPTIONS.get() or {}).get("line_width") or default
 
 
 def _count_label(v):
@@ -67,20 +79,46 @@ _OPTIONS = contextvars.ContextVar("chart_options", default=None)
 BASE_FONT_PT = 7
 
 
+def _number_prop(props, key):
+    """A numeric prop as a float, or None when unset, blank or not a number —
+    a half-typed field must leave the chart as designed, not break it."""
+    value = props.get(key)
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @contextlib.contextmanager
 def chart_options(props):
-    """Apply one chart element's `font_size`, `legend` and `show_values`
-    props to everything drawn inside the block."""
+    """Apply one chart element's drawing choices to everything drawn inside
+    the block: `font_size`, `legend`, `show_values`, and (register D2) the
+    value axis `axis_min`/`axis_max`/`axis_step`, the bars' `bar_gap` and
+    `series_gap`, the lines' `line_width`, the `decimals` values print with
+    and the `legend_position` apply_legend_position moves the legend to."""
     props = props or {}
     size = props.get("font_size")
+    decimals = _number_prop(props, "decimals")
     token = _OPTIONS.set({
         "font_scale": float(size) / BASE_FONT_PT if size else 1.0,
         "legend": props.get("legend") is not False,
         "values": props.get("show_values") is not False,
+        "bar_gap": _number_prop(props, "bar_gap"),
+        "series_gap": _number_prop(props, "series_gap"),
+        "line_width": _number_prop(props, "line_width"),
+        "decimals": int(min(2, max(0, decimals))) if decimals is not None else None,
+    })
+    axis_token = AXIS_OVERRIDE.set({
+        "min": _number_prop(props, "axis_min"),
+        "max": _number_prop(props, "axis_max"),
+        "step": _number_prop(props, "axis_step"),
     })
     try:
         yield
     finally:
+        AXIS_OVERRIDE.reset(axis_token)
         _OPTIONS.reset(token)
 
 
@@ -99,8 +137,14 @@ def _values_on() -> bool:
 
 _PALETTE_PROPS = tuple(f"color_{i}" for i in range(1, 7))
 _COLOR_PROPS = {"color_a": "chart_planned", "color_b": "chart_actual", "color_grid": "chart_grid",
-                "color_text": "text", "color_muted": "muted"}
-STYLE_PROP_KEYS = ("text_labels", *_COLOR_PROPS, *_PALETTE_PROPS)
+                "color_text": "text", "color_muted": "muted",
+                # The gauge's four bands, poor to excellent (register D2).
+                "color_gauge_bad": "gauge_bad", "color_gauge_warn": "gauge_warn",
+                "color_gauge_good": "gauge_good", "color_gauge_excellent": "gauge_excellent"}
+# Where the gauge's average, good and excellent bands start, and where its
+# dial ends, in the gauge's own units (a ratio for SPI, % for completion).
+_GAUGE_PROPS = ("gauge_low", "gauge_mid", "gauge_high", "gauge_max")
+STYLE_PROP_KEYS = ("text_labels", *_COLOR_PROPS, *_PALETTE_PROPS, *_GAUGE_PROPS)
 
 
 def chart_style_override(cfg, props):
@@ -111,11 +155,12 @@ def chart_style_override(cfg, props):
     `color_a`/`color_b` are the planned and actual series (the Properties
     panel offered them long before anything read them; this makes them
     real), `color_1`..`color_6` the palette the other series draw from,
-    `color_grid`/`color_text`/`color_muted` the rest, and `text_labels`
-    {label key: text} the legend entries and axis names this one chart
-    prints. `cfg` comes back untouched when the element sets none."""
+    `color_grid`/`color_text`/`color_muted` the rest, `color_gauge_*` and
+    `gauge_low`/`gauge_mid`/`gauge_high`/`gauge_max` a gauge's bands, and
+    `text_labels` {label key: text} the legend entries and axis names this
+    one chart prints. `cfg` comes back untouched when the element sets none."""
     props = props or {}
-    if not any(props.get(k) for k in STYLE_PROP_KEYS):
+    if not any(props.get(k) not in (None, "") for k in STYLE_PROP_KEYS):
         return cfg
     cfg = {**cfg, "colors": {**cfg["colors"]}, "labels": {**cfg["labels"]}}
     for prop, key in _COLOR_PROPS.items():
@@ -131,7 +176,25 @@ def chart_style_override(cfg, props):
     texts = props.get("text_labels")
     if isinstance(texts, dict):
         cfg["labels"].update({k: v for k, v in texts.items() if isinstance(v, str) and v.strip()})
+    _gauge_override(cfg, props)
     return cfg
+
+
+def _gauge_override(cfg, props):
+    """Patch an element's own band starts and dial end into `cfg`'s gauge
+    settings — both the completion gauge's and SPI's, since one element is
+    only ever one of them and its numbers are in that gauge's units. Bands
+    that would not rise in order leave the report's own bands in place."""
+    chosen = {key: _number_prop(props, f"gauge_{key}") for key in ("low", "mid", "high")}
+    top = _number_prop(props, "gauge_max")
+    for key, spi in (("gauge_thresholds", False), ("spi_thresholds", True)):
+        bands = {**{"low": 50, "mid": 70, "high": 90}, **(cfg.get(key) or {})}
+        bands.update({k: v for k, v in chosen.items() if v is not None})
+        dial_end = (top or float(cfg.get("spi_max", 1.5))) if spi else 100.0
+        if 0 <= bands["low"] < bands["mid"] < bands["high"] <= dial_end:
+            cfg[key] = bands
+    if top is not None and top > 0:
+        cfg["spi_max"] = top
 
 
 def hide_values(drawing):
@@ -145,6 +208,34 @@ def hide_values(drawing):
             el.labels = None
         elif isinstance(el, Group):
             hide_values(el)
+    return drawing
+
+
+def freeze_formats(drawing):
+    """Bind a finished drawing's bar-label formatters to the options it was
+    built under. reportlab calls them while the drawing is DRAWN, after
+    chart_options has exited, so an element's own decimals were lost by the
+    time its values printed (register D2). Call inside chart_options."""
+    options = _OPTIONS.get()
+
+    def bound(fmt):
+        if not callable(fmt):
+            return fmt
+
+        def call(value, _fmt=fmt):
+            token = _OPTIONS.set(options)
+            try:
+                return _fmt(value)
+            finally:
+                _OPTIONS.reset(token)
+        return call
+
+    for el in getattr(drawing, "contents", []):
+        if isinstance(el, BarChart):
+            fmt = el.barLabelFormat
+            el.barLabelFormat = [bound(f) for f in fmt] if isinstance(fmt, list) else bound(fmt)
+        elif isinstance(el, Group):
+            freeze_formats(el)
     return drawing
 
 
@@ -187,6 +278,14 @@ def _bar_geometry(chart, gap_width=GAP_CLUSTERED, overlap=0):
     quote the reference panel it matches. A positive `overlap` (stacked bars
     ride on top of each other) needs no in-cluster spacing at all.
     """
+    # An element's own `bar_gap` (Excel's gap width: a smaller gap is a
+    # thicker bar) and `series_gap` (space between the bars of one group, as
+    # a share of a bar), register D2. A stacked chart has no series gap.
+    options = _OPTIONS.get() or {}
+    if options.get("bar_gap") is not None:
+        gap_width = min(500.0, max(0.0, options["bar_gap"]))
+    if options.get("series_gap") is not None and overlap < 100:
+        overlap = -min(100.0, max(0.0, options["series_gap"]))
     chart.barWidth = _BAR_UNIT
     chart.groupSpacing = _BAR_UNIT * gap_width / 100.0
     chart.barSpacing = _BAR_UNIT * max(0.0, -overlap) / 100.0
@@ -365,7 +464,10 @@ def _legend(colors_labels, x, y, font_size=None, vertical=False, deltax=95):
     leg.columnMaximum = len(colors_labels) if vertical else 1
     leg.deltax = 0 if vertical else deltax
     leg.colorNamePairs = [(hexcolor(c), shape(label)) for c, label in colors_labels]
-    return leg
+    # Plain swatches, like the wrapped legend and the bars themselves carry;
+    # reportlab outlines each one in black by default.
+    leg.strokeColor = None
+    return _LegendGroup(leg)
 
 
 def _reference_pie(cfg, slices, width, height, *, value_fmt=_count_label, popout=4, extra_legend=()):
@@ -396,15 +498,20 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt=_count_label, popout
     legend = [(c, n) for n, _, c, _ in slices] + list(extra_legend)
     legend_rows = _wrapped_legend_rows(legend, width - 16)
     legend_h = 6 + legend_rows * 8
-    # Leave room on all sides for the outside value labels, which sit at
-    # 1.15x the radius and would otherwise run off the drawing.
-    pw = max(18 * mm, min(height - legend_h - 14, width * 0.56))
+    # Room above and below the pie for the outside value labels: they sit at
+    # 1.15x the radius, pushed out further by the popout, and are a line tall.
+    # A flat 7pt was far too little for a pie of any size, so a label on the
+    # top wedge printed above the drawing — the duration pie's "67" was cut
+    # off in the canvas and ran into the title in print (register D1).
+    label_room = popout + pt(6) * 1.2 + 2
+    pw = max(18 * mm, min((height - legend_h - 2 * label_room) / 1.15, width * 0.56))
+    room = pw * 0.075 + label_room
     # A box taller than the pie needs (a narrow panel) gets a drawing only as
     # tall as pie and legend, which the canvas renderer then centres in the
     # box — the spare height used to sit above the pie, the caption far below.
-    d.height = min(height, legend_h + 14 + pw)
+    d.height = min(height, legend_h + 2 * room + pw)
     pie = Pie()
-    pie.x, pie.y = (width - pw) / 2, legend_h + 6
+    pie.x, pie.y = (width - pw) / 2, legend_h + room
     pie.width = pie.height = pw
     pie.data = [max(0.0001, v) for _, v, _, _ in slices]
     pie.labels = [text for _, _, _, text in slices]
@@ -917,8 +1024,6 @@ def time_performance_chart(cfg, ctx, width, labels, height=None):
     Plots the fractions the dashboard states when it was imported, and
     otherwise derives the same two from the day counts, so a project with no
     dashboard still gets the chart. `None` when there is no duration at all."""
-    from .constants import PERCENT_DECIMALS
-
     dur = ctx.get("duration") or {}
     elapsed, remaining = dur.get("elapsed_pct"), dur.get("remaining_pct")
     total = dur.get("total")
@@ -934,7 +1039,7 @@ def time_performance_chart(cfg, ctx, width, labels, height=None):
     ]
     return _single_series_bars(
         cfg, bars, width, height or 60 * mm, value_min=0, value_max=100,
-        bar_fmt=f"%0.{PERCENT_DECIMALS}f%%", percent=True)
+        bar_fmt=f"%0.{_decimals()}f%%", percent=True)
 
 
 def project_duration_chart(cfg, ctx, width, labels, height=None):
@@ -1117,13 +1222,11 @@ def overall_donut(cfg, ctx, width, labels, height=None):
     read this pie every month and asked for that one, so that is the one
     drawn. Falls back to done-vs-remaining when there's no planned baseline
     to compare against."""
-    from .constants import PERCENT_DECIMALS
-
     overall = float(ctx["overall"])
     planned = ctx.get("planned")
     grey = cfg["colors"].get("muted", "#A5A5A5")
     height = height or 56 * mm
-    value_fmt = f"{{:,.{PERCENT_DECIMALS}f}}%"
+    value_fmt = f"{{:,.{_decimals()}f}}%"
     if planned is None:
         slices = [(labels.get("actual", "Actual"), overall, cfg["colors"]["chart_actual"]),
                   (labels.get("not_started", "Remaining"), max(0.0, 100 - overall), grey)]
@@ -1261,7 +1364,7 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
     _grid(chart.valueAxis, cfg)
     for i, (color, _) in enumerate(swatches):
         chart.lines[i].strokeColor = hexcolor(color)
-        chart.lines[i].strokeWidth = 2
+        chart.lines[i].strokeWidth = _line_width(2)
     d.add(chart)
 
     # Call out where each line ends, the way the reference's own Progress Curve
@@ -1277,7 +1380,10 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
             continue
         value = values[last]
         x = chart.x + last * step
-        y = chart.y + chart.height * (min(100.0, max(0.0, value)) / 100.0)
+        # Placed on the axis as drawn, which an element may have narrowed
+        # from 0-100% (register D2).
+        lo, hi = chart.valueAxis.valueMin, chart.valueAxis.valueMax
+        y = chart.y + chart.height * (min(hi, max(lo, value)) - lo) / ((hi - lo) or 1)
         # Two lines can end at the same figure — a planned curve and a
         # remaining curve both reach 100% — and their callouts then printed
         # over each other as "100.00%100.00%". Stack a colliding one above
@@ -1289,7 +1395,7 @@ def _finish_scurve(d, chart, series, swatches, cfg, width, height):
         placed.append((x, y))
         # Nudge in from the right edge so a final-column label isn't clipped.
         anchor = "end" if last >= len(values) - 1 else "start"
-        _callout(d, x + (-2 if anchor == "end" else 2), y + 3, "%.2f%%" % value,
+        _callout(d, x + (-2 if anchor == "end" else 2), y + 3, _pct_label(value),
                  fontName=_SANS_BOLD, fontSize=pt(6),
                  fillColor=hexcolor(color), textAnchor=anchor)
     _draw_wrapped_legend(d, swatches, chart.x, height - 4, chart.width)
@@ -1450,7 +1556,7 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     # widest tick label needs — full figures, or K/M/B on a narrow chart.
     _, label_w = number_axis(chart.valueAxis, 0, max(monthly + cumulative + [0]) or 1,
                              plot_h, pt(6), width, headroom=1.08)
-    top = chart.valueAxis.valueMax
+    bottom, top = chart.valueAxis.valueMin, chart.valueAxis.valueMax
     plot_x = label_w + 8
     plot_w = width - plot_x - 12
     chart.x, chart.y = plot_x, plot_y
@@ -1478,12 +1584,12 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
     curve.data = [[r.get("cum_planned") or 0 for r in rows], [r.get("cum_actual") or 0 for r in rows]]
     curve.categoryAxis.categoryNames = [""] * len(rows)
     curve.categoryAxis.visible = 0
-    curve.valueAxis.valueMin, curve.valueAxis.valueMax = 0, top
+    curve.valueAxis.valueMin, curve.valueAxis.valueMax = bottom, top
     curve.valueAxis.visible = 0
     curve.valueAxis.visibleGrid = 0
     curve.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
     curve.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
-    curve.lines[0].strokeWidth = curve.lines[1].strokeWidth = 1.6
+    curve.lines[0].strokeWidth = curve.lines[1].strokeWidth = _line_width(1.6)
     d.add(curve)
 
     # Where each cumulative line ends, called out the way the reference's own
@@ -1495,7 +1601,8 @@ def cashflow_chart(cfg, rows, width, labels, height=None):
         for row, key in ((0, "cum_planned"), (1, "cum_actual")):
             value = rows[-1].get(key) or 0
             colour = cfg["colors"]["chart_planned" if row == 0 else "chart_actual"]
-            y = plot_y + plot_h * (min(top, max(0.0, float(value))) / top if top else 0)
+            span = (top - bottom) or 1
+            y = plot_y + plot_h * (min(top, max(bottom, float(value))) - bottom) / span
             _callout(d, plot_x + (len(rows) - 1) * step - 2, y + 3, _money_label(value),
                      fontName=_SANS_BOLD, fontSize=pt(6),
                      fillColor=hexcolor(colour), textAnchor="end")
@@ -1538,7 +1645,7 @@ def cashflow_curve(cfg, rows, width, labels, height=None):
     _grid(chart.valueAxis, cfg)
     chart.lines[0].strokeColor = hexcolor(cfg["colors"]["chart_planned"])
     chart.lines[1].strokeColor = hexcolor(cfg["colors"]["chart_actual"])
-    chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = 2
+    chart.lines[0].strokeWidth = chart.lines[1].strokeWidth = _line_width(2)
     d.add(chart)
     _top_legend(d, [(cfg["colors"]["chart_planned"], labels["planned"]),
                     (cfg["colors"]["chart_actual"], labels["actual"])], width, height - 6)
@@ -1631,30 +1738,26 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     # for the longest one instead of a fixed guess, so "Approved with
     # comments" doesn't clip the way a small fixed margin did.
     label_w = max(pdfmetrics.stringWidth(n, FONT_NAME, label_font_size) for n in status_names) + 6
-    legend_w = 32 * mm
-    # At a narrow box (e.g. a Summary dashboard panel, ~52mm) `label_w` alone
-    # can eat most of the width, leaving no room for a side legend without it
-    # overlapping the category labels — found placing this chart in a 52mm
-    # Summary panel (2026-08-26): the legend's fixed x position sat directly
-    # on top of "Rejected"/"Under Review" instead of beside the bars. Below
-    # `min_side_legend_w` there's provably not enough width left for a side
-    # legend to read cleanly, so it drops to a wrapped horizontal legend
-    # under the chart instead — same data/colors, just repositioned and
-    # actually measured (not reportlab's Legend flowable, whose fixed
-    # `deltax` column spacing was found to overflow the panel width outright
-    # for a 4-discipline legend at 52mm — same investigation).
-    min_side_legend_w = 25 * mm
-    side_legend = _legend_on() and width - label_w - legend_w - 8 >= min_side_legend_w
     palette = cfg["colors"].get("chart_palette") or [cfg["colors"]["chart_planned"], cfg["colors"]["chart_actual"]]
     swatches = [(palette[i % len(palette)], enum_label(cfg, disciplines[i])) for i in range(len(disciplines))]
-    legend_rows = 0
-    if not side_legend:
-        legend_rows = _wrapped_legend_rows(swatches, width, font_size=pt(6))
-    legend_h = (legend_rows * 8) if not side_legend else 0
-    chart.x, chart.y = label_w, 6 + legend_h
-    chart_legend_w = legend_w if side_legend else 0
-    chart.width = max(10, width - label_w - chart_legend_w - 8)
-    chart.height = height - 12 - legend_h
+    # The side legend is as wide as its longest discipline name (swatch,
+    # text gap, name, margin), not a fixed 32mm, and it only stays beside the
+    # bars while they keep most of the width. In the 80mm summary panel the
+    # fixed legend and the status names took about 40% of the width and the
+    # bars were squeezed into what was left (register D1); there it now wraps
+    # under the chart instead.
+    legend_font = pt(7)
+    legend_w = max(pdfmetrics.stringWidth(shape(name), FONT_NAME, legend_font) for _, name in swatches) + 20
+    plot_w = width - label_w - 8
+    side_legend = _legend_on() and plot_w - legend_w >= 0.7 * plot_w
+    legend_rows = 0 if side_legend else _wrapped_legend_rows(swatches, width - label_w - 2, font_size=pt(6))
+    legend_h = legend_rows * 8 + 4 if legend_rows else 0
+    # The count labels print under the value axis; without their own room
+    # they fell outside the drawing, so the axis read as ticks with no numbers.
+    axis_h = pt(6) + 6
+    chart.x, chart.y = label_w, legend_h + axis_h
+    chart.width = max(10, plot_w - (legend_w if side_legend else 0))
+    chart.height = height - chart.y - 6
     chart.data = [[grid[disc][sk] for sk, _ in status_order] for disc in disciplines]
     chart.categoryAxis.categoryNames = status_names
     chart.categoryAxis.style = "stacked"
@@ -1694,9 +1797,9 @@ def submittals_breakdown_chart(cfg, rows, width, labels, height=None, counts=Non
     chart.barLabels.boxTarget = "mid"
     d.add(chart)
     if side_legend:
-        d.add(_legend(swatches, width - legend_w, height - 8, vertical=True))
-    else:
-        _draw_wrapped_legend(d, swatches, 2, height - 6, width, font_size=pt(6))
+        d.add(_legend(swatches, width - legend_w, height - 8, font_size=legend_font, vertical=True))
+    elif legend_rows:
+        _draw_wrapped_legend(d, swatches, label_w, legend_h, width - 2, font_size=pt(6))
     return d
 
 
@@ -1727,15 +1830,60 @@ def _draw_wrapped_legend(d, swatches, x0, y_top, max_width, font_size=None, swat
     if not _legend_on():
         return
     font_size = pt(6) if font_size is None else font_size
+    group = _LegendGroup()
     x, y = x0, y_top
     for color, label in swatches:
         text = shape(label)
         w = swatch_size + gap + pdfmetrics.stringWidth(text, FONT_NAME, font_size) + item_gap
         if x + w - item_gap > max_width and x > x0:
             x, y = x0, y - row_h
-        d.add(Rect(x, y - swatch_size, swatch_size, swatch_size, fillColor=hexcolor(color), strokeColor=None))
-        d.add(String(x + swatch_size + gap, y - swatch_size + 1, text, fontName=FONT_NAME, fontSize=font_size))
+        group.add(Rect(x, y - swatch_size, swatch_size, swatch_size, fillColor=hexcolor(color), strokeColor=None))
+        group.add(String(x + swatch_size + gap, y - swatch_size + 1, text, fontName=FONT_NAME, fontSize=font_size))
         x += w
+    d.add(group)
+
+
+class _LegendGroup(Group):
+    """A chart's legend, kept as one group so apply_legend_position can find
+    and move it."""
+
+
+# Legend placements an element can choose (register D2). "auto" leaves each
+# chart's own design.
+LEGEND_POSITIONS = ("auto", "top", "bottom")
+
+
+def _translated(shapes, dy):
+    return Group(*shapes, transform=(1, 0, 0, 1, 0, dy))
+
+
+def apply_legend_position(drawing, position):
+    """Move a finished chart's legend band to the top or bottom of its
+    drawing, with the rest of the chart shifted into the space it leaves.
+
+    Only a legend that runs as a band above (or below) everything else is
+    moved; a legend beside the plot, or none at all, leaves the drawing as it
+    is, since swapping it would put it on top of the bars."""
+    if position not in ("top", "bottom"):
+        return drawing
+    legends = [c for c in drawing.contents if isinstance(c, _LegendGroup) and c.contents]
+    others = [c for c in drawing.contents if not isinstance(c, _LegendGroup)]
+    if not legends or not others:
+        return drawing
+    legend_box = Group(*legends).getBounds()
+    rest_box = Group(*others).getBounds()
+    if not legend_box or not rest_box:
+        return drawing
+    (_, ly0, _, ly1), (_, oy0, _, oy1) = legend_box, rest_box
+    tolerance = 1.0
+    if position == "bottom" and ly0 >= oy1 - tolerance:
+        rest_dy, legend_dy = ly1 - oy1, oy0 - ly0
+    elif position == "top" and ly1 <= oy0 + tolerance:
+        rest_dy, legend_dy = ly0 - oy0, oy1 - ly1
+    else:
+        return drawing
+    drawing.contents = [_translated(others, rest_dy), _translated(legends, legend_dy)]
+    return drawing
 
 
 def gantt_chart(cfg, rows, width, labels, height=None):

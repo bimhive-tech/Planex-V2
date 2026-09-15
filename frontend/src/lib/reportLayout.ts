@@ -41,7 +41,15 @@ export interface LayoutElement {
  * apps/reports/views.py's chart_svgs action, which builds this from the
  * exact same Drawing the real PDF renders (just exported to SVG). Statuses
  * mirror what the PDF itself draws for the same cases, never a fake chart. */
-export type ChartSvgResult = { status: "ok"; svg: string } | { status: "too_small" | "no_data" };
+/** `series`: what each palette colour paints, in palette order, where that is
+ * the data's own (a submittal chart's disciplines) — pdf_canvas.chart_series_names. */
+export type ChartSvgResult =
+  | {
+    status: "ok"; svg: string; series?: string[];
+    /** The element size (mm) the drawing was made for — see useChartSvgs. */
+    w?: number; h?: number;
+  }
+  | { status: "too_small" | "no_data" };
 export type ChartSvgMap = Record<string, ChartSvgResult>;
 
 /** This report's effective `cfg["labels"]` (template defaults merged with

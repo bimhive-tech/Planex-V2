@@ -869,6 +869,48 @@
   overflow: visible;
 }
 
+/* A chart resized since its drawing was made (ElementPreview's ChartPreview,
+   register D3): the old drawing fitted whole and centred, dimmed, with a
+   small spinner in the corner until the redraw lands. */
+.chartSvgStale {
+  position: absolute;
+  inset: 0;
+}
+
+.chartSvgStaleImage {
+  width: 100%;
+  height: 100%;
+  opacity: 0.45;
+  transition: opacity 120ms ease;
+}
+
+.chartSvgStaleImage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chartRedrawing {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border, #d0d5dd);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: chartRedrawSpin 0.8s linear infinite;
+}
+
+@keyframes chartRedrawSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chartRedrawing { animation: none; }
+  .chartSvgStaleImage { transition: none; }
+}
+
 /* Mirrors apps/reports/pdf_canvas.py's _draw_placeholder exactly (dashed
    border, centered gray caption) — shown only for the same two cases the
    real PDF itself falls back to a placeholder for, never a fake chart. */
@@ -1767,6 +1809,18 @@ tr:hover .customTableRowHandle button,
    unusable. High z-index: this must draw above every other page element
    (including ones with a higher z of their own), since only one element
    is ever mid-edit at a time. */
+/* The formatting toolbar portalled into the Properties panel (register D4). */
+.textToolbarSlot {
+  width: 100%;
+}
+
+/* With its toolbar in the side panel, the editor keeps the text box's own
+   area instead of floating a wider panel over the page. */
+.descriptionEditOverlay[data-toolbar-aside="on"] {
+  width: 100%;
+  min-height: 100%;
+}
+
 .descriptionEditOverlay {
   position: absolute;
   top: 0;

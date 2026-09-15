@@ -444,17 +444,22 @@ class ReportViewSet(viewsets.ModelViewSet):
 
         from .svg_export import drawing_to_canvas_svg
 
-        from .pdf_canvas import (MIN_CHART_H_MM, MIN_CHART_W_MM, chart_box_content, expand_pages,
-                                 resolve_chart)
+        from .pdf_canvas import (MIN_CHART_H_MM, MIN_CHART_W_MM, chart_box_content, chart_series_names,
+                                 expand_pages, resolve_chart)
 
         report = self.get_object()
         ctx, cfg = _canvas_inputs(report, request)
 
         min_w, min_h = MIN_CHART_W_MM * _mm, MIN_CHART_H_MM * _mm
+        # `only`: the element ids to draw, when the canvas is redrawing just
+        # the charts an edit touched — one resized chart comes back as soon as
+        # it's drawn instead of after every chart in the report (register D3).
+        only = request.data.get("only")
+        only = set(only) if isinstance(only, list) else None
         charts = {}
         for inst in expand_pages(cfg, ctx, report):
             for el in inst.page.get("elements", []):
-                if el.get("type") != "chart":
+                if el.get("type") != "chart" or (only is not None and el.get("id") not in only):
                     continue
                 props = el.get("props") or {}
                 w, h = float(el.get("w", 0)) * _mm, float(el.get("h", 0)) * _mm
@@ -471,7 +476,14 @@ class ReportViewSet(viewsets.ModelViewSet):
                 if drawing is None:
                     charts[el["id"]] = {"status": "no_data"}
                     continue
-                charts[el["id"]] = {"status": "ok", "svg": drawing_to_canvas_svg(drawing)}
+                # The box size it was drawn for, so the canvas can tell a chart
+                # that has since been resized from one that is current.
+                charts[el["id"]] = {"status": "ok", "svg": drawing_to_canvas_svg(drawing),
+                                    "w": el.get("w"), "h": el.get("h")}
+                # What each palette colour paints, for the colour pickers' labels.
+                series = chart_series_names(props.get("source", ""), cfg, ctx)
+                if series:
+                    charts[el["id"]]["series"] = series
         # The colours too: the Properties panel's colour pickers show the
         # report's own defaults for a chart that hasn't overridden them.
         return Response({"charts": charts, "labels": cfg["labels"], "colors": cfg["colors"]})

@@ -66,4 +66,7 @@ def drawing_to_canvas_svg(drawing) -> str:
     """`drawing` as an SVG string that renders in a browser the way the PDF
     prints it."""
     svg = _CLIP_STYLE.sub("", renderSVG.drawToString(drawing), count=1)
+    # Centred when its box has other proportions — a chart mid-resize on the
+    # canvas — rather than pinned to the top-left corner (register D3).
+    svg = svg.replace('preserveAspectRatio="xMinYMin meet"', 'preserveAspectRatio="xMidYMid meet"', 1)
     return _unique_ids(_TEXT_STYLE.sub(_text_style, svg))

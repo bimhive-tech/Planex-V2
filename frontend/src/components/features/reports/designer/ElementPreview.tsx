@@ -24,6 +24,7 @@ import type { ReportData } from "@/types/report";
 import { CustomTableEditor } from "./CustomTableEditor";
 import { ColGroup, useColumnResize, useRowResize } from "./TableSizing";
 import { DescriptionEmbedToolbar } from "../DescriptionEmbedToolbar";
+import { useTextToolbarSlot } from "./TextToolbarSlot";
 import styles from "./designer.module.css";
 
 interface PreviewProps {
@@ -779,6 +780,19 @@ function ChartPreview({ el, liveData, pinnedItem, chartSvgs, previewsReady = tru
   }
   if (live) {
     if (live.status === "ok") {
+      // Resized since this drawing was made (mid-drag, or waiting on its
+      // redraw): the old picture keeps its proportions, centred and dimmed
+      // with a quiet spinner, instead of stretching into the new box and
+      // jumping when the real one lands (register D3).
+      const stale = live.w !== undefined && (live.w !== el.w || live.h !== el.h);
+      if (stale) {
+        return (
+          <div className={styles.chartSvgStale} aria-busy="true">
+            <div className={styles.chartSvgStaleImage} dangerouslySetInnerHTML={{ __html: live.svg }} />
+            <span className={styles.chartRedrawing} aria-label="Redrawing chart" />
+          </div>
+        );
+      }
       return (
         <div className={styles.chartSvgLive} dangerouslySetInnerHTML={{ __html: live.svg }} />
       );
@@ -1145,6 +1159,11 @@ function DescriptionPreview({
   const [draft, setDraft] = useState(html);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorHandleRef = useRef<RichTextEditorHandle>(null);
+  // The Properties panel's slot for the formatting toolbar (register D4). It
+  // counts as part of the editor: using a button there must not end the edit.
+  const { slot: toolbarSlot } = useTextToolbarSlot();
+  const toolbarSlotRef = useRef(toolbarSlot);
+  toolbarSlotRef.current = toolbarSlot;
 
   useEffect(() => { if (!editing) setDraft(html); }, [html, editing]);
 
@@ -1170,7 +1189,9 @@ function DescriptionPreview({
       if (d !== h) change?.({ ...e, props: { ...e.props, html: d } });
     }
     function onDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) commitAndExit();
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target) || toolbarSlotRef.current?.contains(target)) return;
+      commitAndExit();
     }
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") commitAndExit();
@@ -1219,11 +1240,17 @@ function DescriptionPreview({
   }
 
   return (
-    <div ref={containerRef} className={styles.descriptionEditOverlay} onPointerDown={(e) => e.stopPropagation()}>
+    <div
+      ref={containerRef}
+      className={styles.descriptionEditOverlay}
+      data-toolbar-aside={toolbarSlot ? "on" : undefined}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <RichTextEditor
         ref={editorHandleRef}
         value={draft}
         onChange={setDraft}
+        toolbarTarget={toolbarSlot}
         placeholder="Write the report's description — نسّق النص كما تريد…"
         extraToolbar={
           <DescriptionEmbedToolbar

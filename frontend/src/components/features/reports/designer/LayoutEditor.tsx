@@ -21,7 +21,14 @@ import { CanvasPage } from "./CanvasPage";
 import type { ElementAction } from "./CanvasElementView";
 import { ElementInspector } from "./ElementInspector";
 import { ElementPalette } from "./ElementPalette";
+import { TextToolbarSlotContext } from "./TextToolbarSlot";
 import styles from "./designer.module.css";
+
+/** The selected chart's palette series names, when its data names them. */
+function selectedChartSeries(el: LayoutElement | null, charts: ChartSvgMap | undefined): string[] | undefined {
+  const chart = el ? charts?.[el.id] : undefined;
+  return chart?.status === "ok" ? chart.series : undefined;
+}
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5];
 /** Base pixels-per-mm at 100% — A4 portrait then reads ~460px wide. */
@@ -244,6 +251,11 @@ export function LayoutEditor({
   }, [elements, draft]);
 
   const selected = selectedIds.length === 1 ? (rendered.find((e) => e.id === selectedIds[0]) ?? null) : null;
+
+  // The Properties panel slot a text box being edited shows its toolbar in
+  // (register D4) — see TextToolbarSlot.
+  const [textToolbarSlotEl, setTextToolbarSlotEl] = useState<HTMLElement | null>(null);
+  const textToolbarSlot = useMemo(() => ({ slot: textToolbarSlotEl, setSlot: setTextToolbarSlotEl }), [textToolbarSlotEl]);
 
   /** Selects `id` — `additive` (shift/ctrl/cmd) toggles it in/out of the
    * current selection instead of replacing it. `null` clears everything
@@ -475,6 +487,7 @@ export function LayoutEditor({
   }, [onNavigatePage]);
 
   return (
+    <TextToolbarSlotContext.Provider value={textToolbarSlot}>
     <div className={styles.editor}>
       <div className={styles.leftColumn}>
         {leftHeader}
@@ -587,7 +600,9 @@ export function LayoutEditor({
         liveData={liveData}
         labels={labels}
         chartColors={chartColors}
+        chartSeries={selectedChartSeries(selected, chartSvgs)}
       />
     </div>
+    </TextToolbarSlotContext.Provider>
   );
 }

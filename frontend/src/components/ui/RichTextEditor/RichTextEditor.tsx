@@ -5,6 +5,7 @@
 // the report PDF. styleWithCSS is forced off so the browser emits tags
 // (<b>/<i>/<u>/<font>) the PDF renderer understands rather than inline styles.
 import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { cleanPastedHtml } from "@/lib/pasteHtml";
@@ -20,6 +21,10 @@ interface Props {
    * (see RichTextEditorHandle.insertHtml, which is how it actually inserts
    * content). */
   extraToolbar?: ReactNode;
+  /** Renders the toolbar into this element instead of above the text — e.g.
+   * a side panel, so the text keeps its whole box. Buttons keep the text's
+   * selection either way. */
+  toolbarTarget?: HTMLElement | null;
 }
 
 export interface RichTextEditorHandle {
@@ -37,7 +42,7 @@ const SIZES = [
 ];
 
 export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor(
-  { value, onChange, placeholder, extraToolbar }, handleRef,
+  { value, onChange, placeholder, extraToolbar, toolbarTarget }, handleRef,
 ) {
   const ref = useRef<HTMLDivElement>(null);
   const lastHtml = useRef<string>("");
@@ -144,31 +149,35 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function R
     emit();
   }
 
+  const toolbar = (
+    <div className={styles.toolbar} role="toolbar" aria-label="Text formatting">
+      <ToolButton title="Bold" onClick={() => exec("bold")} label="B" bold />
+      <ToolButton title="Italic" onClick={() => exec("italic")} label="I" italic />
+      <ToolButton title="Underline" onClick={() => exec("underline")} label="U" underline />
+      <span className={styles.sep} />
+      <ToolButton icon="list" title="Bullet list" onClick={() => exec("insertUnorderedList")} />
+      <ToolButton icon="listOrdered" title="Numbered list" onClick={() => exec("insertOrderedList")} />
+      <span className={styles.sep} />
+      <ToolButton icon="alignRight" title="Align right" onClick={() => align("right")} />
+      <ToolButton icon="alignCenter" title="Align center" onClick={() => align("center")} />
+      <ToolButton icon="alignLeft" title="Align left" onClick={() => align("left")} />
+      <span className={styles.sep} />
+      <select className={styles.size} title="Text size" defaultValue="3"
+        onChange={(e) => exec("fontSize", e.target.value)}>
+        {SIZES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+      </select>
+      <label className={styles.color} title="Text color">
+        <Icon name="text" size={15} />
+        <input type="color" onChange={(e) => exec("foreColor", e.target.value)} aria-label="Text color" />
+      </label>
+      {extraToolbar && <span className={styles.sep} />}
+      {extraToolbar}
+    </div>
+  );
+
   return (
     <div className={styles.editor}>
-      <div className={styles.toolbar} role="toolbar" aria-label="Text formatting">
-        <ToolButton title="Bold" onClick={() => exec("bold")} label="B" bold />
-        <ToolButton title="Italic" onClick={() => exec("italic")} label="I" italic />
-        <ToolButton title="Underline" onClick={() => exec("underline")} label="U" underline />
-        <span className={styles.sep} />
-        <ToolButton icon="list" title="Bullet list" onClick={() => exec("insertUnorderedList")} />
-        <ToolButton icon="listOrdered" title="Numbered list" onClick={() => exec("insertOrderedList")} />
-        <span className={styles.sep} />
-        <ToolButton icon="alignRight" title="Align right" onClick={() => align("right")} />
-        <ToolButton icon="alignCenter" title="Align center" onClick={() => align("center")} />
-        <ToolButton icon="alignLeft" title="Align left" onClick={() => align("left")} />
-        <span className={styles.sep} />
-        <select className={styles.size} title="Text size" defaultValue="3"
-          onChange={(e) => exec("fontSize", e.target.value)}>
-          {SIZES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        <label className={styles.color} title="Text color">
-          <Icon name="text" size={15} />
-          <input type="color" onChange={(e) => exec("foreColor", e.target.value)} aria-label="Text color" />
-        </label>
-        {extraToolbar && <span className={styles.sep} />}
-        {extraToolbar}
-      </div>
+      {toolbarTarget ? createPortal(toolbar, toolbarTarget) : toolbar}
 
       <div
         ref={ref}

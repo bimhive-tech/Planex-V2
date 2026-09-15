@@ -23,7 +23,14 @@ def _chart(drawing, kind=VerticalBarChart):
 
 
 def _texts(drawing):
-    return [el.text for el in drawing.contents if isinstance(el, String)]
+    """Every String in the drawing, inside groups too (legends are grouped)."""
+    out = []
+    for el in getattr(drawing, "contents", []):
+        if isinstance(el, String):
+            out.append(el.text)
+        else:
+            out.extend(_texts(el))
+    return out
 
 
 PANEL_DURATION = {"project_days": 1380.0, "completed_days": 1313.0, "remaining_days": 67.0,

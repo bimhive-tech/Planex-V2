@@ -1638,15 +1638,39 @@ def resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w:
     printed values stripped afterwards when it turned them off. One wrapper,
     so the PDF, the has-content check, the Customize canvas and a rich-text
     embed all style a chart the same way."""
-    from .pdf_charts import chart_options, chart_style_override, hide_values
+    from .pdf_charts import (apply_legend_position, chart_options, chart_style_override, freeze_formats,
+                             hide_values)
 
     props = props or {}
     with chart_options(props):
         drawing = _resolve_chart(source, chart_type, chart_style_override(cfg, props), ctx, scope, w, h,
                                  scope_zone_id=scope_zone_id, props=props)
-    if drawing is not None and props.get("show_values") is False:
+        if drawing is not None:
+            freeze_formats(drawing)
+    if drawing is None:
+        return None
+    if props.get("show_values") is False:
         hide_values(drawing)
-    return drawing
+    return apply_legend_position(drawing, props.get("legend_position"))
+
+
+def chart_series_names(source: str, cfg: dict, ctx: dict) -> list[str] | None:
+    """The names a chart's palette colours stand for, in palette order, where
+    they are the data's own (a submittal chart's disciplines) — so the
+    Properties panel can label each colour picker with what it paints
+    (register D2). None for a chart whose palette entries are fixed series."""
+    if source not in ("submittals_material", "submittals_shop_drawing"):
+        return None
+    wanted = "material" if source == "submittals_material" else "shop_drawing"
+    counts = ((ctx.get("dashboard") or {}).get("submittals") or {}).get(wanted)
+    if counts:
+        names = [line["discipline"] for line in counts]
+    else:
+        names = []
+        for row in (ctx.get("submittals") or {}).get("rows") or []:
+            if row.get("type_key") == wanted and row["discipline"] not in names:
+                names.append(row["discipline"])
+    return [enum_label(cfg, name) for name in names] or None
 
 
 def _resolve_chart(source: str, chart_type, cfg: dict, ctx: dict, scope: dict, w: float, h: float,

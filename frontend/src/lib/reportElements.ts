@@ -76,9 +76,62 @@ export const CHART_COLOR_PROPS: { path: string; label: string; colorKey: string;
   { path: "color_muted", label: "Muted (remaining / axis notes)", colorKey: "muted" },
 ];
 
-/** Every prop the chart style block writes — cleared together by "Reset". */
+/** A number a chart element may set, blank meaning "as the chart is designed"
+ * (register D2) — read by pdf_charts.chart_options / chart_style_override. */
+export interface ChartNumberProp { path: string; label: string; step: number; min?: number; max?: number }
+
+/** Value axis range and bar/line sizing. */
+export const CHART_AXIS_PROPS: ChartNumberProp[] = [
+  { path: "axis_min", label: "Axis minimum", step: 1 },
+  { path: "axis_max", label: "Axis maximum", step: 1 },
+  { path: "axis_step", label: "Axis step", step: 1, min: 0 },
+  { path: "bar_gap", label: "Space between bar groups (%) — smaller is thicker", step: 10, min: 0, max: 500 },
+  { path: "series_gap", label: "Space between bars in a group (%)", step: 5, min: 0, max: 100 },
+  { path: "line_width", label: "Line thickness (pt)", step: 0.5, min: 0.25 },
+];
+
+/** Where the legend sits (pdf_charts.LEGEND_POSITIONS). */
+export const CHART_LEGEND_POSITIONS = [
+  { value: "", label: "As designed" },
+  { value: "top", label: "Top" },
+  { value: "bottom", label: "Bottom" },
+];
+
+/** Decimals a chart's printed values use — never more than the report's two. */
+export const CHART_DECIMALS = [
+  { value: "", label: "Report default (2)" },
+  { value: "1", label: "1" },
+  { value: "0", label: "0" },
+];
+
+/** A gauge's band starts and dial end, in its own units. */
+export const GAUGE_NUMBER_PROPS: ChartNumberProp[] = [
+  { path: "gauge_low", label: "Average band starts at", step: 0.05, min: 0 },
+  { path: "gauge_mid", label: "Good band starts at", step: 0.05, min: 0 },
+  { path: "gauge_high", label: "Excellent band starts at", step: 0.05, min: 0 },
+  { path: "gauge_max", label: "Dial ends at (SPI)", step: 0.1, min: 0 },
+];
+
+/** A gauge's band colours, poor to excellent. */
+export const GAUGE_COLOR_PROPS: { path: string; label: string; colorKey: string }[] = [
+  { path: "color_gauge_bad", label: "Poor band", colorKey: "gauge_bad" },
+  { path: "color_gauge_warn", label: "Average band", colorKey: "gauge_warn" },
+  { path: "color_gauge_good", label: "Good band", colorKey: "gauge_good" },
+  { path: "color_gauge_excellent", label: "Excellent band", colorKey: "gauge_excellent" },
+];
+
+/** Whether a chart element draws a gauge. */
+export function isGaugeChart(props: Record<string, unknown>): boolean {
+  return props.chart_type === "gauge" || String(props.source ?? "").endsWith("spi");
+}
+
+/** Every prop the chart style blocks write — cleared together by "Reset". */
 export const CHART_STYLE_PROPS = ["font_size", "show_values", "legend", "text_labels",
-  ...CHART_COLOR_PROPS.map((c) => c.path)];
+  "legend_position", "decimals",
+  ...CHART_COLOR_PROPS.map((c) => c.path),
+  ...CHART_AXIS_PROPS.map((c) => c.path),
+  ...GAUGE_NUMBER_PROPS.map((c) => c.path),
+  ...GAUGE_COLOR_PROPS.map((c) => c.path)];
 
 /** The point size chart text is designed at (pdf_charts.BASE_FONT_PT). */
 export const CHART_BASE_FONT_PT = 7;

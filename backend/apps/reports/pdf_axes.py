@@ -15,12 +15,37 @@ Fixed steps (a 10% axis everywhere) and fixed "%b %y" labels were right at one
 size only: shrink the chart and the ticks overprinted; grow it and a six-year
 series still carried only year-sparse month labels.
 """
+import contextvars
 import datetime
 import math
 
 from reportlab.pdfbase import pdfmetrics
 
 from .pdf_base import FONT_NAME
+
+# One chart element's own value-axis range, {"min", "max", "step"} with any of
+# them absent, set by pdf_charts.chart_options around the build (register D2).
+# Every value-axis helper below ends by applying it, so a builder never needs
+# to know the author moved its axis.
+AXIS_OVERRIDE = contextvars.ContextVar("axis_override", default=None)
+
+# More ticks than this is a typo (a step of 1 on a 0-1,000,000 axis), not a
+# choice; such a step is ignored rather than drawing a solid bar of labels.
+_MAX_TICKS = 200
+
+
+def _overridden(lo, hi, step):
+    """(lo, hi, step) with the current element's own axis choices applied —
+    each one only where it leaves a usable axis."""
+    o = AXIS_OVERRIDE.get() or {}
+    new_lo = o["min"] if o.get("min") is not None else lo
+    new_hi = o["max"] if o.get("max") is not None else hi
+    if new_hi <= new_lo:
+        new_lo, new_hi = lo, hi
+    new_step = o.get("step") or step
+    if new_step <= 0 or (new_hi - new_lo) / new_step > _MAX_TICKS:
+        new_step = step
+    return new_lo, new_hi, new_step
 
 # Value-axis tick labels are horizontal text stacked along a vertical axis;
 # this many font sizes between ticks leaves a clear gap between neighbours.
@@ -73,8 +98,10 @@ def value_step(span, length, extent, finest=None):
 def percent_axis(axis, length, font_size, lo=0, hi=100, finest=5):
     """A 0-100% value axis with a tick step that suits `length`."""
     step = value_step(hi - lo, length, font_size * VALUE_TICK_PITCH, finest)
+    lo, hi, step = _overridden(lo, hi, step)
     axis.valueMin, axis.valueMax, axis.valueStep = lo, hi, step
-    axis.labelTextFormat = "%d%%" if float(step).is_integer() else "%.1f%%"
+    places = _decimals_for(step)
+    axis.labelTextFormat = f"%.{places}f%%" if places else "%d%%"
     return step
 
 
@@ -112,6 +139,7 @@ def number_axis(axis, lo, hi, length, font_size, chart_width, *, headroom=1.0):
     if hi <= lo:
         hi = lo + 1
     step = value_step(hi - lo, length, font_size * VALUE_TICK_PITCH)
+    lo, hi, step = _overridden(lo, hi, step)
     first, last = math.ceil(lo / step - 1e-9) * step, math.floor(hi / step + 1e-9) * step
     fmt = number_format(max(abs(first), abs(last)), step, chart_width, font_size)
     axis.valueMin, axis.valueMax, axis.valueStep = lo, hi, step
@@ -131,8 +159,9 @@ def horizontal_number_axis(axis, hi, length, font_size, *, lo=0):
         # A single step spanning everything is as coarse as an axis gets; take
         # it even if its one label is wider than the axis.
         if (top - lo) / step * pitch <= length or step >= span:
+            lo, top, step = _overridden(lo, top, step)
             axis.valueMin, axis.valueMax, axis.valueStep = lo, top, step
-            axis.labelTextFormat = fmt
+            axis.labelTextFormat = lambda v, p=_decimals_for(step): f"{v:,.{p}f}"
             return step
 
 

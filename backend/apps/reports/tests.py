@@ -1319,7 +1319,10 @@ class ResolveChartTests(SimpleTestCase):
         # stacked "100%" over every bar in one colliding row.
         from .pdf_charts import _pct_label
 
-        self.assertEqual(chart.barLabelFormat, [None, _pct_label])
+        planned_fmt, actual_fmt = chart.barLabelFormat
+        self.assertIsNone(planned_fmt)
+        # Bound to the chart's own options (freeze_formats), so compare what it prints.
+        self.assertEqual(actual_fmt(69.0), _pct_label(69.0))
 
     def test_planned_actual_chart_keeps_both_series_when_only_some_zones_are_pinned(self):
         """The mixed case reads the same way — nothing special about it now."""
@@ -3859,7 +3862,10 @@ class SubmittalsChartLegendTests(SimpleTestCase):
         # Legend is below the bars: the chart's baseline is pushed up off 6pt.
         self.assertGreater(chart.y, 6)
         # ...and every legend swatch/label stays inside the panel's width.
-        for shape_ in d.contents[1:]:
+        def leaves(group):
+            for child in getattr(group, "contents", []):
+                yield from (leaves(child) if hasattr(child, "contents") else [child])
+        for shape_ in [s for g in d.contents[1:] for s in leaves(g)]:
             self.assertGreaterEqual(shape_.x, 0)
             self.assertLessEqual(shape_.x, width)
 

@@ -21,6 +21,9 @@ interface Props {
    * Builder, where the block still edits but shows no defaults. */
   labels?: ReportLabels;
   chartColors?: ReportColors;
+  /** What each palette colour paints, when the chart's data names it (a
+   * submittal chart's disciplines): those names label the pickers. */
+  series?: string[];
   onChange: (el: LayoutElement) => void;
 }
 
@@ -33,7 +36,7 @@ function defaultColor(colors: ReportColors | undefined, colorKey: string, palett
   return typeof value === "string" ? value : "#000000";
 }
 
-export function ChartStyleBlock({ el, labels, chartColors, onChange }: Props) {
+export function ChartStyleBlock({ el, labels, chartColors, series, onChange }: Props) {
   const p = el.props;
   const textKeys = CHART_TEXT_KEYS[String(p.source ?? "")] ?? [];
   const texts = (p.text_labels as Record<string, string> | undefined) ?? {};
@@ -67,7 +70,7 @@ export function ChartStyleBlock({ el, labels, chartColors, onChange }: Props) {
       <div className={styles.styleColorGrid}>
         {CHART_COLOR_PROPS.map((c) => (
           <label key={c.path} className={styles.propField}>
-            <span>{c.label}</span>
+            <span>{(c.paletteIndex != null && series?.[c.paletteIndex]) || c.label}</span>
             <input
               type="color"
               value={String(p[c.path] ?? defaultColor(chartColors, c.colorKey, c.paletteIndex))}
