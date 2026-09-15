@@ -20,13 +20,13 @@ gotchas that cost time.
 | B · Report content | B1–B5 | 4 done · **B4 left as is** (user decision) | `32a6ca5` |
 | C · Preview identical to the PDF | C1–C4 | **All done** | `56e7dc8` (C1–C3), `cf0d989` (C4) |
 | D · Chart look and editing | D1–D4 | **All done** | `3a66e4c` |
-| E · Schedule page | E1–E3 | **Not started** (E2 needs a decision) | — |
+| E · Schedule page | E1–E3 | E1, E2 **done** · **E3 not started** | `a261f09` |
 | F · Source ledger | F1 | **Not started** | — |
 | Side work (sub 1 + sub 3) | centring, figure order, zoom-stable text, fit-to-width canvas | Pushed, **not yet tested by the user** | `672e850` |
 
-- `origin/main` = **`3a66e4c`**. The working tree is clean (only `frontend/tsconfig.tsbuildinfo` shows as modified; it's a build artefact).
-- Next in order: **E1 → E2 (after the decision) → E3 → F1**, with A5 whenever the user supplies the columns.
-- Plan page (live, private artifact, version 5): https://claude.ai/artifact/APw2m5pjjwJQVC1Wgp7Uwf. The local source was a scratchpad file of the Main session (`…/scratchpad/plan/cairo-report-revisions.html`). A new session should update the artifact through its URL (read it first, then publish with `url`).
+- `origin/main` = **`a261f09`** + this doc update. The working tree is clean (only `frontend/tsconfig.tsbuildinfo` shows as modified; it's a build artefact).
+- Next in order: **E3 → F1**, with A5 whenever the user supplies the columns. (Updated after E1/E2 landed — see section 4 "E".)
+- Plan page (live, private artifact, version 6): https://claude.ai/artifact/APw2m5pjjwJQVC1Wgp7Uwf. The local source was a scratchpad file of the Main session (`…/scratchpad/plan/cairo-report-revisions.html`). A new session should update the artifact through its URL (read it first, then publish with `url`).
 
 ---
 
@@ -67,6 +67,8 @@ Source files the planners use (in the user's Downloads): `P6 templete - Cairo Ai
 | `cf0d989` | **C4**: every page of the Customize canvas matches the PDF. |
 | `672e850` | **Sub 1 + sub 3** (committed by sub 1 at the user's request): centred tables/pies, figures numbered in reading order, zoom-stable text (`FixedZoom`), canvas fit-to-width + slimmer side columns (`useFitZoom`). |
 | `3a66e4c` | **Register D**: D1–D4. |
+| `31dafd8` | This handoff document. |
+| `a261f09` | **E1 + E2**: one Import dialog; Planex-code tree, report reads through empty levels. |
 
 ### The user's original list (the "your #N" on the plan page)
 
@@ -105,6 +107,7 @@ Source files the planners use (in the user's Downloads): `P6 templete - Cairo Ai
 - **B4:** keep the empty المعوقات page as is.
 - **C4:** fix element by element (not a rendered-PDF underlay).
 - **D3:** smooth drag + instant redraw (not fixed text size, layout steps or presets).
+- **E2:** every empty Planex-code level is its own row (not folded).
 - Only commit/push per section; sub 1's work stays for the user to test (then it was committed anyway at the user's "commit everything" request).
 
 ---
@@ -178,6 +181,16 @@ Rule: every value comes from P6, the dashboard workbook, or a field entered on t
 - Tests: `test_register_d.py` (axis room, bar share, long names, pie bounds, axis override, invalid axis, bar gap, decimals, legend top, gauge bands, series names, `only` + size). Test helpers in `test_dashboard_charts._texts` and `tests.SubmittalsChartLegendTests` now look inside groups. A resolver test compares the bound formatter's output. The full suite ran 417 tests with one failure (that identity check), which was fixed and its class rerun green.
 - Verified in the Browser pane on report `68679aa5`: axis max 120% (ticks to 120%), stale drag state captured then redrawn, undo restored the element, toolbar rendered in the inspector with 11 controls, pressing it kept editing, clicking outside ended it, no console errors on a fresh load.
 
+### E · Schedule page (E1, E2)
+
+- **E1 — one Import dialog.** `ProjectImportButton` + `ProjectImportDialog` (`frontend/src/components/features/projects/`, text and result wording in `lib/projectImport.ts`). "Import" sits beside "Export P6" in the project top bar (`ProjectWorkspace.tsx`). It offers P6 schedule if the user can manage the project and Dashboard workbook if they can manage finances, then asks for the "Data as of" date and the file. The schedule goes to `/upload/import/<project>` with `date`, the dashboard to `/api/projects/<id>/dashboard/import/` with `date`. After an import the Schedule/Finances tab remounts (`key={importKey}`). The old "Import Excel" button + date box were removed from `ProjectSchedule.tsx`; `DashboardImport.tsx` was deleted and the Finances Imports view opens the same dialog. Backend: `DashboardImport.data_date` (migration `projects/0058_dashboardimport_data_date`, **already applied to the shared dev DB**), set from `date` or the filename (`imports.parse_date_from_name`), listed in the history ("Data as of"). New `upload` icon.
+- **E2 — Planex-code tree.** The importer already built the strict chain since `47ff0d6` (every legend slot is a level; empty slots are `is_placeholder` scopes named "0"). What E2 added:
+  - Wording: an empty PH slot reads **"No phase"** (the legend's word), while the scope type stays `stage` (`ProjectScope._PLACEHOLDER_LEVEL_WORD`, `level_name` property → serializer → tree badge; `enum_no_phase` label).
+  - **Report reads through empty levels** (`apps/reports/scope_tree.py` `ScopeTree`: `real_children`, `real_ancestor`, DFS `order`). Used in `services._zone_rows`, `_hierarchy_rows`, `_phase_rows`, `_discipline_rows` (`phase_of` walks past an empty sub-discipline), `_gantt_rows`, `_work_rows` (no "0" trade), and `_disambiguated_names` (prefix = nearest real ancestor, so "Part 1 - Level 2", not "0 - Level 2").
+  - Both Cairo schedules had been imported (8 and 13 Sep) **before** `47ff0d6`. The **Admin Cairo test project (`0f8af361…`) was re-imported** through the real endpoint from its stored workbook with the same data date (new batch `e83b27d8…`, the old batch `1c461f0e…` is kept and can be deleted in the picker): 492 activities, 59.55% / 94.45%, 154 scopes. A before/after snapshot of report `68679aa5` showed zones, hierarchy, areas, critical path, overall, planned, SPI identical; the discipline table's 288 values identical with rows/columns in tree order; the trades chart order changed (Civil, MEP, Elevators, Facade, Landscape, Architectural — the tree's order). **The MCG Cairo project (`f1cb52ad…`) still has its old tree** until someone re-imports it.
+  - Tests: `apps/projects/test_register_e.py` (chain order and "No …" names, root is "No area", a part-less row still passes all 9 levels, report rows never an empty level and named by Part, dashboard data date recorded/listed/from filename/refused when malformed). Borrowing `LegendReadImportTests`' workbook by attribute (importing the class into the module would run its tests twice).
+  - Known: at phone width the 9-level indentation pushes names off-screen (desktop fits) — part of E3.
+
 ---
 
 ## 5. The other sessions
@@ -222,9 +235,8 @@ Rule: every value comes from P6, the dashboard workbook, or a field entered on t
 
 | Item | What's needed |
 |---|---|
-| **E1** One "Import" button next to "Export P6" on the schedule page, with a dialog: P6 schedule or dashboard workbook, the data date, the file. The Finances-tab dashboard import uses the same dialog. | Not started. No decision needed. |
-| **E2** Schedule tree follows the Planex Code: skip segments 1–2 (project, construction), then always Area › Sub-area › Phase › Zone › Part › Unit › Level › Discipline › Sub-discipline › activities, with "No area", "No sub-area", … for missing segments. Today the top level mixes 5 disciplines, 5 parts and 4 levels. Re-check report charts/tables that read zones (F5, F7, F14, T3, T5) afterwards. Related older commit `47ff0d6` (keep the code's empty levels) doesn't finish it. | **Decision:** every empty level as its own row, or fold a run of empties into one ("No area · sub-area · phase · zone")? |
-| **E3** Right-hand panel rows overlap on the schedule page. | Reproduce at desktop/tablet/phone widths, fix, re-check. |
+| ~~E1~~ ~~E2~~ | Done (section 4 "E"). The MCG Cairo project needs a re-import to get the new tree; the user should re-check the trades chart order. |
+| **E3** Right-hand panel rows overlap on the schedule page; also the 9-level tree indentation at phone width. | Reproduce at desktop/tablet/phone widths, fix, re-check. |
 | **F1** Source ledger: per page and per element, what it shows, where each value comes from (P6 column / dashboard cell / project field), any Planex formula, estimates flagged. First as a document for this report, then a source line on each chart/table in the editor. Much of the tracing is already in A1–A8 and sub 2's findings. | Not started. |
 | **A5** Invoice status rebuild. | The table's columns from the user. |
 | Sub 2's 121 level-less activities (Testing & Commissioning −47). | User decision: add a General row? |
