@@ -399,6 +399,10 @@ def _reference_pie(cfg, slices, width, height, *, value_fmt=_count_label, popout
     # Leave room on all sides for the outside value labels, which sit at
     # 1.15x the radius and would otherwise run off the drawing.
     pw = max(18 * mm, min(height - legend_h - 14, width * 0.56))
+    # A box taller than the pie needs (a narrow panel) gets a drawing only as
+    # tall as pie and legend, which the canvas renderer then centres in the
+    # box — the spare height used to sit above the pie, the caption far below.
+    d.height = min(height, legend_h + 14 + pw)
     pie = Pie()
     pie.x, pie.y = (width - pw) / 2, legend_h + 6
     pie.width = pie.height = pw

@@ -601,28 +601,38 @@ def _hierarchy_table_flat(cfg, styles, header, rows, rtl, avail_width=None,
     return t
 
 
-def draw_table_in_box(c, table, x, y, w, h, *, note_color="#595959") -> bool:
-    """Fit a Platypus Table into a fixed box on an open canvas page.
+def centred_offset(avail, used) -> float:
+    """Inset that centres `used` inside `avail` — zero once it no longer fits."""
+    return max(0.0, (avail - used) / 2)
+
+
+def draw_table_in_box(c, table, x, y, w, h, *, note_color="#595959") -> float | None:
+    """Fit a Platypus Table into a fixed box on an open canvas page, centred
+    on both axes so a table shorter or narrower than its box has the spare
+    space evenly around it instead of all below and to one side.
 
     `Table.split(w, h)` asks ReportLab's own layout engine "how much of this
     fits in this height" rather than us re-deriving row-fitting logic — it
     returns the parts that fit as a list of (possibly one) Table flowables.
     If rows had to be dropped, draws a small "+N more rows" note under the
-    table rather than silently losing data. Returns False when even the
-    header alone doesn't fit the box (caller draws a placeholder instead).
+    table rather than silently losing data. Returns the height drawn (table
+    plus any note), or None when even the header alone doesn't fit the box.
     """
     total_rows = len(table._cellvalues)
-    _, natural_h = table.wrap(w, h)
+    table_w, natural_h = table.wrap(w, h)
     if natural_h <= h:
-        table.drawOn(c, x, y + h - natural_h)
-        return True
+        table.drawOn(c, x + centred_offset(w, table_w), y + centred_offset(h, natural_h))
+        return natural_h
 
     pieces = table.split(w, h - NOTE_HEIGHT)
     if not pieces:
-        return False
+        return None
     fitted = pieces[0]
-    _, fitted_h = fitted.wrap(w, h - NOTE_HEIGHT)
-    fitted.drawOn(c, x, y + h - fitted_h)
+    fitted_w, fitted_h = fitted.wrap(w, h - NOTE_HEIGHT)
+    block_h = fitted_h + NOTE_HEIGHT
+    bottom = y + centred_offset(h, block_h)
+    left = x + centred_offset(w, fitted_w)
+    fitted.drawOn(c, left, bottom + NOTE_HEIGHT)
 
     # repeatRows=1 means the header re-appears in `fitted` on top of the rows
     # it kept — subtract it once so the count reflects data rows only.
@@ -631,6 +641,6 @@ def draw_table_in_box(c, table, x, y, w, h, *, note_color="#595959") -> bool:
         c.saveState()
         c.setFont(FONT_NAME, 7)
         c.setFillColor(hexcolor(note_color))
-        c.drawString(x, y + h - fitted_h - NOTE_HEIGHT + 1, f"+{dropped} more rows")
+        c.drawString(left, bottom + 1, f"+{dropped} more rows")
         c.restoreState()
-    return True
+    return block_h

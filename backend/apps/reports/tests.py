@@ -658,6 +658,41 @@ class CanvasPdfTests(SimpleTestCase):
         self.assertIn("Progress Chart - 1", full_text)  # its own, separate figure counter
         self.assertIn("Second Table - 2", full_text)    # second table, not reset per page
 
+    def test_captions_number_in_reading_order_not_stored_order(self):
+        """Figures are numbered down the page, and right-to-left across a row
+        in an Arabic report — not in the order the elements were added."""
+        from .pdf_canvas import reading_order
+
+        low = {"id": "low", "x": 10, "y": 150}
+        left = {"id": "left", "x": 10, "y": 40}
+        right = {"id": "right", "x": 110, "y": 42}  # same row, 2mm lower
+        self.assertEqual([e["id"] for e in reading_order([low, left, right], rtl=True)],
+                         ["right", "left", "low"])
+        self.assertEqual([e["id"] for e in reading_order([low, right, left], rtl=False)],
+                         ["left", "right", "low"])
+
+    def test_short_table_is_centred_in_its_box(self):
+        """A table shorter than its box sits in the middle of it, with the
+        spare height split above and below, not all under it."""
+        import fitz
+
+        pages = [{"id": "p1", "name": "Page 1", "elements": [
+            {"id": "tbl", "type": "table", "x": 10, "y": 20, "w": 100, "h": 200, "z": 0,
+             "props": {"source": "zone_progress", "show_title": False}},
+        ]}]
+        report = SimpleNamespace(title="T", template=self._template(pages))
+        data = build_canvas_pdf(report, _sample_ctx())
+
+        page = fitz.open(stream=data, filetype="pdf")[0]
+        mm_pt = 72 / 25.4
+        ys = [b[1] for b in page.get_text("blocks")] + [b[3] for b in page.get_text("blocks")]
+        box_top, box_bottom = 20 * mm_pt, 220 * mm_pt
+        inside = [y for y in ys if box_top <= y <= box_bottom]
+        above = min(inside) - box_top
+        below = box_bottom - max(inside)
+        self.assertGreater(above, 20 * mm_pt)
+        self.assertAlmostEqual(above, below, delta=12 * mm_pt)
+
     def test_table_continuation_pages_do_not_repeat_the_caption(self):
         """Only the table's first page gets a caption/number — a synthetic
         continuation page (see _expand_table_overflow) is the same logical

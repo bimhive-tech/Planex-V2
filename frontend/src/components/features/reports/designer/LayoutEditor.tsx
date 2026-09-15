@@ -7,9 +7,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/Icon";
 import { useCanvasInteraction } from "@/hooks/useCanvasInteraction";
+import { useFitZoom } from "@/hooks/useFitZoom";
 import type { ResizeHandle } from "@/hooks/useCanvasInteraction";
 import { createElement, findSpec } from "@/lib/reportElements";
-import { clampToPage, contentBox, newElementId, roundMm } from "@/lib/reportLayout";
+import { clampToPage, contentBox, newElementId, pageDimensions, roundMm } from "@/lib/reportLayout";
 import type { ReportColors } from "@/lib/reportLayout";
 import type {
   ChartSvgMap, LayoutElement, PageDesign, ReportLabels, TableDataMap, TocCaptionsData, TocEntry,
@@ -139,8 +140,8 @@ export function LayoutEditor({
   bottomPanel, onNavigatePage, initialScrollToBottom = false, history, historyPageId,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useFitZoom(scrollRef, pageDimensions(design).w * BASE_SCALE);
 
   // Margin/header/footer guides help while laying out a template, but on a
   // report (liveData present) they're just chrome between you and seeing

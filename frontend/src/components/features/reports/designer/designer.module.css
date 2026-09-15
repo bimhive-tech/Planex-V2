@@ -771,10 +771,47 @@
   height: 100%;
 }
 
+/* See ElementPreview's FixedZoom: laid out at one size, drawn at the zoom. */
+.fixedZoom {
+  width: var(--fixedW);
+  height: var(--fixedH);
+  transform: scale(var(--fixedZoom));
+  transform-origin: 0 0;
+}
+
 .captionedBoxBody {
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+}
+
+/* A live table is only as tall as its rows: the block centres in the box and
+   the spare height splits above and below it, as the PDF draws it
+   (pdf_tables.draw_table_in_box). The body still shrinks to clip a table
+   taller than the box. */
+.captionedBox[data-centred="on"] {
+  justify-content: center;
+}
+
+.captionedBox[data-centred="on"] .captionedBoxBody {
+  flex: 0 1 auto;
+}
+
+/* A live chart's SVG is as tall as its drawing, which for a pie in a tall
+   panel is shorter than the box (pdf_charts._reference_pie): it centres with
+   its title and caption, as pdf_canvas._draw_chart_element draws it. A chart
+   that fills its box is unaffected. */
+.captionedBox:has(.chartSvgLive) {
+  justify-content: center;
+}
+
+.captionedBox:has(.chartSvgLive) .captionedBoxBody {
+  flex: 0 1 auto;
+}
+
+.captionedBox:has(.chartSvgLive) .chartSvgLive,
+.captionedBox:has(.chartSvgLive) .chartSvgLive svg {
+  height: auto;
 }
 
 /* The strips take the same height off the box the PDF takes (see
@@ -1494,26 +1531,57 @@ th:hover > .tableLiveHeaderCell > .tableLiveColHideBtn,
   color: var(--text-primary);
 }
 
-/* Tablet+: the real three-column workspace. */
+/* Desktop: the real three-column workspace. On laptop widths the side panels
+   stay slim so the paper — the point of the page — gets most of the row. */
 @media (min-width: 1024px) {
   .editor {
     flex-direction: row;
     align-items: flex-start;
+    gap: var(--space-3);
   }
   .leftColumn {
-    width: 320px;
+    width: 270px;
     flex-shrink: 0;
     max-height: calc(100vh - 220px);
     overflow-y: auto;
+  }
+  .palette,
+  .inspector,
+  .setupPanel {
+    padding: var(--space-3);
   }
   .canvasArea {
     flex: 1;
   }
+  .canvasScroll {
+    padding: var(--space-3);
+  }
   .inspector {
-    width: 250px;
+    width: 230px;
     flex-shrink: 0;
     max-height: calc(100vh - 220px);
     overflow-y: auto;
+  }
+}
+
+/* Large screens have room to spare — give the panels their comfortable width. */
+@media (min-width: 1440px) {
+  .editor {
+    gap: var(--space-4);
+  }
+  .leftColumn {
+    width: 320px;
+  }
+  .palette,
+  .inspector,
+  .setupPanel {
+    padding: var(--space-4);
+  }
+  .canvasScroll {
+    padding: var(--space-5);
+  }
+  .inspector {
+    width: 250px;
   }
 }
 

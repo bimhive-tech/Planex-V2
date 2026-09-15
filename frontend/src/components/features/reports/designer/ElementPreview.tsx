@@ -875,12 +875,15 @@ const CAPTION_FONT_PT = 8;
  * PreviewProps.labels — so the only gap left versus the download is the
  * missing running number, not the language/wording. */
 function CaptionedBox({
-  titleShow, titleText, captionShow, captionText, scale, children,
+  titleShow, titleText, captionShow, captionText, scale, centred = false, children,
 }: {
   titleShow: boolean; titleText: string; captionShow: boolean; captionText: string; scale: number;
+  /** Content-sized body (a live table): title, body and caption centre in
+   * the box as one block, as pdf_canvas._draw_table_element draws them. */
+  centred?: boolean;
   children: React.ReactNode;
 }) {
-  if (!titleShow && !captionShow) return <>{children}</>;
+  if (!titleShow && !captionShow && !centred) return <>{children}</>;
   const strips = {
     "--stripTitleH": `${TITLE_STRIP_MM * scale}px`,
     "--stripTitleFont": `${ptToPx(TITLE_FONT_PT, scale)}px`,
@@ -888,7 +891,7 @@ function CaptionedBox({
     "--stripCaptionFont": `${ptToPx(CAPTION_FONT_PT, scale)}px`,
   } as React.CSSProperties;
   return (
-    <div className={styles.captionedBox} style={strips}>
+    <div className={styles.captionedBox} data-centred={centred ? "on" : undefined} style={strips}>
       {titleShow && <div className={styles.elementTitle}>{titleText}</div>}
       <div className={styles.captionedBoxBody}>{children}</div>
       {captionShow && <div className={styles.elementCaption}>{captionText}</div>}
@@ -1233,7 +1236,38 @@ function DescriptionPreview({
   );
 }
 
-export function ElementPreview({
+/** CSS's own mm (96px per inch): the zoom text-bearing elements lay out at
+ * before FixedZoom scales them to the canvas zoom. */
+const LAYOUT_SCALE = 96 / 25.4;
+/** Element types whose text wraps inside their box. The description stays
+ * out: its rich-text editor positions a floating overlay in screen px. */
+const FIXED_ZOOM_TYPES = new Set(["text", "field", "table", "toc"]);
+
+/** Lays its element out at LAYOUT_SCALE and scales the result to `scale`.
+ * Laid out at each zoom's own px font size, rounding moved an Arabic value's
+ * line breaks as you zoomed, so the same cell read differently at 100% and
+ * 150% (2026-09-15); one layout scaled as a picture keeps the same words on
+ * the same lines at every zoom. */
+function FixedZoom({ el, scale, children }: { el: LayoutElement; scale: number; children: React.ReactNode }) {
+  const vars = {
+    "--fixedW": `${el.w * LAYOUT_SCALE}px`,
+    "--fixedH": `${el.h * LAYOUT_SCALE}px`,
+    "--fixedZoom": String(scale / LAYOUT_SCALE),
+  } as React.CSSProperties;
+  return <div className={styles.fixedZoom} style={vars}>{children}</div>;
+}
+
+/** One element's content inside its box — see ElementBody. */
+export function ElementPreview(props: PreviewProps) {
+  if (!FIXED_ZOOM_TYPES.has(props.el.type)) return <ElementBody {...props} />;
+  return (
+    <FixedZoom el={props.el} scale={props.scale}>
+      <ElementBody {...props} scale={LAYOUT_SCALE} />
+    </FixedZoom>
+  );
+}
+
+function ElementBody({
   el, scale, liveData, reportId, pinnedItem, chartSvgs, tableData, tocCaptions, previewsReady, labels, tocEntries,
   ownPageId, onElementChange,
 }: PreviewProps) {
@@ -1357,6 +1391,7 @@ export function ElementPreview({
           captionText={tocCaptions?.captions?.[el.id]
             ?? String(p.caption || sourceLabel(labels, TABLE_SOURCES, p.source, "Table"))}
           scale={scale}
+          centred={tableData?.[el.id]?.status === "ok" && p.source !== "custom"}
         >
           <TablePreview
             el={el} scale={scale} liveData={liveData} pinnedItem={pinnedItem}

@@ -177,7 +177,9 @@ export function useColumnResize(
           aria-label={`Resize column ${index + 1}`}
           onPointerDown={(e) => {
             const table = (e.currentTarget as HTMLElement).closest("table");
-            const total = Math.max(1, table?.clientWidth ?? 1);
+            // On-screen width: the table may be drawn scaled (FixedZoom), and
+            // the pointer moves in screen px.
+            const total = Math.max(1, table?.getBoundingClientRect().width ?? 1);
             start(e, index, current, total, table?.dir === "rtl");
           }}
         />
@@ -211,9 +213,14 @@ export function useRowResize(
             // height THIS row currently measures, read at pointerdown from
             // the row itself, so it doesn't jump on the first pixel.
             const row = (e.currentTarget as HTMLElement).closest("tr");
-            const measured = (row?.getBoundingClientRect().height ?? 0) / scale;
+            // `scale` is the px/mm the table is laid out at; FixedZoom may
+            // draw it larger or smaller, and the pointer moves in screen px.
+            const table = row?.closest("table");
+            const drawn = table && table.offsetWidth ? table.getBoundingClientRect().width / table.offsetWidth : 1;
+            const screenScale = scale * drawn;
+            const measured = (row?.getBoundingClientRect().height ?? 0) / screenScale;
             const seeded = current.map((v, i) => (v > 0 ? v : (i === index ? measured : 0)));
-            start(e, index, seeded, scale);
+            start(e, index, seeded, screenScale);
           }}
         />
       )

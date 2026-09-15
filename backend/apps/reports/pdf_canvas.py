@@ -49,7 +49,7 @@ from .pdf_tables import (
     INFO_LABEL_COL_MM, _data_table as _data_table_impl, _fmt_date,
     _hierarchy_table_flat as _hierarchy_table_flat_impl,
     _info_table as _info_table_impl, _pct_or_dash, _styles,
-    _wrap_shape, apply_table_overrides, draw_table_in_box, enum_label,
+    _wrap_shape, apply_table_overrides, centred_offset, draw_table_in_box, enum_label,
     fmt_otp, table_style_override,
 )
 
@@ -753,8 +753,8 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     # assigned to THIS page is already split to fit this exact box — drawn
     # verbatim, nothing left to resolve or re-split.
     if inst.continues_chunk is not None:
-        _, chunk_h = inst.continues_chunk.wrap(w, h)
-        inst.continues_chunk.drawOn(c, x, y + h - chunk_h)
+        chunk_w, chunk_h = inst.continues_chunk.wrap(w, h)
+        inst.continues_chunk.drawOn(c, x + centred_offset(w, chunk_w), y + centred_offset(h, chunk_h))
         return
 
     show_caption = bool(props.get("show_caption"))
@@ -776,21 +776,27 @@ def _draw_table_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     # draw that same piece rather than resolving/splitting it again.
     chunk0 = (inst.table_chunk0 or {}).get(el_id) if el_id else None
     if chunk0 is not None:
-        _, chunk_h = chunk0.wrap(w, content_h)
-        chunk0.drawOn(c, x, y + caption_h + content_h - chunk_h)
-    elif not draw_table_in_box(c, table, x, y + caption_h, w, content_h):
-        # Same reasoning as the chart case above — an author-facing note must
-        # not print into the client's copy.
-        return
+        chunk_w, drawn_h = chunk0.wrap(w, content_h)
+        chunk0.drawOn(c, x + centred_offset(w, chunk_w), y + caption_h + centred_offset(content_h, drawn_h))
+    else:
+        drawn_h = draw_table_in_box(c, table, x, y + caption_h, w, content_h)
+        if drawn_h is None:
+            # Same reasoning as the chart case above — an author-facing note
+            # must not print into the client's copy.
+            return
 
+    # The title and caption hug the centred table, so title, table and
+    # caption sit as one block with the box's spare height split above and
+    # below it — not strips pinned to the box edges with the gap between.
+    shift = centred_offset(content_h, drawn_h)
     if show_caption:
         # Text (with its running "جدول N:" number) was already assigned by
         # the _collect_captions pre-pass — see build_canvas_pdf.
         text = (ctx.get("_table_caption_text") or {}).get((id(inst), el_id))
         if text:
-            _draw_caption_text(c, x, y, w, caption_h, text)
+            _draw_caption_text(c, x, y + shift, w, caption_h, text)
     if title:
-        _draw_title_text(c, x, y + h - title_h, w, title_h, title)
+        _draw_title_text(c, x, y + h - title_h - shift, w, title_h, title)
 
 
 def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_id=None):
@@ -813,14 +819,17 @@ def _draw_chart_element(c, props, x, y, w, h, inst: PageInstance, cfg, ctx, el_i
     if drawing is None:
         return  # nothing real to draw — see _draw_placeholder's docstring
     from reportlab.graphics import renderPDF
-    renderPDF.draw(drawing, c, x, y + caption_h)
+    # A drawing shorter than its box (a pie in a tall, narrow panel) centres
+    # with its title and caption hugging it, the way a short table does.
+    shift = centred_offset(content_h, drawing.height)
+    renderPDF.draw(drawing, c, x, y + caption_h + shift)
 
     if show_caption:
         text = (ctx.get("_figure_caption_text") or {}).get((id(inst), el_id))
         if text:
-            _draw_caption_text(c, x, y, w, caption_h, text)
+            _draw_caption_text(c, x, y + shift, w, caption_h, text)
     if title:
-        _draw_title_text(c, x, y + h - title_h, w, title_h, title)
+        _draw_title_text(c, x, y + h - title_h - shift, w, title_h, title)
 
 
 def _effective_description_html(props: dict, ctx: dict) -> str:
@@ -2191,6 +2200,26 @@ def _element_will_draw(el, inst, cfg, ctx) -> bool:
         return _remember(True)
 
 
+# Elements whose tops are this close share a row when reading a page.
+_READING_ROW_MM = 5
+
+
+def reading_order(elements: list, rtl: bool) -> list:
+    """`elements` in the order a reader meets them: row by row down the page,
+    and across each row from the right in an Arabic report. Numbering in
+    stored order (the order elements were added) gave a chart low on the
+    page a smaller number than the one above it (2026-09-15)."""
+    rows: list[tuple[float, list]] = []
+    for el in sorted(elements, key=lambda e: float(e.get("y") or 0)):
+        top = float(el.get("y") or 0)
+        if rows and top - rows[-1][0] <= _READING_ROW_MM:
+            rows[-1][1].append(el)
+        else:
+            rows.append((top, [el]))
+    across = -1 if rtl else 1
+    return [el for _, row in rows for el in sorted(row, key=lambda e: across * float(e.get("x") or 0))]
+
+
 def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:
     """Pre-pass, run once before any page is drawn: assigns every captioned
     table/chart/photo its running number ("جدول N"/"شكل N"/"صورة N") and
@@ -2212,11 +2241,12 @@ def _collect_captions(instances: list, cfg: dict, ctx: dict) -> None:
     seq = {"table": 0, "figure": 0, "image": 0}
     lists = {"table": [], "figure": [], "image": []}
     text_maps = {"table": {}, "figure": {}, "image": {}}
+    rtl = bool(ctx.get("arabic"))
 
     for inst in instances:
         if inst.continues_chunk is not None:
             continue  # continuation pages don't get their own caption
-        for el in inst.page.get("elements") or []:
+        for el in reading_order(inst.page.get("elements") or [], rtl):
             props = el.get("props") or {}
             if not props.get("show_caption"):
                 continue

@@ -2230,3 +2230,29 @@ Discipline table's first column too narrow (wraps every row, doubling an
 continuation pages carry no "(تابع)" marker; Gantt row labels lack their phase
 prefix; two adjacent tables label different quantities "المخطط %"; a title and
 its caption disagree on two pages.
+
+## 2026-09-15 — Centred content, zoom-stable text, figure order
+
+Reported: tables on the area-dashboard pages (canvas pages 12-13) not centred;
+spare space on a page should sit evenly around its content; page 6's Arabic
+text re-wrapped as the canvas zoomed; figure numbers out of order.
+
+- **Tables** centre in their box on both axes (`pdf_tables.draw_table_in_box`,
+  chunk0 and continuation chunks), with title and caption hugging the table.
+  Canvas: `CaptionedBox centred` for live tables.
+- **Pies** in a tall, narrow panel get a drawing only as tall as pie + legend
+  (`pdf_charts._reference_pie`); `_draw_chart_element` centres any drawing
+  shorter than its box, caption and title hugging it. Canvas: CSS
+  `.captionedBox:has(.chartSvgLive)`.
+- **Zoom**: text, field, table and TOC elements lay out at one fixed scale
+  (CSS mm) and are CSS-scaled to the zoom (`FixedZoom`), so line breaks no
+  longer change between zoom levels. Row/column drag grips convert with the
+  on-screen size. Description is excluded (its editor overlay works in screen px).
+- **Figure/table numbering** follows reading order — row by row down the
+  page, right-to-left in an Arabic report (`pdf_canvas.reading_order`) —
+  instead of the order elements were added. Verified on report (53): page 9
+  numbers donut 1, gauge 2, then the lower row right-to-left.
+- Not done: page-level re-centring of authored element positions (it would
+  fight manual placement on the canvas). Live canvas previews could not be
+  loaded locally (context build ~14 min against the remote DB); PDF pages
+  were rendered and checked instead.
