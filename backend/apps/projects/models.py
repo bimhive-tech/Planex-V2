@@ -584,6 +584,10 @@ class DashboardImport(TimestampedModel):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="dashboard_imports")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="dashboard_imports")
     source = models.CharField(max_length=200, blank=True)  # original filename
+    # The date the workbook's figures are as of, chosen in the import dialog
+    # the same way a schedule import's is (register E1) — else read from the
+    # filename. Blank for uploads made before the dialog existed.
+    data_date = models.DateField(null=True, blank=True)
     file = models.FileField(upload_to=dashboard_import_file_key, null=True, blank=True)
     uploaded_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
@@ -735,11 +739,28 @@ class ProjectScope(TimestampedModel):
         Arabic template translates it through the same `enum_*` labels every
         other model value uses (reports.pdf_tables.enum_label)."""
         if self.is_placeholder:
-            return f"No {self.get_scope_type_display().lower()}"
+            return f"No {self.level_name.lower()}"
         return (self.label or "").strip() or self.name
+
+    @property
+    def level_name(self) -> str:
+        """The name of the level this scope sits at, as the tree's badge shows
+        it. An empty level is named the way the Planex Code legend names its
+        slot, so its badge and its "No …" text agree ("Phase · No phase")."""
+        if self.is_placeholder and self.scope_type in _PLACEHOLDER_LEVEL_WORD:
+            return _PLACEHOLDER_LEVEL_WORD[self.scope_type].capitalize()
+        return self.get_scope_type_display()
 
     def __str__(self):
         return f"{self.get_scope_type_display()}: {self.name}"
+
+
+# How an empty level is worded where the Planex Code legend names the slot
+# differently from the scope type it is stored as: the legend calls PH
+# "phase", and the tree reads Area › Sub-area › Phase › Zone the way the
+# planners' own code sheet does (register E2). It stays a stage underneath,
+# which is what the report reads as its stage.
+_PLACEHOLDER_LEVEL_WORD = {"stage": "phase"}
 
 
 # Which side of "where the work is" vs "what the work is" each level falls on.

@@ -18,6 +18,7 @@ from apps.projects.services import (
 )
 
 from .models import ReportImage
+from .scope_tree import ScopeTree
 
 
 def _f(value):
@@ -487,17 +488,35 @@ def _disambiguated_names(scopes):
     from collections import Counter
     scopes = list(scopes)
     counts = Counter(name for _, name, _ in scopes)
-    parent_ids = {pid for _, _, pid in scopes if pid}
-    # The parent prefix is display text too — "Level 2 - …", not "L.2 - …".
-    parent_names = (
-        {pid: (label or "").strip() or name
-         for pid, name, label in ProjectScope.objects.filter(id__in=parent_ids)
-         .values_list("id", "name", "label")}
-        if parent_ids else {}
-    )
+    # The prefix is the nearest ancestor that names something: an empty
+    # Planex-code level between a level and its part ("Part 1 › No unit ›
+    # Level 2") would otherwise prefix it with the code's own "0" (register
+    # E2). Walked up a generation at a time, so a deep tree costs a query per
+    # level of placeholders, not per scope.
+    namer = {}       # id -> (parent_id, text, is_placeholder)
+    wanted = {pid for _, _, pid in scopes if pid}
+    while wanted:
+        fetched = ProjectScope.objects.filter(id__in=wanted).values_list(
+            "id", "parent_id", "name", "label", "is_placeholder")
+        wanted = set()
+        for sid, pid, name, label, placeholder in fetched:
+            namer[sid] = (pid, (label or "").strip() or name, placeholder)
+            if placeholder and pid and pid not in namer:
+                wanted.add(pid)
+
+    def prefix(pid):
+        seen = set()
+        while pid and pid not in seen and pid in namer:
+            seen.add(pid)
+            parent_id, text, placeholder = namer[pid]
+            if not placeholder:
+                return text
+            pid = parent_id
+        return None
+
     result = {}
     for sid, name, pid in scopes:
-        parent_name = parent_names.get(pid) if pid else None
+        parent_name = prefix(pid) if pid else None
         result[str(sid)] = f"{parent_name} - {name}" if counts[name] > 1 and parent_name else name
     return result
 
@@ -517,10 +536,12 @@ def _zone_rows(project, scope_ids=None, progress=None, schedule_import=None):
     zones = list(
         ProjectScope.objects.filter(
             project=project, scope_type=_scope_roles(project, schedule_import)["zone"],
-            schedule_import=schedule_import
-        ).order_by("sort_order", "name").values_list("id", "name", "parent_id", "label")
+            schedule_import=schedule_import, is_placeholder=False,
+        ).values_list("id", "name", "parent_id", "label")
     )
-    order = {str(z): i for i, (z, _, _, _) in enumerate(zones)}
+    # "No level" is a slot the code left empty, not a zone (register E2).
+    scopes_qs = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
+    order = ScopeTree.for_scopes(scopes_qs).order()
     zone_name = _disambiguated_names(
         (zid, (label or "").strip() or name, pid) for zid, name, pid, label in zones)
 
@@ -563,17 +584,18 @@ def _work_rows(project, scope_ids=None, progress=None, schedule_import=None):
 
     predicate, _ = _scope_context(project, scope_ids, schedule_import)
     scopes = project.scopes.filter(schedule_import=schedule_import) if schedule_import else project.scopes.all()
-    info = {str(sid): (str(pid) if pid else None, st, (label or "").strip() or name, order)
-            for sid, pid, st, name, label, order in scopes.values_list(
-                "id", "parent_id", "scope_type", "name", "label", "sort_order")}
+    info = {str(sid): (str(pid) if pid else None, st, (label or "").strip() or name, order, placeholder)
+            for sid, pid, st, name, label, order, placeholder in scopes.values_list(
+                "id", "parent_id", "scope_type", "name", "label", "sort_order", "is_placeholder")}
 
     def top_work(sid):
-        """The shallowest work-level node over this scope, or None."""
+        """The shallowest work-level node over this scope that names a trade,
+        or None. An empty discipline slot is not a trade called "0"."""
         found, seen = None, set()
         while sid and sid not in seen:
             seen.add(sid)
-            parent, stype, _, _ = info.get(sid, (None, None, None, None))
-            if stype in WORK_SCOPE_TYPES:
+            parent, stype, _, _, placeholder = info.get(sid, (None, None, None, None, False))
+            if stype in WORK_SCOPE_TYPES and not placeholder:
                 found = sid
             sid = parent
         return found
@@ -689,11 +711,15 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         return pweight[sid] / w if w else None
 
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
-    # see _zone_rows's docstring for why (Stage can sit above Zone).
+    # see _zone_rows's docstring for why (Stage can sit above Zone). An empty
+    # Planex-code level is not a zone, and its children count as its
+    # parent's (register E2).
     roles = _scope_roles(project, schedule_import)
+    tree = ScopeTree.for_scopes(scopes_qs)
+    tree_order = tree.order()
     zones = sorted(
-        (s for s in scopes.values() if s.scope_type == roles["zone"]),
-        key=lambda s: (s.sort_order, s.name),
+        (s for s in scopes.values() if s.scope_type == roles["zone"] and not s.is_placeholder),
+        key=lambda s: tree_order.get(str(s.id), 0),
     )
     # See _disambiguated_names's docstring — the same "Z(A)" repeated under
     # different stages/buildings gets a disambiguating parent prefix here too.
@@ -701,12 +727,8 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
     # The zone's own parent (its stage), kept separately as well as folded into
     # the display name: the reference Progress Sheet puts the stage in its own
     # "Unit" column beside the zone, rather than prefixing it (2026-09-02).
-    stage_names = {
-        pid: (label or "").strip() or name
-        for pid, name, label in ProjectScope.objects
-        .filter(id__in={z.parent_id for z in zones if z.parent_id})
-        .values_list("id", "name", "label")
-    }
+    stage_of = {str(z.id): tree.real_ancestor(z.id) for z in zones}
+    stage_names = {sid: _text(scopes[sid]) for sid in stage_of.values() if sid in scopes}
 
     rows = []
     for zone in zones:
@@ -715,7 +737,7 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         if not weight.get(zid):
             continue
         sub_rows = []
-        for cid in sorted(children.get(zid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+        for cid in tree.real_children(zid):
             if not weight.get(cid):
                 continue
             child = scopes[cid]
@@ -726,7 +748,7 @@ def _hierarchy_rows(project, scope_ids=None, progress=None, prev_scopes=None, as
         rows.append({
             "id": zid, "name": zone_display_name[zid], "actual": pct(zid), "previous": prev_scopes.get(zid),
             "planned": _scope_planned_progress(zone, project, as_of, planned_map),
-            "stage": stage_names.get(zone.parent_id) or "",
+            "stage": stage_names.get(stage_of.get(zid)) or "",
             "zone": _text(zone),
             "children": sub_rows,
         })
@@ -803,9 +825,11 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         return b, e
 
     roles = _scope_roles(project, schedule_import)
+    tree = ScopeTree.for_scopes(scopes_qs)
+    tree_order = tree.order()
     stages = sorted(
-        (s for s in scopes.values() if s.scope_type == roles["stage"]),
-        key=lambda s: (s.sort_order, s.name),
+        (s for s in scopes.values() if s.scope_type == roles["stage"] and not s.is_placeholder),
+        key=lambda s: tree_order.get(str(s.id), 0),
     )
     rows = []
     for stage in stages:
@@ -814,7 +838,7 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         if not weight.get(sid):
             continue
         kids = []
-        for cid in sorted(children.get(sid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+        for cid in tree.real_children(sid):
             if not weight.get(cid):
                 continue
             child = scopes[cid]
@@ -828,8 +852,8 @@ def _phase_rows(project, scope_ids=None, progress=None, prev_scopes=None, as_of=
         # separately so `children` keeps meaning "direct children" for the
         # zone table beside it (2026-09-03).
         areas = []
-        for zid in sorted(children.get(sid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
-            for aid_ in sorted(children.get(zid, []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+        for zid in tree.real_children(sid):
+            for aid_ in tree.real_children(zid):
                 child = scopes[aid_]
                 if child.scope_type != roles["area"] or not weight.get(aid_):
                     continue
@@ -1075,6 +1099,22 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     if not phases:
         return [], []
 
+    def phase_of(sid):
+        """The work package an activity's scope counts toward: the scope
+        itself, or — when it is an empty Planex-code slot, say a discipline
+        with no sub-discipline — the nearest real work level above it, so the
+        column is "Landscape", not "No sub-discipline" (register E2)."""
+        seen, cur = set(), sid
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            phase = phases.get(cur)
+            if phase is None:
+                return None
+            if cur not in empty_of:
+                return phase
+            cur = parent_of.get(cur)
+        return None
+
     activities = project.activities.filter(schedule_import=schedule_import) if schedule_import else project.activities.all()
     unit_w, unit_pw = {}, {}
     # Column order follows the schedule's own ordering, not first-seen or
@@ -1082,7 +1122,7 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     seen_order = {}
     for sid, weight, prog, aid in activities.values_list("scope_id", "weight", "progress_percent", "id"):
         sid = str(sid)
-        phase = phases.get(sid)
+        phase = phase_of(sid)
         if not phase or not predicate(sid, aid):
             continue
         unit_id = unit_of(sid)
@@ -1109,8 +1149,9 @@ def _discipline_rows(project, scope_ids=None, progress=None, schedule_import=Non
     # with different numbers, reading as contradictory data (2026-08-30). Same
     # disambiguation `_hierarchy_rows` already applies to its zones.
     unit_display = _disambiguated_names((u.id, _text(u), u.parent_id) for u in units.values())
+    tree_order = ScopeTree.for_scopes(scopes).order()
     rows = []
-    for uid, by_phase in sorted(unit_w.items(), key=lambda kv: (units[kv[0]].sort_order, units[kv[0]].name)):
+    for uid, by_phase in sorted(unit_w.items(), key=lambda kv: tree_order.get(kv[0], 0)):
         row = {"name": unit_display.get(uid, _text(units[uid])), "values": []}
         for key in columns:
             w = by_phase.get(key, 0.0)
@@ -1191,9 +1232,12 @@ def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
 
     # Every ZONE-typed scope, regardless of depth — not just top-level ones;
     # see _zone_rows's docstring for why (Stage can sit above Zone).
+    tree = ScopeTree.for_scopes(scopes_qs)
+    tree_order = tree.order()
     zones = sorted(
-        (s for s in scopes.values() if s.scope_type == _scope_roles(project, schedule_import)["zone"]),
-        key=lambda s: (s.sort_order, s.name),
+        (s for s in scopes.values()
+         if s.scope_type == _scope_roles(project, schedule_import)["zone"] and not s.is_placeholder),
+        key=lambda s: tree_order.get(str(s.id), 0),
     )
 
     rows = []
@@ -1201,7 +1245,7 @@ def _gantt_rows(project, scope_ids=None, progress=None, schedule_import=None):
         zr = row_for(zone, 0)
         if zr:
             rows.append(zr)
-        for cid in sorted(children.get(str(zone.id), []), key=lambda c: (scopes[c].sort_order, scopes[c].name)):
+        for cid in tree.real_children(zone.id):
             cr = row_for(scopes[cid], 1)
             if cr:
                 rows.append(cr)

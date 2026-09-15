@@ -7,7 +7,7 @@
 import { useState } from "react";
 
 import { CashFlowPanel } from "./CashFlowPanel";
-import { DashboardImport } from "./DashboardImport";
+import { ProjectImportButton } from "./ProjectImportButton";
 import { DashboardImportHistory } from "./DashboardImportHistory";
 import { InvoicesPanel } from "./InvoicesPanel";
 import { ProjectCostPerformance } from "./ProjectCostPerformance";
@@ -45,7 +45,16 @@ export function ProjectFinances({ projectId, canManage }: { projectId: string; c
       {sub === "imports" && (
         <>
           {canManage && (
-            <DashboardImport projectId={projectId} onImported={() => setReloadKey((k) => k + 1)} />
+            <div className={styles.importBar}>
+              {/* The same Import dialog as the project's own button (register E1). */}
+              <ProjectImportButton
+                projectId={projectId} kinds={["dashboard"]} label="Import dashboard"
+                onImported={() => setReloadKey((k) => k + 1)}
+              />
+              <span className={styles.importHint}>
+                One upload: cash flow, progress curve, invoices and the Dashboard sheet&apos;s panels.
+              </span>
+            </div>
           )}
           <DashboardImportHistory projectId={projectId} reloadKey={reloadKey} />
         </>

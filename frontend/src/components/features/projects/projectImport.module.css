@@ -1,0 +1,63 @@
+/* The project Import dialog (ProjectImportDialog, register E1). */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kinds {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kind {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.kindOn {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.kind input {
+  margin-top: 3px;
+}
+
+.kindText {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.kindText strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.hint {
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.result {
+  font-size: 14px;
+  color: var(--text-primary);
+}

@@ -4,7 +4,7 @@
 // Activity). Build the tree, set per-activity progress; everything rolls up. A
 // Zone/Subzone/Phase/Task filter bar prunes both the tree and the Excel grid
 // down to one branch.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -94,43 +94,15 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
   const [actionError, setActionError] = useState<string | null>(null);
   const [gridZone, setGridZone] = useState<{ id: string; name: string } | null>(null);
   const [photosScope, setPhotosScope] = useState<{ id: string; name: string } | null>(null);
-  const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
-  // The date THIS schedule's data is as of — not necessarily today. Blank
-  // lets the backend infer one from the filename, falling back to today.
-  const [importDate, setImportDate] = useState("");
   // The import the delete dialog is open for, with what deleting it would take.
   const [deletingImport, setDeletingImport] = useState<ScheduleImportImpact | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [zoneFilter, setZoneFilter] = useState("");
   const [subzoneFilter, setSubzoneFilter] = useState("");
   const [phaseFilter, setPhaseFilter] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
   const [expandAll, setExpandAll] = useState<{ open: boolean; seq: number } | null>(null);
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file
-    if (!file) return;
-    setImporting(true);
-    setActionError(null);
-    setImportMsg(null);
-    try {
-      const r = await api.upload<{ zones: number; subzones: number; activities: number; overall_progress: number; snapshot_date: string; source_kind?: string }>(
-        `/upload/import/${projectId}`, file, "file", importDate ? { date: importDate } : undefined);
-      setImportMsg(r.source_kind === "p6"
-        ? `Imported the Primavera (P6) WBS: ${r.activities} activities (${r.overall_progress}% overall) as of ${r.snapshot_date} — kept alongside every earlier import. Note: P6 has no weights, so every activity is equal-weighted.`
-        : `Imported ${r.zones} zones, ${r.subzones} subzones, ${r.activities} task cells (${r.overall_progress}% overall) as of ${r.snapshot_date} — kept alongside every earlier import. Expand a subzone for its phases/tasks, or open the zone grid.`);
-      setImportId(""); // the new import is now latest — show it, not whatever was picked before
-      reload();
-      reloadImports();
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : "Import failed.");
-    } finally {
-      setImporting(false);
-    }
-  }
 
   /** Open the delete confirmation for the import chosen in the picker.
    *
@@ -359,26 +331,12 @@ export function ProjectSchedule({ projectId, canManage, canSubmit, canDeletePhot
             onClick={() => toggleAll(false)}>
             Collapse all
           </Button>
+          {/* Importing a schedule is the project's Import button, beside Export P6 (register E1). */}
           {canManage && (
-            <>
-              <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={handleImport} />
-              <input
-                type="date"
-                className={styles.importDate}
-                value={importDate}
-                onChange={(e) => setImportDate(e.target.value)}
-                title="Data as of (defaults to the filename's date, or today)"
-                aria-label="Import as-of date"
-              />
-              <Button size="sm" variant="secondary" disabled={importing}
-                onClick={() => fileRef.current?.click()}>
-                {importing ? "Importing…" : "Import Excel"}
-              </Button>
-              <Button size="sm" leadingIcon={<Icon name="plus" size={16} />} disabled={isHistorical}
-                onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
-                Add phase
-              </Button>
-            </>
+            <Button size="sm" leadingIcon={<Icon name="plus" size={16} />} disabled={isHistorical}
+              onClick={() => setScopeModal({ parentId: null, scope: null, type: "phase" })}>
+              Add phase
+            </Button>
           )}
         </div>
       </div>

@@ -26,6 +26,7 @@ export type IconName =
   | "clock"
   | "reports"
   | "download"
+  | "upload"
   | "text"
   | "heading"
   | "image"
@@ -188,6 +189,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   download: (
     <>
       <path d="M12 3v12M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M12 15V3M7 8l5-5 5 5" />
       <path d="M5 21h14" />
     </>
   ),

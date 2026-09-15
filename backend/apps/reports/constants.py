@@ -234,6 +234,7 @@ DEFAULT_CONFIG = {
         "enum_no_area": "بدون منطقة",
         "enum_no_sub-area": "بدون منطقة فرعية",
         "enum_no_stage": "بدون مرحلة",
+        "enum_no_phase": "بدون مرحلة",
         "enum_no_zone": "بدون نطاق",
         "enum_no_part": "بدون جزء",
         "enum_no_unit": "بدون وحدة",

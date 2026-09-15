@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import type { IconName } from "@/components/ui/Icon";
 import { formatDate } from "@/lib/format";
+import type { ProjectImportKind } from "@/lib/projectImport";
 import { P6ExportButton } from "./P6ExportButton";
+import { ProjectImportButton } from "./ProjectImportButton";
 import { ProjectFormDrawer } from "./ProjectFormDrawer";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectSchedule } from "./ProjectSchedule";
@@ -69,6 +71,20 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
     overall: project.overall_progress,
     breakdown: project.progress_breakdown,
   });
+  // Bumped by an import, so the tab showing that data remounts and refetches.
+  const [importKey, setImportKey] = useState(0);
+  // What this user may import: a schedule needs project management, the
+  // dashboard workbook the finances permission (register E1).
+  const importKinds: ProjectImportKind[] = [
+    ...(canManage ? (["schedule"] as ProjectImportKind[]) : []),
+    ...(perms.manageFinances ? (["dashboard"] as ProjectImportKind[]) : []),
+  ];
+
+  function afterImport(kind: ProjectImportKind) {
+    setImportKey((k) => k + 1);
+    // A new schedule moves the project's headline progress too.
+    if (kind === "schedule") router.refresh();
+  }
 
   return (
     <div className={styles.page}>
@@ -78,6 +94,7 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
           <span>Back to Projects</span>
         </Link>
         <div className={styles.topActions}>
+          <ProjectImportButton projectId={project.id} kinds={importKinds} onImported={afterImport} />
           {perms.exportReports && <P6ExportButton projectId={project.id} />}
           {canManage && (
             <Button variant="secondary" size="sm" leadingIcon={<Icon name="edit" size={15} />}
@@ -121,12 +138,12 @@ export function ProjectWorkspace({ project, canManage, perms }: { project: Proje
             onViewMilestones={perms.viewSchedule ? () => setTab("Milestones") : undefined} />
         )}
         {tab === "Schedule" && (
-          <ProjectSchedule projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
+          <ProjectSchedule key={importKey} projectId={project.id} canManage={canManage} canSubmit={perms.submit} canDeletePhotos={perms.deletePhotos} onStatsChange={setStats} />
         )}
         {tab === "Milestones" && <ProjectMilestones projectId={project.id} canManage={canManage} />}
         {tab === "Team" && <ProjectTeam projectId={project.id} canManage={canManage} />}
         {tab === "Areas of Concern" && <ProjectDelays projectId={project.id} canManage={perms.manageAreasOfConcern} />}
-        {tab === "Finances" && <ProjectFinances projectId={project.id} canManage={perms.manageFinances} />}
+        {tab === "Finances" && <ProjectFinances key={importKey} projectId={project.id} canManage={perms.manageFinances} />}
         {tab === "Part Scope" && <ProjectPartScope projectId={project.id} canManage={perms.manageFinances} />}
         {tab === "Submittals" && <ProjectSubmittals projectId={project.id} canManage={perms.manageSubmittals} />}
         {tab === "Variations" && <ProjectVariations projectId={project.id} canManage={perms.manageVariations} />}

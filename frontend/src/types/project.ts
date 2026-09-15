@@ -185,6 +185,9 @@ export interface Scope {
   parent: string | null;
   scope_type: ScopeType;
   scope_type_display: string;
+  /** The level's name for the tree badge — the Planex legend's word for an
+   * empty level ("Phase"), else the scope type's display name. */
+  level_name?: string;
   name: string;
   // Human-readable display text from the source file's own WBS heading, when
   // a code-driven P6 import could determine one — empty otherwise, in which
@@ -308,6 +311,8 @@ export interface DashboardPanelsSummary {
 export interface DashboardImportRow {
   id: string;
   source: string;
+  /** The date the workbook's figures are as of (register E1); null for older uploads. */
+  data_date: string | null;
   created_at: string;
   uploaded_by_name: string;
   file_url: string | null;

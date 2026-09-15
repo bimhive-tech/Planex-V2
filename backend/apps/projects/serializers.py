@@ -146,12 +146,14 @@ class ScopeSerializer(serializers.ModelSerializer):
     # What the tree shows: the heading that names this level, or the level it
     # stands for when it names nothing (see ProjectScope.display_name).
     display_name = serializers.CharField(read_only=True)
+    # The level's name for the tree badge (see ProjectScope.level_name).
+    level_name = serializers.CharField(read_only=True)
 
     class Meta:
         model = ProjectScope
         fields = [
             "id", "parent", "scope_type", "scope_type_display", "name", "label",
-            "display_name", "is_placeholder", "sort_order",
+            "display_name", "level_name", "is_placeholder", "sort_order",
             "planned_start", "planned_finish", "revised_finish",
             "discipline", "discipline_display",
         ]

@@ -88,7 +88,7 @@ export function ScopeNode(props: ScopeNodeProps) {
         <button className={styles.caret} onClick={() => setOpen((o) => !o)} aria-label={open ? "Collapse" : "Expand"}>
           {hasChildren ? <Icon name="chevronDown" size={14} className={open ? "" : styles.caretClosed} /> : <span className={styles.dot} />}
         </button>
-        <Badge tone="info">{scope.scope_type_display}</Badge>
+        <Badge tone="info">{scope.level_name ?? scope.scope_type_display}</Badge>
         <span className={`${styles.scopeName}${scope.is_placeholder ? ` ${styles.emptyLevel}` : ""}`}>
           {scope.display_name}
         </span>

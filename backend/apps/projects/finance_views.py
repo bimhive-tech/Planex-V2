@@ -125,6 +125,24 @@ def _checked_upload(request):
     return upload
 
 
+def _data_date(request, upload):
+    """The date an upload's figures are as of: the `date` the import dialog
+    sent, else one read from the filename ("… 02-08-2026.xlsx"), else None —
+    the same order a schedule import uses, so one dialog means the same thing
+    for either file."""
+    import datetime
+
+    from .imports import parse_date_from_name
+
+    raw = request.data.get("date")
+    if raw:
+        try:
+            return datetime.date.fromisoformat(raw)
+        except ValueError:
+            raise ValidationError({"date": "Use YYYY-MM-DD."})
+    return parse_date_from_name(upload.name or "")
+
+
 class DashboardImportSerializer(serializers.ModelSerializer):
     """One past dashboard upload, for the Finances tab's history list."""
 
@@ -134,7 +152,7 @@ class DashboardImportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DashboardImport
-        fields = ["id", "source", "created_at", "uploaded_by_name", "summary", "file_url"]
+        fields = ["id", "source", "data_date", "created_at", "uploaded_by_name", "summary", "file_url"]
 
     def get_file_url(self, obj):
         if not obj.file:
@@ -159,6 +177,7 @@ class DashboardImportView(APIView):
         project = _project(request, project_id)
         _require_manage_finances(request)
         upload = _checked_upload(request)
+        data_date = _data_date(request, upload)
         result = import_dashboard(project, upload)
         if not result["imported"]:
             # Nothing at all was recognised — that IS a failed upload, and the
@@ -171,8 +190,8 @@ class DashboardImportView(APIView):
         # answerable — "where did these invoice figures come from?" ends in a
         # download, not in asking whoever uploaded it.
         record = DashboardImport(
-            company=project.company, project=project,
-            source=(upload.name or "")[:200], uploaded_by=request.user, summary=result)
+            company=project.company, project=project, source=(upload.name or "")[:200],
+            data_date=data_date, uploaded_by=request.user, summary=result)
         upload.seek(0)
         record.file.save(upload.name or "dashboard.xlsx", upload, save=False)
         record.save()

@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import { API_BASE } from "@/lib/constants";
 import { panelParts } from "@/lib/dashboardImport";
 import { useFetch } from "@/hooks/useFetch";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import type { DashboardImportRow } from "@/types/project";
 import styles from "./finances.module.css";
 
@@ -58,7 +58,7 @@ export function DashboardImportHistory({ projectId, reloadKey }: {
         <div className={styles.tableWrap}>
           <table className={styles.grid}>
             <thead>
-              <tr><th>File</th><th>Imported</th><th>By</th><th>Brought in</th></tr>
+              <tr><th>File</th><th>Data as of</th><th>Imported</th><th>By</th><th>Brought in</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -73,6 +73,8 @@ export function DashboardImportHistory({ projectId, reloadKey }: {
                       )
                       : (r.source || "—")}
                   </td>
+                  {/* Blank for an upload made before the import dialog asked for it. */}
+                  <td>{r.data_date ? formatDate(r.data_date) : "—"}</td>
                   <td>{formatDateTime(r.created_at)}</td>
                   {/* Blank for an upload whose user has since been deleted. */}
                   <td>{r.uploaded_by_name || "—"}</td>
